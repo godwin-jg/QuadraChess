@@ -1,8 +1,9 @@
-import { View } from "@/components/Themed";
+import { View, Text } from "@/components/Themed";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState, resetGame, completePromotion } from "../state";
 import Board from "../components/board/Board";
 import GameOverModal from "../components/ui/GameOverModal";
+import GameNotification from "../components/ui/GameNotification";
 import PlayerInfoPod from "../components/ui/PlayerInfoPod";
 import PromotionModal from "../components/ui/PromotionModal";
 
@@ -23,8 +24,11 @@ export default function GameScreen() {
   const promotionState = useSelector(
     (state: RootState) => state.game.promotionState
   );
+  const justEliminated = useSelector(
+    (state: RootState) => state.game.justEliminated
+  );
 
-  // Map player colors to display names
+  // Helper function to get player name
   const getPlayerName = (playerColor: string) => {
     switch (playerColor) {
       case "r":
@@ -38,6 +42,17 @@ export default function GameScreen() {
       default:
         return "Unknown";
     }
+  };
+
+  // Determine notification message
+  const getNotificationMessage = () => {
+    if (gameStatus === "checkmate" && justEliminated) {
+      return `Checkmate! ${getPlayerName(justEliminated)} has been eliminated!`;
+    }
+    if (gameStatus === "stalemate" && justEliminated) {
+      return `Stalemate! ${getPlayerName(justEliminated)} has been eliminated!`;
+    }
+    return "";
   };
 
   // Create player data for the pods
@@ -115,12 +130,22 @@ export default function GameScreen() {
         />
       </View>
 
-      {/* Game Over Modal */}
-      <GameOverModal
-        status={gameStatus}
-        winner={winner}
-        onReset={() => dispatch(resetGame())}
+      {/* Game Notification (for eliminations) */}
+      <GameNotification
+        message={getNotificationMessage()}
+        isVisible={gameStatus === "checkmate" || gameStatus === "stalemate"}
+        duration={3000}
       />
+
+      {/* Game Over Modal (only for final winner) */}
+      {gameStatus === "finished" && (
+        <GameOverModal
+          status={gameStatus}
+          winner={winner}
+          eliminatedPlayer={justEliminated}
+          onReset={() => dispatch(resetGame())}
+        />
+      )}
 
       {/* Promotion Modal */}
       <PromotionModal

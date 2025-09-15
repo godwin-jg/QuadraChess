@@ -108,7 +108,11 @@ const getPseudoLegalMoves = (
   boardState: (string | null)[][],
   eliminatedPlayers: string[] = [],
   hasMoved?: any,
-  enPassantTarget?: { position: Position; createdBy: string } | null
+  enPassantTargets?: {
+    position: Position;
+    createdBy: string;
+    createdByTurn: string;
+  }[]
 ): MoveInfo[] => {
   if (!pieceCode || pieceCode.length < 2) return [];
 
@@ -127,7 +131,7 @@ const getPseudoLegalMoves = (
         position,
         boardState,
         eliminatedPlayers,
-        enPassantTarget
+        enPassantTargets
       );
     case "N": // Knight
       return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
@@ -159,7 +163,11 @@ export const getValidMoves = (
   boardState: (string | null)[][],
   eliminatedPlayers: string[] = [],
   hasMoved?: any,
-  enPassantTarget?: { position: Position; createdBy: string } | null
+  enPassantTargets?: {
+    position: Position;
+    createdBy: string;
+    createdByTurn: string;
+  }[]
 ): MoveInfo[] => {
   if (!pieceCode || pieceCode.length < 2) return [];
 
@@ -178,7 +186,7 @@ export const getValidMoves = (
     boardState,
     eliminatedPlayers,
     hasMoved,
-    enPassantTarget
+    enPassantTargets
   );
 
   // Filter out moves that would result in self-check
@@ -270,7 +278,12 @@ export const hasAnyLegalMoves = (
   playerColor: string,
   boardState: (string | null)[][],
   eliminatedPlayers: string[] = [],
-  hasMoved?: any
+  hasMoved?: any,
+  enPassantTargets?: {
+    position: Position;
+    createdBy: string;
+    createdByTurn: string;
+  }[]
 ): boolean => {
   // Iterate through every square of the board
   for (let row = 0; row < 14; row++) {
@@ -279,13 +292,14 @@ export const hasAnyLegalMoves = (
 
       // If this square contains a piece belonging to the player
       if (piece && piece[0] === playerColor) {
-        // Get valid moves for this piece
+        // Get valid moves for this piece (including en passant opportunities)
         const validMoves = getValidMoves(
           piece,
           { row, col },
           boardState,
           eliminatedPlayers,
-          hasMoved
+          hasMoved,
+          enPassantTargets
         );
 
         // If there are any legal moves, return true immediately

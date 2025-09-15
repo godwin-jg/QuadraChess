@@ -23,6 +23,7 @@ const initialState: GameState = {
   checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
   winner: null,
   eliminatedPlayers: [],
+  justEliminated: null, // Will be 'r', 'b', 'y', or 'g'
   scores: { r: 0, b: 0, y: 0, g: 0 },
   promotionState: { isAwaiting: false, position: null, color: null },
   hasMoved: {
@@ -39,7 +40,12 @@ const initialState: GameState = {
     gR1: false,
     gR2: false, // Green
   },
-  enPassantTarget: null, // Will store {position: Position, createdBy: string} of the square that was skipped
+  enPassantTargets: [], // Will store multiple {position: Position, createdBy: string, createdByTurn: string} of squares that were skipped
+  gameOverState: {
+    isGameOver: false,
+    status: null,
+    eliminatedPlayer: null,
+  },
 };
 
 const gameSlice = createSlice({
@@ -68,25 +74,28 @@ const gameSlice = createSlice({
         return; // Do nothing if the piece belongs to an eliminated player
       }
 
-      // Enforce player turn - TEMPORARILY DISABLED FOR TESTING
-      // if (pieceColor !== state.currentPlayerTurn) {
-      //   state.selectedPiece = null;
-      //   state.validMoves = [];
-      //   return;
-      // }
+      // Allow any player to select their pieces to see moves (including en passant)
+      // But only the current player can actually make moves
 
       state.selectedPiece = { row, col };
+
       state.validMoves = getValidMoves(
         pieceCode,
         { row, col },
         state.boardState,
         state.eliminatedPlayers,
         state.hasMoved,
-        state.enPassantTarget
+        state.enPassantTargets
       );
     },
     makeMove: (state, action: PayloadAction<{ row: number; col: number }>) => {
       if (state.selectedPiece) {
+        // Check if en passant opportunities should expire
+        // Remove targets that were created by the current player (full round has passed)
+        state.enPassantTargets = state.enPassantTargets.filter(
+          (target) => target.createdByTurn !== state.currentPlayerTurn
+        );
+
         const { row: targetRow, col: targetCol } = action.payload;
         const { row: startRow, col: startCol } = state.selectedPiece;
 
@@ -94,6 +103,11 @@ const gameSlice = createSlice({
         const capturedPiece = state.boardState[targetRow][targetCol];
         const pieceColor = pieceToMove?.charAt(0);
         const pieceType = pieceToMove?.[1];
+
+        // Enforce player turn - only current player can make moves
+        if (pieceColor !== state.currentPlayerTurn) {
+          return; // Don't make the move
+        }
 
         // Track if King or Rook has moved
         if (pieceType === "K") {
@@ -201,55 +215,40 @@ const gameSlice = createSlice({
           }
         }
 
-        // A. Handle en passant capture FIRST (before clearing enPassantTarget)
-        const enPassantTarget = state.enPassantTarget as {
-          position: Position;
-          createdBy: string;
-        } | null;
-        const isEnPassantCapture =
-          enPassantTarget !== null &&
-          enPassantTarget.position.row === targetRow &&
-          enPassantTarget.position.col === targetCol &&
-          pieceType === "P" &&
-          pieceToMove !== enPassantTarget.createdBy; // Prevent the pawn that created the target from capturing it
+        // A. Handle en passant capture FIRST (before clearing enPassantTargets)
+        const enPassantTarget = state.enPassantTargets.find(
+          (target) =>
+            target.position.row === targetRow &&
+            target.position.col === targetCol &&
+            pieceType === "P" &&
+            pieceToMove !== target.createdBy // Prevent the pawn that created the target from capturing it
+        );
 
-        if (isEnPassantCapture) {
-          // Find the captured pawn - it's at its final position (one square beyond the skipped square)
+        if (enPassantTarget) {
           const createdByColor = enPassantTarget.createdBy.charAt(0);
           const { row: skippedRow, col: skippedCol } = enPassantTarget.position;
 
-          // Calculate the captured pawn's position based on its movement direction
-          let capturedPawnRow: number;
-          let capturedPawnCol: number;
+          // Calculate captured pawn position based on movement direction
+          const capturedPos = (() => {
+            switch (createdByColor) {
+              case "r":
+                return { row: skippedRow - 1, col: skippedCol };
+              case "y":
+                return { row: skippedRow + 1, col: skippedCol };
+              case "b":
+                return { row: skippedRow, col: skippedCol + 1 };
+              case "g":
+                return { row: skippedRow, col: skippedCol - 1 };
+              default:
+                throw new Error(`Invalid piece color: ${createdByColor}`);
+            }
+          })();
 
-          switch (createdByColor) {
-            case "r": // Red moves up (decreasing row)
-              capturedPawnRow = skippedRow - 1;
-              capturedPawnCol = skippedCol;
-              break;
-            case "y": // Yellow moves down (increasing row)
-              capturedPawnRow = skippedRow + 1;
-              capturedPawnCol = skippedCol;
-              break;
-            case "b": // Blue moves right (increasing col)
-              capturedPawnRow = skippedRow;
-              capturedPawnCol = skippedCol + 1;
-              break;
-            case "g": // Green moves left (decreasing col)
-              capturedPawnRow = skippedRow;
-              capturedPawnCol = skippedCol - 1;
-              break;
-            default:
-              throw new Error(`Invalid piece color: ${createdByColor}`);
-          }
-
-          // Remove the captured pawn
+          // Remove captured pawn and update score
           const capturedPawn =
-            state.boardState[capturedPawnRow][capturedPawnCol];
+            state.boardState[capturedPos.row][capturedPos.col];
           if (capturedPawn) {
-            state.boardState[capturedPawnRow][capturedPawnCol] = null;
-
-            // Add to captured pieces and update score
+            state.boardState[capturedPos.row][capturedPos.col] = null;
             state.capturedPieces[
               pieceColor as keyof typeof state.capturedPieces
             ].push(capturedPawn);
@@ -257,12 +256,8 @@ const gameSlice = createSlice({
           }
         }
 
-        // B. Clear enPassantTarget after handling en passant capture
-        // (This will be set again if current move creates a new en passant opportunity)
-        state.enPassantTarget = null;
-
-        // Handle the capture (only for non-castling moves and non-en passant captures)
-        if (capturedPiece && !isCastling && !isEnPassantCapture) {
+        // B. Handle regular capture (only for non-castling moves and non-en passant captures)
+        if (capturedPiece && !isCastling && !enPassantTarget) {
           const capturingPlayer = pieceToMove?.charAt(0);
           state.capturedPieces[
             capturingPlayer as keyof typeof state.capturedPieces
@@ -311,6 +306,10 @@ const gameSlice = createSlice({
           }
         }
 
+        // Move the piece (for all moves, including promotions)
+        state.boardState[targetRow][targetCol] = pieceToMove;
+        state.boardState[startRow][startCol] = null;
+
         if (isPromotion) {
           // Pause the game for promotion selection
           state.promotionState = {
@@ -320,41 +319,35 @@ const gameSlice = createSlice({
           };
           state.gameStatus = "promotion";
           // Don't advance the turn yet - wait for promotion completion
-        } else {
-          // Move the piece
-          state.boardState[targetRow][targetCol] = pieceToMove;
-          state.boardState[startRow][startCol] = null;
         }
 
-        // C. Set new enPassantTarget for two-square pawn moves
+        // C. Set enPassantTarget for two-square pawn moves
         if (pieceType === "P") {
-          const rowDiff = Math.abs(targetRow - startRow);
-          const colDiff = Math.abs(targetCol - startCol);
-          const isTwoSquarePawnMove =
-            (rowDiff === 2 && colDiff === 0) ||
-            (rowDiff === 0 && colDiff === 2);
+          const isTwoSquareMove =
+            (Math.abs(targetRow - startRow) === 2 && targetCol === startCol) ||
+            (Math.abs(targetCol - startCol) === 2 && targetRow === startRow);
 
-          if (isTwoSquarePawnMove) {
-            // Calculate the skipped square based on movement direction
-            const skippedSquare: Position = (() => {
+          if (isTwoSquareMove) {
+            const skippedSquare = (() => {
               switch (pieceColor) {
-                case "r": // Red moves up (decreasing row)
+                case "r":
                   return { row: targetRow + 1, col: targetCol };
-                case "y": // Yellow moves down (increasing row)
+                case "y":
                   return { row: targetRow - 1, col: targetCol };
-                case "b": // Blue moves right (increasing col)
+                case "b":
                   return { row: targetRow, col: targetCol - 1 };
-                case "g": // Green moves left (decreasing col)
+                case "g":
                   return { row: targetRow, col: targetCol + 1 };
                 default:
                   throw new Error(`Invalid piece color: ${pieceColor}`);
               }
             })();
 
-            state.enPassantTarget = {
+            state.enPassantTargets.push({
               position: skippedSquare,
               createdBy: pieceToMove!,
-            };
+              createdByTurn: state.currentPlayerTurn,
+            });
           }
         }
 
@@ -387,68 +380,124 @@ const gameSlice = createSlice({
             state.boardState,
             state.eliminatedPlayers,
             state.hasMoved,
-            state.enPassantTarget
+            state.enPassantTargets
           );
           return; // Don't advance the turn
         }
 
-        // Advance to next player
-        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn as any);
-        const nextIndex = (currentIndex + 1) % turnOrder.length;
-        const nextPlayer = turnOrder[nextIndex];
-        state.currentPlayerTurn = nextPlayer;
+        // Clear justEliminated flag from previous move (if any)
+        state.justEliminated = null;
 
-        // Check if the next player has any legal moves
-        const nextPlayerHasMoves = hasAnyLegalMoves(
-          nextPlayer,
-          state.boardState,
-          state.eliminatedPlayers,
-          state.hasMoved
+        // Check if any opponent is in checkmate/stalemate after this move
+        // We need to check all other players, not just the next one
+        const currentPlayer = state.currentPlayerTurn;
+        const otherPlayers = turnOrder.filter(
+          (player) =>
+            player !== currentPlayer &&
+            !state.eliminatedPlayers.includes(player)
         );
 
-        if (!nextPlayerHasMoves) {
-          // The next player has no legal moves
-          if (state.checkStatus[nextPlayer as keyof typeof state.checkStatus]) {
-            // Checkmate - current player wins
-            state.winner = state.currentPlayerTurn;
-            state.gameStatus = "finished";
-          } else {
-            // Stalemate - it's a draw
-            state.gameStatus = "finished";
-          }
-        } else {
-          // Advance to next player
-          state.currentPlayerTurn = nextPlayer;
-        }
+        // Check each opponent for checkmate/stalemate
+        for (const opponent of otherPlayers) {
+          const opponentHasMoves = hasAnyLegalMoves(
+            opponent,
+            state.boardState,
+            state.eliminatedPlayers,
+            state.hasMoved,
+            state.enPassantTargets
+          );
 
-        // Check if any player is eliminated (checkmated)
-        turnOrder.forEach((player) => {
-          if (
-            !state.eliminatedPlayers.includes(player) &&
-            state.checkStatus[player as keyof typeof state.checkStatus]
-          ) {
-            const playerHasMoves = hasAnyLegalMoves(
-              player,
+          if (!opponentHasMoves) {
+            // This opponent has no legal moves
+            const isInCheck = isKingInCheck(
+              opponent,
               state.boardState,
               state.eliminatedPlayers,
               state.hasMoved
             );
 
-            if (!playerHasMoves) {
-              // Player is checkmated - eliminate them
-              state.eliminatedPlayers.push(player);
+            if (isInCheck) {
+              // Checkmate - eliminate the player
+              state.gameStatus = "checkmate";
+              state.eliminatedPlayers.push(opponent);
+              state.justEliminated = opponent;
               state.scores[
                 state.currentPlayerTurn as keyof typeof state.scores
-              ] += 10; // Checkmate bonus
+              ] += 10;
+
+              // Set game over state for checkmate
+              state.gameOverState = {
+                isGameOver: true,
+                status: "checkmate",
+                eliminatedPlayer: opponent,
+              };
+            } else {
+              // Stalemate - eliminate the player
+              state.gameStatus = "stalemate";
+              state.eliminatedPlayers.push(opponent);
+              state.justEliminated = opponent;
+
+              // Set game over state for stalemate
+              state.gameOverState = {
+                isGameOver: true,
+                status: "stalemate",
+                eliminatedPlayer: opponent,
+              };
             }
+            break; // Exit the loop after eliminating one player
           }
-        });
+        }
+
+        // Always advance to next player after a move
+        // Determine the next player in sequence
+        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn as any);
+        const nextIndex = (currentIndex + 1) % turnOrder.length;
+        const nextPlayerInSequence = turnOrder[nextIndex];
+
+        // Find the next active player (skip eliminated players)
+        let nextActivePlayer = nextPlayerInSequence;
+        while (state.eliminatedPlayers.includes(nextActivePlayer)) {
+          const activeIndex = turnOrder.indexOf(nextActivePlayer as any);
+          const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
+          nextActivePlayer = turnOrder[nextActiveIndex];
+        }
+
+        state.currentPlayerTurn = nextActivePlayer;
+
+        // Check if the entire game is over
+        if (state.eliminatedPlayers.length === 3) {
+          // Find the one player who is NOT in the eliminatedPlayers array
+          const winner = turnOrder.find(
+            (player) => !state.eliminatedPlayers.includes(player)
+          );
+
+          if (winner) {
+            state.winner = winner;
+            state.gameStatus = "finished";
+            state.gameOverState = {
+              isGameOver: true,
+              status: "finished",
+              eliminatedPlayer: null,
+            };
+          }
+
+          // Clear justEliminated flag after a delay to allow UI to react
+          // We'll clear it in the next move instead
+        }
       }
     },
     resetGame: (state) => {
-      return {
+      // Reset the entire game state back to initialState
+      Object.assign(state, {
         ...initialState,
         checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
+      });
+    },
+    clearGameOver: (state) => {
+      state.gameOverState = {
+        isGameOver: false,
+        status: null,
+        eliminatedPlayer: null,
       };
     },
     completePromotion: (
@@ -498,6 +547,7 @@ export const {
   makeMove,
   completePromotion,
   resetGame,
+  clearGameOver,
 } = gameSlice.actions;
 
 export default gameSlice.reducer;

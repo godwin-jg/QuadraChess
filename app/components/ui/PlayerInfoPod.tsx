@@ -106,23 +106,26 @@ export default function PlayerInfoPod({
       </Text>
 
       {/* Score */}
-      <View
-        className={`
-          mt-1 px-3 py-1 rounded-full
-          ${
-            isCurrentTurn
-              ? "bg-white/20 border border-white/30"
-              : "bg-gray-200 border border-gray-300"
-          }
-        `}
-      >
+      <View className="mt-2 relative">
         <Text
-          className={`text-xs font-bold ${
-            isCurrentTurn ? "text-white" : "text-gray-600"
-          }`}
+          className="text-center tracking-wider relative z-10"
+          style={{
+            fontSize: 28,
+            fontWeight: "900",
+            color: "#FFFFFF",
+            textShadowColor: "#FFFFFF",
+            textShadowOffset: { width: 0, height: 0 },
+            textShadowRadius: 8,
+            letterSpacing: 2,
+            transform: [{ scaleX: 1.1 }],
+          }}
         >
           {player.score}
         </Text>
+        {/* Chess piece overlay effect */}
+        <View className="absolute top-0 right-0 opacity-20">
+          <Text className="text-green-500 text-lg font-bold">♜</Text>
+        </View>
       </View>
 
       {/* Captured Pieces */}

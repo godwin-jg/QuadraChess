@@ -8,7 +8,11 @@ export const getPawnMoves = (
   position: Position,
   boardState: (string | null)[][],
   eliminatedPlayers: string[] = [],
-  enPassantTarget?: { position: Position; createdBy: string } | null
+  enPassantTargets?: {
+    position: Position;
+    createdBy: string;
+    createdByTurn: string;
+  }[]
 ): MoveInfo[] => {
   const { row, col } = position;
   const pieceColor = pieceCode[0];
@@ -100,17 +104,29 @@ export const getPawnMoves = (
     });
   }
 
-  // Check en passant capture - only pawns adjacent to the en passant target can capture
-  if (enPassantTarget && pieceCode !== enPassantTarget.createdBy) {
-    const { row: targetRow, col: targetCol } = enPassantTarget.position;
+  // Check en passant capture
+  if (enPassantTargets && enPassantTargets.length > 0) {
+    for (const enPassantTarget of enPassantTargets) {
+      if (pieceCode !== enPassantTarget.createdBy) {
+        const { row: targetRow, col: targetCol } = enPassantTarget.position;
 
-    // Determine if this pawn is in a position to attack the en passant target diagonally
-    switch (pieceColor) {
-      case "r": // Red pawns attack diagonally up
-        if (
-          (row === targetRow + 1 && col === targetCol + 1) ||
-          (row === targetRow + 1 && col === targetCol - 1)
-        ) {
+        // Check if this pawn can attack the en passant target diagonally
+        const canCapture = (() => {
+          switch (pieceColor) {
+            case "r":
+              return row === targetRow + 1 && Math.abs(col - targetCol) === 1;
+            case "y":
+              return row === targetRow - 1 && Math.abs(col - targetCol) === 1;
+            case "b":
+              return col === targetCol - 1 && Math.abs(row - targetRow) === 1;
+            case "g":
+              return col === targetCol + 1 && Math.abs(row - targetRow) === 1;
+            default:
+              return false;
+          }
+        })();
+
+        if (canCapture) {
           validMoves.push({
             row: targetRow,
             col: targetCol,
@@ -118,49 +134,7 @@ export const getPawnMoves = (
             isEnPassant: true,
           });
         }
-        break;
-
-      case "y": // Yellow pawns attack diagonally down
-        if (
-          (row === targetRow - 1 && col === targetCol + 1) ||
-          (row === targetRow - 1 && col === targetCol - 1)
-        ) {
-          validMoves.push({
-            row: targetRow,
-            col: targetCol,
-            isCapture: true,
-            isEnPassant: true,
-          });
-        }
-        break;
-
-      case "b": // Blue pawns attack diagonally right
-        if (
-          (row === targetRow + 1 && col === targetCol - 1) ||
-          (row === targetRow - 1 && col === targetCol - 1)
-        ) {
-          validMoves.push({
-            row: targetRow,
-            col: targetCol,
-            isCapture: true,
-            isEnPassant: true,
-          });
-        }
-        break;
-
-      case "g": // Green pawns attack diagonally left
-        if (
-          (row === targetRow + 1 && col === targetCol + 1) ||
-          (row === targetRow - 1 && col === targetCol + 1)
-        ) {
-          validMoves.push({
-            row: targetRow,
-            col: targetCol,
-            isCapture: true,
-            isEnPassant: true,
-          });
-        }
-        break;
+      }
     }
   }
 

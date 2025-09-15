@@ -12,6 +12,7 @@ interface SquareProps {
   moveType?: "move" | "capture" | null;
   isInCheck?: boolean;
   capturingPieceColor?: string;
+  isEliminated?: boolean;
   onPress?: () => void;
 }
 
@@ -25,6 +26,7 @@ export default function Square({
   moveType = null,
   isInCheck = false,
   capturingPieceColor,
+  isEliminated = false,
   onPress,
 }: SquareProps) {
   // Check if this is a corner square that should not be playable
@@ -108,7 +110,9 @@ export default function Square({
         {moveType === "move" && !piece && (
           <View className="w-1/3 h-1/3 bg-gray-500/50 rounded-full" />
         )}
-        {piece && <Piece piece={piece} size={size} />}
+        {piece && (
+          <Piece piece={piece} size={size} isEliminated={isEliminated} />
+        )}
         {/* Check overlay */}
         {isInCheck && (
           <View className="absolute top-0 left-0 w-full h-full bg-red-500/50" />

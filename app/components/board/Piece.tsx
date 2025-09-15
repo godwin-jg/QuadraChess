@@ -4,9 +4,14 @@ import { View, Text } from "react-native";
 interface PieceProps {
   piece: string;
   size: number;
+  isEliminated?: boolean;
 }
 
-export default function Piece({ piece, size }: PieceProps) {
+export default function Piece({
+  piece,
+  size,
+  isEliminated = false,
+}: PieceProps) {
   const getPieceColor = (piece: string) => {
     switch (piece[0]) {
       case "y":
@@ -49,14 +54,15 @@ export default function Piece({ piece, size }: PieceProps) {
         height: size * 0.98,
         justifyContent: "center",
         alignItems: "center",
+        opacity: isEliminated ? 0.3 : 1.0, // Grey out eliminated pieces
       }}
     >
       <Text
         style={{
           fontSize: size * 0.8,
           fontWeight: "bold",
-          color: getPieceColor(piece),
-          textShadowColor: "#000",
+          color: isEliminated ? "#9CA3AF" : getPieceColor(piece), // Grey color for eliminated pieces
+          textShadowColor: isEliminated ? "#6B7280" : "#000", // Lighter shadow for eliminated pieces
           textShadowOffset: { width: 0.4, height: 0.4 },
           textShadowRadius: 1,
         }}

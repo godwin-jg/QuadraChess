@@ -10,13 +10,14 @@ export { Position, MoveInfo };
 export interface GameState {
   boardState: (string | null)[][];
   currentPlayerTurn: string;
-  gameStatus: string;
+  gameStatus: "active" | "checkmate" | "stalemate" | "finished" | "promotion";
   selectedPiece: Position | null;
   validMoves: MoveInfo[];
   capturedPieces: { r: string[]; b: string[]; y: string[]; g: string[] };
   checkStatus: { r: boolean; b: boolean; y: boolean; g: boolean };
   winner: string | null;
   eliminatedPlayers: string[];
+  justEliminated: string | null; // Will be 'r', 'b', 'y', or 'g'
   scores: { r: number; b: number; y: number; g: number };
   promotionState: {
     isAwaiting: boolean;
@@ -37,5 +38,14 @@ export interface GameState {
     gR1: boolean;
     gR2: boolean; // Green
   };
-  enPassantTarget: { position: Position; createdBy: string } | null; // Will store the skipped square and which pawn created it
+  enPassantTargets: {
+    position: Position;
+    createdBy: string;
+    createdByTurn: string;
+  }[]; // Will store multiple skipped squares and which pawns created them
+  gameOverState: {
+    isGameOver: boolean;
+    status: "checkmate" | "stalemate" | "finished" | null;
+    eliminatedPlayer: string | null;
+  };
 }

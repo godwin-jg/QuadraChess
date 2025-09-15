@@ -3,7 +3,7 @@ import { View, useWindowDimensions } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../state/store";
 import { selectPiece, makeMove } from "../../state/gameSlice";
-import { MoveInfo } from "../../logic/chessLogic";
+import { MoveInfo } from "../../logic";
 import Square from "./Square";
 
 // 4-player chess piece codes:
@@ -22,6 +22,9 @@ export default function Board() {
   );
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
   const checkStatus = useSelector((state: RootState) => state.game.checkStatus);
+  const eliminatedPlayers = useSelector(
+    (state: RootState) => state.game.eliminatedPlayers
+  );
 
   // Get dispatch function
   const dispatch = useDispatch();
@@ -40,6 +43,13 @@ export default function Board() {
     if (!selectedPiece) return null;
     const piece = boardState[selectedPiece.row][selectedPiece.col];
     return piece ? piece[0] : null;
+  };
+
+  // Check if a piece belongs to an eliminated player
+  const isPieceEliminated = (piece: string | null) => {
+    if (!piece) return false;
+    const pieceColor = piece[0];
+    return eliminatedPlayers.includes(pieceColor);
   };
 
   // Handle square press
@@ -102,6 +112,7 @@ export default function Board() {
                     checkStatus[piece[0] as keyof typeof checkStatus]
                   )
                 }
+                isEliminated={isPieceEliminated(piece)}
               />
             );
           })}

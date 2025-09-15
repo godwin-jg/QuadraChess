@@ -56,9 +56,13 @@ export default function Scoreboard() {
               ]}
             />
             <Text style={styles.playerName}>{player.name}</Text>
-            <Text style={styles.score}>
-              {scores[player.color as keyof typeof scores]}
-            </Text>
+            <View style={styles.scoreContainer}>
+              <Text style={styles.score}>
+                {scores[player.color as keyof typeof scores]}
+              </Text>
+              {/* Chess piece overlay effect */}
+              <Text style={styles.chessPieceOverlay}>♜</Text>
+            </View>
           </View>
         ))}
       </View>
@@ -110,9 +114,29 @@ const styles = StyleSheet.create({
     color: "#333",
     marginBottom: 2,
   },
+  scoreContainer: {
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   score: {
-    fontSize: 18,
+    fontSize: 32,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    textShadowColor: "#FFFFFF",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+    letterSpacing: 2,
+    transform: [{ scaleX: 1.1 }],
+    zIndex: 10,
+  },
+  chessPieceOverlay: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    fontSize: 16,
+    color: "#16A34A",
+    opacity: 0.3,
     fontWeight: "bold",
-    color: "#1F2937",
   },
 });

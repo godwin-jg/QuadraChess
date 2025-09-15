@@ -107,7 +107,8 @@ const getPseudoLegalMoves = (
   position: Position,
   boardState: (string | null)[][],
   eliminatedPlayers: string[] = [],
-  hasMoved?: any
+  hasMoved?: any,
+  enPassantTarget?: { position: Position; createdBy: string } | null
 ): MoveInfo[] => {
   if (!pieceCode || pieceCode.length < 2) return [];
 
@@ -121,7 +122,13 @@ const getPseudoLegalMoves = (
 
   switch (pieceType) {
     case "P": // Pawn
-      return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
+      return getPawnMoves(
+        pieceCode,
+        position,
+        boardState,
+        eliminatedPlayers,
+        enPassantTarget
+      );
     case "N": // Knight
       return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
     case "R": // Rook
@@ -151,7 +158,8 @@ export const getValidMoves = (
   position: Position,
   boardState: (string | null)[][],
   eliminatedPlayers: string[] = [],
-  hasMoved?: any
+  hasMoved?: any,
+  enPassantTarget?: { position: Position; createdBy: string } | null
 ): MoveInfo[] => {
   if (!pieceCode || pieceCode.length < 2) return [];
 
@@ -169,7 +177,8 @@ export const getValidMoves = (
     position,
     boardState,
     eliminatedPlayers,
-    hasMoved
+    hasMoved,
+    enPassantTarget
   );
 
   // Filter out moves that would result in self-check

@@ -1,8 +1,9 @@
 import React from "react";
 import { View, useWindowDimensions } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState, selectPiece, makeMove } from "../../state";
-import { MoveInfo } from "../../logic";
+import { RootState } from "../../state/store";
+import { selectPiece, makeMove } from "../../state/gameSlice";
+import { MoveInfo } from "../../logic/chessLogic";
 import Square from "./Square";
 
 // 4-player chess piece codes:

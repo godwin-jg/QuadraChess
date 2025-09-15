@@ -10,4 +10,5 @@ export interface MoveInfo {
   col: number;
   isCapture: boolean;
   isPromotion?: boolean;
+  isEnPassant?: boolean;
 }

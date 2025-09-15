@@ -77,3 +77,4 @@ export const isCastlingMove = (
 
   return (rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2);
 };
+

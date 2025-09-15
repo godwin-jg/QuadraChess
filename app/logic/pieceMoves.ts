@@ -7,7 +7,8 @@ export const getPawnMoves = (
   pieceCode: string,
   position: Position,
   boardState: (string | null)[][],
-  eliminatedPlayers: string[] = []
+  eliminatedPlayers: string[] = [],
+  enPassantTarget?: { position: Position; createdBy: string } | null
 ): MoveInfo[] => {
   const { row, col } = position;
   const pieceColor = pieceCode[0];
@@ -97,6 +98,70 @@ export const getPawnMoves = (
       isCapture: true,
       isPromotion: false,
     });
+  }
+
+  // Check en passant capture - only pawns adjacent to the en passant target can capture
+  if (enPassantTarget && pieceCode !== enPassantTarget.createdBy) {
+    const { row: targetRow, col: targetCol } = enPassantTarget.position;
+
+    // Determine if this pawn is in a position to attack the en passant target diagonally
+    switch (pieceColor) {
+      case "r": // Red pawns attack diagonally up
+        if (
+          (row === targetRow + 1 && col === targetCol + 1) ||
+          (row === targetRow + 1 && col === targetCol - 1)
+        ) {
+          validMoves.push({
+            row: targetRow,
+            col: targetCol,
+            isCapture: true,
+            isEnPassant: true,
+          });
+        }
+        break;
+
+      case "y": // Yellow pawns attack diagonally down
+        if (
+          (row === targetRow - 1 && col === targetCol + 1) ||
+          (row === targetRow - 1 && col === targetCol - 1)
+        ) {
+          validMoves.push({
+            row: targetRow,
+            col: targetCol,
+            isCapture: true,
+            isEnPassant: true,
+          });
+        }
+        break;
+
+      case "b": // Blue pawns attack diagonally right
+        if (
+          (row === targetRow + 1 && col === targetCol - 1) ||
+          (row === targetRow - 1 && col === targetCol - 1)
+        ) {
+          validMoves.push({
+            row: targetRow,
+            col: targetCol,
+            isCapture: true,
+            isEnPassant: true,
+          });
+        }
+        break;
+
+      case "g": // Green pawns attack diagonally left
+        if (
+          (row === targetRow + 1 && col === targetCol + 1) ||
+          (row === targetRow - 1 && col === targetCol + 1)
+        ) {
+          validMoves.push({
+            row: targetRow,
+            col: targetCol,
+            isCapture: true,
+            isEnPassant: true,
+          });
+        }
+        break;
+    }
   }
 
   // Check initial two-square move (only from starting position)
@@ -622,7 +687,7 @@ export const getKingMoves = (
           const square1UnderAttack = isSquareUnderAttack(
             boardState,
             0,
-            7, // King's current position
+            6, // King's current position (0, 6)
             pieceColor,
             eliminatedPlayers,
             hasMoved
@@ -638,7 +703,7 @@ export const getKingMoves = (
           if (!square1UnderAttack && !square2UnderAttack) {
             validMoves.push({
               row: 0,
-              col: 9, // King's destination (7 + 2)
+              col: 8, // King's destination (6 + 2)
               isCapture: false,
               isPromotion: false,
             });
@@ -647,14 +712,14 @@ export const getKingMoves = (
         // Queenside castling (left) - King moves 2 squares left
         if (
           !hasMoved.yR1 &&
-          isEmpty(boardState, 0, 5) && // Intermediate square 1
-          isEmpty(boardState, 0, 6) && // Intermediate square 2
+          isEmpty(boardState, 0, 4) && // Intermediate square 1
+          isEmpty(boardState, 0, 5) && // Intermediate square 2
           boardState[0][3] === "yR" // Left rook at (0, 3)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
             boardState,
             0,
-            5, // King's destination (7 - 2)
+            4, // King's destination (6 - 2)
             pieceColor,
             eliminatedPlayers,
             hasMoved
@@ -662,7 +727,7 @@ export const getKingMoves = (
           const square2UnderAttack = isSquareUnderAttack(
             boardState,
             0,
-            6, // King's intermediate square
+            5, // King's intermediate square
             pieceColor,
             eliminatedPlayers,
             hasMoved
@@ -670,7 +735,7 @@ export const getKingMoves = (
           if (!square1UnderAttack && !square2UnderAttack) {
             validMoves.push({
               row: 0,
-              col: 5, // King's destination (7 - 2)
+              col: 4, // King's destination (6 - 2)
               isCapture: false,
               isPromotion: false,
             });
@@ -686,7 +751,7 @@ export const getKingMoves = (
         ) {
           const square1UnderAttack = isSquareUnderAttack(
             boardState,
-            7, // King's current position
+            6, // King's current position (6, 13)
             13,
             pieceColor,
             eliminatedPlayers,
@@ -702,7 +767,7 @@ export const getKingMoves = (
           );
           if (!square1UnderAttack && !square2UnderAttack) {
             validMoves.push({
-              row: 9, // King's destination (7 + 2)
+              row: 8, // King's destination (6 + 2)
               col: 13,
               isCapture: false,
               isPromotion: false,
@@ -712,13 +777,13 @@ export const getKingMoves = (
         // Queenside castling (up) - King moves 2 squares up
         if (
           !hasMoved.gR1 &&
-          isEmpty(boardState, 5, 13) && // Intermediate square 1
-          isEmpty(boardState, 6, 13) && // Intermediate square 2
+          isEmpty(boardState, 4, 13) && // Intermediate square 1
+          isEmpty(boardState, 5, 13) && // Intermediate square 2
           boardState[3][13] === "gR" // Left rook at (3, 13)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
             boardState,
-            5, // King's destination (7 - 2)
+            4, // King's destination (6 - 2)
             13,
             pieceColor,
             eliminatedPlayers,
@@ -726,7 +791,7 @@ export const getKingMoves = (
           );
           const square2UnderAttack = isSquareUnderAttack(
             boardState,
-            6, // King's intermediate square
+            5, // King's intermediate square
             13,
             pieceColor,
             eliminatedPlayers,
@@ -734,7 +799,7 @@ export const getKingMoves = (
           );
           if (!square1UnderAttack && !square2UnderAttack) {
             validMoves.push({
-              row: 5, // King's destination (7 - 2)
+              row: 4, // King's destination (6 - 2)
               col: 13,
               isCapture: false,
               isPromotion: false,

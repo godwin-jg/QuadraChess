@@ -37,4 +37,5 @@ export interface GameState {
     gR1: boolean;
     gR2: boolean; // Green
   };
+  enPassantTarget: { position: Position; createdBy: string } | null; // Will store the skipped square and which pawn created it
 }

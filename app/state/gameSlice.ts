@@ -13,7 +13,32 @@ import {
   isCastlingMove,
 } from "./gameHelpers";
 
-const initialState: GameState = {
+// Helper function to create a deep copy of the game state
+const createStateSnapshot = (state: GameState): GameState => {
+  return {
+    ...state,
+    boardState: state.boardState.map((row) => [...row]),
+    capturedPieces: {
+      r: [...state.capturedPieces.r],
+      b: [...state.capturedPieces.b],
+      y: [...state.capturedPieces.y],
+      g: [...state.capturedPieces.g],
+    },
+    checkStatus: { ...state.checkStatus },
+    scores: { ...state.scores },
+    hasMoved: { ...state.hasMoved },
+    enPassantTargets: state.enPassantTargets.map((target) => ({
+      ...target,
+      position: { ...target.position },
+    })),
+    promotionState: { ...state.promotionState },
+    gameOverState: { ...state.gameOverState },
+    eliminatedPlayers: [...state.eliminatedPlayers],
+    history: [...state.history],
+  };
+};
+
+const baseInitialState: GameState = {
   boardState: initialBoardState,
   currentPlayerTurn: "r", // Red starts first
   gameStatus: "active",
@@ -46,6 +71,15 @@ const initialState: GameState = {
     status: null,
     eliminatedPlayer: null,
   },
+  history: [],
+  historyIndex: -1,
+};
+
+// Create initial state with proper history initialization
+const initialState: GameState = {
+  ...baseInitialState,
+  history: [createStateSnapshot(baseInitialState)],
+  historyIndex: 0,
 };
 
 const gameSlice = createSlice({
@@ -59,6 +93,11 @@ const gameSlice = createSlice({
       state.validMoves = action.payload;
     },
     selectPiece: (state, action: PayloadAction<Position>) => {
+      // Don't allow piece selection when viewing historical moves
+      if (state.historyIndex < state.history.length - 1) {
+        return;
+      }
+
       const { row, col } = action.payload;
       const pieceCode = state.boardState[row][col];
 
@@ -89,6 +128,11 @@ const gameSlice = createSlice({
       );
     },
     makeMove: (state, action: PayloadAction<{ row: number; col: number }>) => {
+      // Don't allow moves when viewing historical moves
+      if (state.historyIndex < state.history.length - 1) {
+        return;
+      }
+
       if (state.selectedPiece) {
         // Check if en passant opportunities should expire
         // Remove targets that were created by the current player (full round has passed)
@@ -484,14 +528,29 @@ const gameSlice = createSlice({
           // Clear justEliminated flag after a delay to allow UI to react
           // We'll clear it in the next move instead
         }
+
+        // Save current state to history (only if not in promotion mode)
+        if (state.gameStatus !== "promotion") {
+          // Remove any future history if we're not at the end
+          if (state.historyIndex < state.history.length - 1) {
+            state.history = state.history.slice(0, state.historyIndex + 1);
+          }
+
+          // Add current state to history
+          state.history.push(createStateSnapshot(state));
+          state.historyIndex = state.history.length - 1;
+        }
       }
     },
     resetGame: (state) => {
-      // Reset the entire game state back to initialState
+      // Reset the entire game state back to baseInitialState
       Object.assign(state, {
-        ...initialState,
+        ...baseInitialState,
         checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
       });
+      // Initialize history with the initial state
+      state.history = [createStateSnapshot(baseInitialState)];
+      state.historyIndex = 0;
     },
     clearGameOver: (state) => {
       state.gameOverState = {
@@ -537,6 +596,175 @@ const gameSlice = createSlice({
         state.currentPlayerTurn = turnOrder[nextIndex];
       }
     },
+    stepHistory: (state, action: PayloadAction<"back" | "forward">) => {
+      if (action.payload === "back" && state.historyIndex > 0) {
+        state.historyIndex--;
+        const historicalState = state.history[state.historyIndex];
+        // Restore the historical state (excluding history properties)
+        state.boardState = historicalState.boardState.map((row) => [...row]);
+        state.currentPlayerTurn = historicalState.currentPlayerTurn;
+        state.gameStatus = historicalState.gameStatus;
+        state.selectedPiece = historicalState.selectedPiece;
+        state.validMoves = [...historicalState.validMoves];
+        state.capturedPieces = {
+          r: [...historicalState.capturedPieces.r],
+          b: [...historicalState.capturedPieces.b],
+          y: [...historicalState.capturedPieces.y],
+          g: [...historicalState.capturedPieces.g],
+        };
+        state.checkStatus = { ...historicalState.checkStatus };
+        state.winner = historicalState.winner;
+        state.eliminatedPlayers = [...historicalState.eliminatedPlayers];
+        state.justEliminated = historicalState.justEliminated;
+        state.scores = { ...historicalState.scores };
+        state.promotionState = { ...historicalState.promotionState };
+        state.hasMoved = { ...historicalState.hasMoved };
+        state.enPassantTargets = historicalState.enPassantTargets.map(
+          (target) => ({
+            ...target,
+            position: { ...target.position },
+          })
+        );
+        state.gameOverState = { ...historicalState.gameOverState };
+      } else if (
+        action.payload === "forward" &&
+        state.historyIndex < state.history.length - 1
+      ) {
+        state.historyIndex++;
+        const historicalState = state.history[state.historyIndex];
+        // Restore the historical state (excluding history properties)
+        state.boardState = historicalState.boardState.map((row) => [...row]);
+        state.currentPlayerTurn = historicalState.currentPlayerTurn;
+        state.gameStatus = historicalState.gameStatus;
+        state.selectedPiece = historicalState.selectedPiece;
+        state.validMoves = [...historicalState.validMoves];
+        state.capturedPieces = {
+          r: [...historicalState.capturedPieces.r],
+          b: [...historicalState.capturedPieces.b],
+          y: [...historicalState.capturedPieces.y],
+          g: [...historicalState.capturedPieces.g],
+        };
+        state.checkStatus = { ...historicalState.checkStatus };
+        state.winner = historicalState.winner;
+        state.eliminatedPlayers = [...historicalState.eliminatedPlayers];
+        state.justEliminated = historicalState.justEliminated;
+        state.scores = { ...historicalState.scores };
+        state.promotionState = { ...historicalState.promotionState };
+        state.hasMoved = { ...historicalState.hasMoved };
+        state.enPassantTargets = historicalState.enPassantTargets.map(
+          (target) => ({
+            ...target,
+            position: { ...target.position },
+          })
+        );
+        state.gameOverState = { ...historicalState.gameOverState };
+      }
+    },
+    returnToLive: (state) => {
+      if (state.history.length > 0) {
+        state.historyIndex = state.history.length - 1;
+        const liveState = state.history[state.historyIndex];
+        // Restore the live state (excluding history properties)
+        state.boardState = liveState.boardState.map((row) => [...row]);
+        state.currentPlayerTurn = liveState.currentPlayerTurn;
+        state.gameStatus = liveState.gameStatus;
+        state.selectedPiece = liveState.selectedPiece;
+        state.validMoves = [...liveState.validMoves];
+        state.capturedPieces = {
+          r: [...liveState.capturedPieces.r],
+          b: [...liveState.capturedPieces.b],
+          y: [...liveState.capturedPieces.y],
+          g: [...liveState.capturedPieces.g],
+        };
+        state.checkStatus = { ...liveState.checkStatus };
+        state.winner = liveState.winner;
+        state.eliminatedPlayers = [...liveState.eliminatedPlayers];
+        state.justEliminated = liveState.justEliminated;
+        state.scores = { ...liveState.scores };
+        state.promotionState = { ...liveState.promotionState };
+        state.hasMoved = { ...liveState.hasMoved };
+        state.enPassantTargets = liveState.enPassantTargets.map((target) => ({
+          ...target,
+          position: { ...target.position },
+        }));
+        state.gameOverState = { ...liveState.gameOverState };
+      }
+    },
+    resignGame: (state) => {
+      // Don't allow resigning when viewing historical moves
+      if (state.historyIndex < state.history.length - 1) {
+        return;
+      }
+
+      // Don't allow resigning if game is already over
+      if (
+        state.gameStatus === "finished" ||
+        state.gameStatus === "checkmate" ||
+        state.gameStatus === "stalemate"
+      ) {
+        return;
+      }
+
+      const currentPlayer = state.currentPlayerTurn;
+
+      // Add current player to eliminated players
+      if (!state.eliminatedPlayers.includes(currentPlayer)) {
+        state.eliminatedPlayers.push(currentPlayer);
+        state.justEliminated = currentPlayer;
+      }
+
+      // Clear selection
+      state.selectedPiece = null;
+      state.validMoves = [];
+
+      // Update check status for all players
+      state.checkStatus = updateAllCheckStatus(
+        state.boardState,
+        state.eliminatedPlayers,
+        state.hasMoved
+      );
+
+      // Check if the entire game is over
+      if (state.eliminatedPlayers.length === 3) {
+        // Find the one player who is NOT in the eliminatedPlayers array
+        const winner = turnOrder.find(
+          (player) => !state.eliminatedPlayers.includes(player)
+        );
+
+        if (winner) {
+          state.winner = winner;
+          state.gameStatus = "finished";
+          state.gameOverState = {
+            isGameOver: true,
+            status: "finished",
+            eliminatedPlayer: null,
+          };
+        }
+      } else {
+        // Advance to next active player
+        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn as any);
+        const nextIndex = (currentIndex + 1) % turnOrder.length;
+        const nextPlayerInSequence = turnOrder[nextIndex];
+
+        // Find the next active player (skip eliminated players)
+        let nextActivePlayer = nextPlayerInSequence;
+        while (state.eliminatedPlayers.includes(nextActivePlayer)) {
+          const activeIndex = turnOrder.indexOf(nextActivePlayer as any);
+          const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
+          nextActivePlayer = turnOrder[nextActiveIndex];
+        }
+
+        state.currentPlayerTurn = nextActivePlayer;
+      }
+
+      // Save current state to history
+      if (state.historyIndex < state.history.length - 1) {
+        state.history = state.history.slice(0, state.historyIndex + 1);
+      }
+
+      state.history.push(createStateSnapshot(state));
+      state.historyIndex = state.history.length - 1;
+    },
   },
 });
 
@@ -548,6 +776,9 @@ export const {
   completePromotion,
   resetGame,
   clearGameOver,
+  stepHistory,
+  returnToLive,
+  resignGame,
 } = gameSlice.actions;
 
 export default gameSlice.reducer;

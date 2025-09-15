@@ -6,6 +6,8 @@ import GameOverModal from "../components/ui/GameOverModal";
 import GameNotification from "../components/ui/GameNotification";
 import PlayerInfoPod from "../components/ui/PlayerInfoPod";
 import PromotionModal from "../components/ui/PromotionModal";
+import HistoryControls from "../components/ui/HistoryControls";
+import GameMenu from "../components/ui/GameMenu";
 
 export default function GameScreen() {
   // Get dispatch function
@@ -89,8 +91,18 @@ export default function GameScreen() {
 
   return (
     <View className="flex-1 bg-gray-800 justify-center items-center">
+      {/* History Controls - Top Center */}
+      <View className="absolute top-4 z-10">
+        <HistoryControls />
+      </View>
+
       {/* Chess Board - Centered */}
       <Board />
+
+      {/* Game Menu - Bottom Center */}
+      <View className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10">
+        <GameMenu />
+      </View>
 
       {/* Player Info Pods - Positioned in corners */}
 

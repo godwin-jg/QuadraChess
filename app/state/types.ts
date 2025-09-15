@@ -48,4 +48,6 @@ export interface GameState {
     status: "checkmate" | "stalemate" | "finished" | null;
     eliminatedPlayer: string | null;
   };
+  history: GameState[];
+  historyIndex: number;
 }

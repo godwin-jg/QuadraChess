@@ -1,10 +1,14 @@
 import React from "react";
 import { View, useWindowDimensions } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState } from "../../state/store";
-import { selectPiece, makeMove, sendMoveToServer } from "../../state/gameSlice";
+import { RootState } from "../../../state/store";
+import {
+  selectPiece,
+  makeMove,
+  sendMoveToServer,
+} from "../../../state/gameSlice";
 import networkService from "../../services/networkService";
-import { MoveInfo } from "../../logic";
+import { MoveInfo } from "../../../logic";
 import Square from "./Square";
 
 // 4-player chess piece codes:

@@ -9,7 +9,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { Provider } from "react-redux";
-import { store } from "./state";
+import { store } from "../state";
 import "../global.css";
 
 import { useColorScheme } from "@/components/useColorScheme";

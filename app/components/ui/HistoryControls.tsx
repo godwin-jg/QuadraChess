@@ -1,8 +1,8 @@
 import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState } from "../../state";
-import { stepHistory, returnToLive } from "../../state/gameSlice";
+import { RootState } from "../../../state";
+import { stepHistory, returnToLive } from "../../../state/gameSlice";
 
 export default function HistoryControls() {
   const dispatch = useDispatch();
@@ -31,79 +31,42 @@ export default function HistoryControls() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.controls}>
+    <View className="bg-black/80 rounded-xl p-3 m-4 items-center">
+      <View className="flex-row gap-2">
         <TouchableOpacity
-          style={styles.button}
+          className="w-10 h-10 bg-gray-700 rounded-lg justify-center items-center"
           onPress={handleStepBack}
           activeOpacity={1}
         >
-          <Text style={styles.buttonText}>←</Text>
+          <Text className="text-white text-lg font-bold">←</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.button}
+          className="w-10 h-10 bg-gray-700 rounded-lg justify-center items-center"
           onPress={handleStepForward}
           activeOpacity={1}
         >
-          <Text style={styles.buttonText}>→</Text>
+          <Text className="text-white text-lg font-bold">→</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.button}
+          className="w-10 h-10 bg-gray-700 rounded-lg justify-center items-center"
           onPress={handleReturnToLive}
           activeOpacity={1}
         >
-          <Text style={styles.buttonText}>»</Text>
+          <Text className="text-white text-lg font-bold">»</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.historyInfo}>
+      <Text className="text-white text-sm mt-2 text-center">
         Move {historyIndex + 1} of {history.length}
         {isViewingHistory && (
-          <Text style={styles.historyModeText}> • VIEWING HISTORY</Text>
+          <Text className="text-yellow-400 font-semibold">
+            {" "}
+            • VIEWING HISTORY
+          </Text>
         )}
       </Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    borderRadius: 12,
-    padding: 12,
-    margin: 16,
-    alignItems: "center",
-  },
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  button: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  buttonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "normal",
-  },
-  historyInfo: {
-    color: "#D1D5DB",
-    fontSize: 12,
-    marginTop: 8,
-    fontWeight: "500",
-  },
-  historyModeText: {
-    color: "#F59E0B",
-    fontWeight: "bold",
-  },
-});

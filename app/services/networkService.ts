@@ -27,6 +27,7 @@ class NetworkService {
   private isConnected = false;
   private currentRoomId: string | null = null;
   private currentPlayerId: string | null = null;
+  private serverIp: string | null = null;
   private pendingListeners: Map<string, (data: any) => void> | null = null;
 
   get connected(): boolean {
@@ -41,8 +42,17 @@ class NetworkService {
     return this.currentPlayerId;
   }
 
+  getServerIp(): string | null {
+    return this.serverIp;
+  }
+
   connect(serverIp: string, port: number = 3001): Promise<void> {
     return new Promise((resolve, reject) => {
+      console.log(`🔌 Attempting to connect to: ${serverIp}:${port}`);
+
+      // Store the server IP for later use
+      this.serverIp = serverIp;
+
       try {
         this.socket = io(`http://${serverIp}:${port}`, {
           timeout: 10000,
@@ -83,6 +93,14 @@ class NetworkService {
     });
   }
 
+  leaveGame(): void {
+    if (this.socket && this.currentRoomId) {
+      this.socket.emit("leave-game");
+      this.currentRoomId = null;
+      this.currentPlayerId = null;
+    }
+  }
+
   disconnect(): void {
     if (this.socket) {
       this.socket.disconnect();
@@ -96,9 +114,12 @@ class NetworkService {
     }
   }
 
-  createRoom(playerData: {
-    name: string;
-  }): Promise<{ roomId: string; playerId: string; color: string }> {
+  createRoom(playerData: { name: string }): Promise<{
+    roomId: string;
+    playerId: string;
+    color: string;
+    players: Player[];
+  }> {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.isConnected) {
         reject(new Error("Not connected to server"));

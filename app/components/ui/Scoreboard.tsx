@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { useSelector } from "react-redux";
-import { RootState } from "../../state";
+import { RootState } from "../../../state";
 
 export default function Scoreboard() {
   const scores = useSelector((state: RootState) => state.game.scores);

@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState } from "../../state";
-import { resignGame } from "../../state/gameSlice";
+import { RootState } from "../../../state";
+import { resignGame } from "../../../state/gameSlice";
 import ResignConfirmationModal from "./ResignConfirmationModal";
 
 export default function GameMenu() {
@@ -50,13 +50,13 @@ export default function GameMenu() {
 
   return (
     <>
-      <View style={styles.container}>
+      <View className="absolute top-4 right-4 z-20">
         <TouchableOpacity
-          style={styles.menuButton}
+          className="w-10 h-10 bg-gray-800 rounded-full justify-center items-center shadow-lg"
           onPress={handleResignPress}
           activeOpacity={0.8}
         >
-          <Text style={styles.menuButtonText}>⋮</Text>
+          <Text className="text-white text-xl font-bold">⋮</Text>
         </TouchableOpacity>
       </View>
 
@@ -69,27 +69,3 @@ export default function GameMenu() {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    zIndex: 20,
-  },
-  menuButton: {
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    borderRadius: 20,
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  menuButtonText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-});

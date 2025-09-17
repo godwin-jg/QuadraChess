@@ -18,7 +18,9 @@
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "NSLocalNetworkUsageDescription": "This app needs to scan the local network to find and connect to other players for multiplayer games.",
+        "NSBonjourServices": ["_fourchess._tcp."]
       }
     },
     "android": {
@@ -28,7 +30,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "package": "com.godwinjg.FourPlayer"
     },
     "web": {
       "bundler": "metro",

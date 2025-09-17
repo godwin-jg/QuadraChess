@@ -17,6 +17,9 @@ export {
   completePromotion,
   resetGame,
   sendMoveToServer,
+  setPlayers,
+  setIsHost,
+  setCanStartGame,
 } from "./gameSlice";
 
 // Re-export the store

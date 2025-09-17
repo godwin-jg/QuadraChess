@@ -1,5 +1,6 @@
 // Import shared types
 import { Position, MoveInfo } from "../types/index";
+import { Player } from "../app/services/networkService";
 
 // Define the turn order for 4-player chess
 export const turnOrder = ["r", "b", "y", "g"] as const;
@@ -50,4 +51,8 @@ export interface GameState {
   };
   history: GameState[];
   historyIndex: number;
+  // Multiplayer state
+  players: Player[];
+  isHost: boolean;
+  canStartGame: boolean;
 }

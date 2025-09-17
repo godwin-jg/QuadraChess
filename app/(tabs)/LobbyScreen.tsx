@@ -1,588 +1,426 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
-  StyleSheet,
   Alert,
   ActivityIndicator,
-  Dimensions,
-  ScrollView,
+  TextInput,
 } from "react-native";
-import { useDispatch } from "react-redux";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
+import { useDispatch, useSelector } from "react-redux";
+import { RootState, resetGame } from "../../state";
+import { setPlayers, setIsHost, setCanStartGame } from "../../state/gameSlice";
 import networkService, { Player } from "../services/networkService";
 
-const { width } = Dimensions.get("window");
+// Generate random player names
+const generateRandomName = (): string => {
+  const adjectives = [
+    "Swift",
+    "Bold",
+    "Clever",
+    "Sharp",
+    "Quick",
+    "Wise",
+    "Brave",
+    "Smart",
+  ];
+  const nouns = [
+    "Player",
+    "Chess",
+    "King",
+    "Queen",
+    "Rook",
+    "Knight",
+    "Bishop",
+    "Pawn",
+  ];
+  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+  const noun = nouns[Math.floor(Math.random() * nouns.length)];
+  return `${adj}${noun}`;
+};
+
+interface AvailableGame {
+  id: string;
+  name: string;
+  host: string;
+  playerCount: number;
+  maxPlayers: number;
+  status: string;
+}
 
 export default function LobbyScreen() {
   const dispatch = useDispatch();
   const router = useRouter();
-
-  const [playerName, setPlayerName] = useState("");
-  const [serverIp, setServerIp] = useState("192.168.1.9:3001"); // Updated default IP with port
-  const [roomId, setRoomId] = useState("");
+  const [playerName, setPlayerName] = useState(generateRandomName());
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [isHost, setIsHost] = useState(false);
-  const [canStartGame, setCanStartGame] = useState(false);
-  const [showConnectionSettings, setShowConnectionSettings] = useState(false);
-  const [autoConnectAttempted, setAutoConnectAttempted] = useState(false);
+  const [availableGames, setAvailableGames] = useState<AvailableGame[]>([]);
+  const [showJoinGames, setShowJoinGames] = useState(false);
+  const isInGameRef = useRef(false);
 
+  const {
+    players = [],
+    isHost = false,
+    canStartGame = false,
+  } = useSelector((state: RootState) => state.game);
+
+  // Auto-connect to server
   useEffect(() => {
-    // Set up network event listeners
-    networkService.on("update-players", (data) => {
-      setPlayers(data.players);
-      setCanStartGame(data.players.length >= 2 && isHost);
-    });
-
-    networkService.on("game-started", () => {
-      router.push("/(tabs)/GameScreen");
-    });
-
-    networkService.on("room-error", (error) => {
-      Alert.alert("Error", (error as Error).message);
-      setIsConnecting(false);
-      setIsCreatingRoom(false);
-      setIsJoiningRoom(false);
-    });
-
-    return () => {
-      networkService.off("update-players");
-      networkService.off("game-started");
-      networkService.off("room-error");
-    };
-  }, [isHost, router]);
-
-  // Auto-connect on component mount
-  useEffect(() => {
-    const autoConnect = async () => {
-      if (!autoConnectAttempted && !networkService.connected) {
-        setAutoConnectAttempted(true);
+    const connectToServer = async () => {
+      if (!networkService.connected) {
         setIsConnecting(true);
-
         try {
-          const [ip, port] = serverIp.includes(":")
-            ? serverIp.split(":")
-            : [serverIp, "3001"];
-
-          await networkService.connect(ip, parseInt(port));
-          setIsConnecting(false);
+          await networkService.connect("192.168.1.9", 3001);
         } catch (error) {
+          Alert.alert("Connection Error", "Could not connect to server.");
+        } finally {
           setIsConnecting(false);
-          setShowConnectionSettings(true);
         }
       }
     };
+    connectToServer();
+  }, []);
 
-    autoConnect();
-  }, [autoConnectAttempted, serverIp]);
+  // Handle game events
+  useEffect(() => {
+    if (!networkService.connected) return;
 
-  const connectToServer = async () => {
-    if (!playerName.trim()) {
-      Alert.alert("Error", "Please enter your name");
-      return;
-    }
+    const handleGameDestroyed = (data: { reason: string }) => {
+      isInGameRef.current = false;
+      Alert.alert("Game Ended", data.reason, [
+        { text: "OK", onPress: () => dispatch(resetGame()) },
+      ]);
+    };
 
-    if (!serverIp.trim()) {
-      Alert.alert("Error", "Please enter server IP address");
-      return;
-    }
+    const handleGameStarted = () => {
+      router.push("/(tabs)/GameScreen");
+    };
 
-    setIsConnecting(true);
+    const handleUpdatePlayers = (data: { players: Player[] }) => {
+      dispatch(setPlayers(data.players));
+    };
+
+    networkService.on("game-destroyed", handleGameDestroyed);
+    networkService.on("game-started", handleGameStarted);
+    networkService.on("update-players", handleUpdatePlayers);
+
+    return () => {
+      networkService.off("game-destroyed", handleGameDestroyed);
+      networkService.off("game-started", handleGameStarted);
+      networkService.off("update-players", handleUpdatePlayers);
+    };
+  }, [networkService.connected, dispatch]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (isInGameRef.current) {
+        networkService.leaveGame();
+      }
+    };
+  }, []);
+
+  // Load available games
+  const loadAvailableGames = async () => {
     try {
-      const [ip, port] = serverIp.includes(":")
-        ? serverIp.split(":")
-        : [serverIp, "3001"];
-
-      await networkService.connect(ip, parseInt(port));
-      Alert.alert("Connected", `Successfully connected to ${ip}:${port}`);
-      setIsConnecting(false);
+      const response = await fetch("http://192.168.1.9:3001/api/games");
+      const games = await response.json();
+      setAvailableGames(games);
     } catch (error) {
-      setIsConnecting(false);
-      Alert.alert(
-        "Connection Error",
-        `Could not connect to server: ${(error as Error).message}`
-      );
+      Alert.alert("Error", "Could not load available games");
     }
   };
 
+  // Create room
   const createRoom = async () => {
-    if (!networkService.connected) {
-      Alert.alert("Error", "Not connected to server");
+    if (!playerName.trim()) {
+      Alert.alert("Error", "Please enter a name");
       return;
     }
 
     setIsCreatingRoom(true);
     try {
       const result = await networkService.createRoom({ name: playerName });
-      setIsHost(true);
-      setCanStartGame(false);
+      dispatch(setIsHost(true));
+      dispatch(setCanStartGame(false));
+      dispatch(setPlayers(result.players || []));
+      isInGameRef.current = true;
       Alert.alert(
-        "Room Created",
-        `Room ID: ${result.roomId}\nShare this with other players!`
+        "Game Created!",
+        "Your game is now available for others to join."
       );
     } catch (error) {
-      Alert.alert("Error", (error as Error).message);
+      Alert.alert(
+        "Error",
+        `Could not create game: ${(error as Error).message}`
+      );
     } finally {
       setIsCreatingRoom(false);
     }
   };
 
-  const joinRoom = async () => {
-    if (!networkService.connected) {
-      Alert.alert("Error", "Not connected to server");
-      return;
-    }
-
-    if (!roomId.trim()) {
-      Alert.alert("Error", "Please enter room ID");
+  // Join game
+  const joinGame = async (game: AvailableGame) => {
+    if (!playerName.trim()) {
+      Alert.alert("Error", "Please enter a name");
       return;
     }
 
     setIsJoiningRoom(true);
     try {
-      const result = await networkService.joinRoom(roomId, {
+      const result = await networkService.joinRoom(game.id, {
         name: playerName,
       });
-      setIsHost(false);
-      setPlayers(result.players);
+      dispatch(setIsHost(false));
+      dispatch(setPlayers(result.players));
+      isInGameRef.current = true;
+      setShowJoinGames(false);
+      Alert.alert("Joined Game!", `You joined ${game.name}`);
     } catch (error) {
-      Alert.alert("Error", (error as Error).message);
-    } finally {
+      Alert.alert("Error", `Could not join game: ${(error as Error).message}`);
       setIsJoiningRoom(false);
     }
   };
 
+  // Start game
   const startGame = async () => {
     if (!isHost) return;
-
     try {
       await networkService.startGame();
     } catch (error) {
-      Alert.alert("Error", (error as Error).message);
+      Alert.alert("Error", "Could not start game");
     }
   };
 
-  const getPlayerColorName = (color: string) => {
-    switch (color) {
-      case "r":
-        return "Red";
-      case "b":
-        return "Blue";
-      case "y":
-        return "Yellow";
-      case "g":
-        return "Green";
-      default:
-        return color;
-    }
+  // Disconnect
+  const disconnect = () => {
+    networkService.leaveGame();
+    networkService.disconnect();
+    dispatch(resetGame());
+    isInGameRef.current = false;
   };
 
-  return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={["#1e3a8a", "#1e40af", "#3b82f6"]}
-        style={styles.gradient}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.title}>🌐 Local Multiplayer</Text>
-            <Text style={styles.subtitle}>Connect and play with friends</Text>
+  // Name editing functions
+  const startEditingName = () => {
+    setTempName(playerName);
+    setIsEditingName(true);
+  };
+
+  const saveName = () => {
+    if (tempName.trim()) {
+      setPlayerName(tempName.trim());
+    }
+    setIsEditingName(false);
+  };
+
+  // Loading state
+  if (isConnecting) {
+    return (
+      <View className="flex-1 bg-black justify-center items-center">
+        <ActivityIndicator size="large" color="#FFFFFF" />
+        <Text className="text-white text-lg mt-4">Connecting...</Text>
+      </View>
+    );
+  }
+
+  // In game state
+  if (players.length > 0) {
+    return (
+      <View className="flex-1 bg-black">
+        <View className="flex-1 px-6 pt-16 pb-10 justify-between">
+          <View className="items-center">
+            <Text className="text-white text-3xl font-bold mb-2">
+              🌐 Multiplayer Chess
+            </Text>
+            <Text className="text-gray-300 text-base mb-6">
+              Playing as: {playerName}
+            </Text>
           </View>
 
-          {!networkService.connected ? (
-            <View style={styles.content}>
-              {isConnecting ? (
-                <View style={styles.loadingSection}>
-                  <ActivityIndicator color="#FFFFFF" size="large" />
-                  <Text style={styles.loadingText}>
-                    Connecting to server...
-                  </Text>
-                </View>
-              ) : showConnectionSettings ? (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>🔌 Connection Failed</Text>
-                  <Text style={styles.errorText}>
-                    Could not connect to {serverIp}. Please check your settings.
-                  </Text>
-
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Your Name"
-                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                    value={playerName}
-                    onChangeText={setPlayerName}
-                    maxLength={20}
-                  />
-
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Server IP:Port (e.g., 192.168.1.9:3001)"
-                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                    value={serverIp}
-                    onChangeText={setServerIp}
-                    autoCapitalize="none"
-                  />
-
-                  <TouchableOpacity
-                    style={[styles.button, styles.connectButton]}
-                    onPress={connectToServer}
-                    disabled={isConnecting}
-                  >
-                    {isConnecting ? (
-                      <ActivityIndicator color="#FFFFFF" size="small" />
-                    ) : (
-                      <Text style={styles.buttonText}>🚀 Retry Connection</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-            </View>
-          ) : (
-            <View style={styles.content}>
-              {/* Connection Status */}
-              <View style={styles.statusSection}>
-                <View style={styles.statusDot} />
-                <Text style={styles.connectedText}>
-                  Connected to {serverIp}
-                </Text>
-              </View>
-
-              {/* Player Name Input */}
-              {!playerName && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>👤 Enter Your Name</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Your Name"
-                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                    value={playerName}
-                    onChangeText={setPlayerName}
-                    maxLength={20}
-                    autoFocus
-                  />
-                </View>
-              )}
-
-              {/* Action Buttons */}
-              {playerName && (
-                <View style={styles.buttonsContainer}>
-                  <TouchableOpacity
-                    style={[styles.button, styles.createButton]}
-                    onPress={createRoom}
-                    disabled={isCreatingRoom}
-                  >
-                    {isCreatingRoom ? (
-                      <ActivityIndicator color="#FFFFFF" size="small" />
-                    ) : (
-                      <Text style={styles.buttonText}>🏠 Create Room</Text>
-                    )}
-                  </TouchableOpacity>
-
-                  <View style={styles.divider}>
-                    <View style={styles.dividerLine} />
-                    <Text style={styles.dividerText}>OR</Text>
-                    <View style={styles.dividerLine} />
-                  </View>
-
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter Room ID"
-                    placeholderTextColor="rgba(255, 255, 255, 0.7)"
-                    value={roomId}
-                    onChangeText={setRoomId}
-                    autoCapitalize="characters"
-                  />
-
-                  <TouchableOpacity
-                    style={[styles.button, styles.joinButton]}
-                    onPress={joinRoom}
-                    disabled={isJoiningRoom}
-                  >
-                    {isJoiningRoom ? (
-                      <ActivityIndicator color="#FFFFFF" size="small" />
-                    ) : (
-                      <Text style={styles.buttonText}>🚪 Join Room</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Players List */}
-              {players.length > 0 && (
-                <View style={styles.playersSection}>
-                  <Text style={styles.playersTitle}>
-                    👥 Players ({players.length}/4)
-                  </Text>
-                  {players.map((player, index) => (
-                    <View key={player.id} style={styles.playerItem}>
-                      <View
-                        style={[
-                          styles.colorIndicator,
-                          { backgroundColor: getPlayerColor(player.color) },
-                        ]}
-                      />
-                      <Text style={styles.playerName}>
-                        {player.name} {player.isHost && "👑"}
-                      </Text>
-                      <Text style={styles.playerColor}>
-                        {getPlayerColorName(player.color)}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Start Game Button */}
-              {isHost && canStartGame && (
-                <TouchableOpacity
-                  style={[styles.button, styles.startButton]}
-                  onPress={startGame}
+          <View className="flex-1 justify-center">
+            <Text className="text-white text-xl font-semibold mb-4 text-center">
+              Players ({players.length}/4)
+            </Text>
+            <View className="gap-3 mb-8">
+              {players.map((player) => (
+                <View
+                  key={player.id}
+                  className="flex-row items-center gap-3 bg-white/10 py-3 px-4 rounded-lg border border-white/20"
                 >
-                  <Text style={styles.buttonText}>🎯 Start Game</Text>
-                </TouchableOpacity>
+                  <View
+                    className="w-5 h-5 rounded-full"
+                    style={{ backgroundColor: getColorHex(player.color) }}
+                  />
+                  <Text className="text-white text-base font-medium">
+                    {player.name} {player.isHost && "(Host)"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Action Buttons */}
+            <View className="items-center gap-4">
+              {isHost && (
+                <View className="items-center w-full">
+                  {players.length < 2 && (
+                    <Text className="text-gray-400 text-sm mb-3">
+                      Need 2+ players to start
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    className={`w-full py-3 px-6 rounded-xl shadow-lg ${
+                      players.length < 2 ? "bg-gray-600" : "bg-white"
+                    }`}
+                    onPress={startGame}
+                    disabled={players.length < 2}
+                  >
+                    <Text
+                      className={`text-lg font-bold text-center ${
+                        players.length < 2 ? "text-gray-300" : "text-black"
+                      }`}
+                    >
+                      Start Game
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               )}
 
-              {/* Disconnect Button */}
               <TouchableOpacity
-                style={[styles.button, styles.disconnectButton]}
-                onPress={() => {
-                  networkService.disconnect();
-                  setPlayers([]);
-                  setIsHost(false);
-                  setCanStartGame(false);
-                }}
+                className="bg-red-600 py-3 px-6 rounded-xl shadow-lg w-full"
+                onPress={disconnect}
               >
-                <Text style={styles.buttonText}>❌ Disconnect</Text>
+                <Text className="text-white text-lg font-bold text-center">
+                  Leave Game
+                </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Main menu
+  return (
+    <View className="flex-1 bg-black">
+      <View className="flex-1 px-6 pt-16 pb-10 justify-between">
+        <View className="items-center">
+          <Text className="text-white text-4xl font-bold mb-2">
+            🌐 Multiplayer Chess
+          </Text>
+          <Text className="text-gray-300 text-lg mb-6">
+            Connect and Play with Friends
+          </Text>
+          <View className="w-20 h-20 rounded-full bg-white/10 justify-center items-center border-2 border-white/20">
+            <Text className="text-4xl text-white">♛</Text>
+          </View>
+        </View>
+
+        <View className="items-center mb-8">
+          <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
+          {isEditingName ? (
+            <TextInput
+              className="text-white text-2xl font-bold text-center border-b border-white/30 pb-1"
+              value={tempName}
+              onChangeText={setTempName}
+              onSubmitEditing={saveName}
+              onBlur={saveName}
+              autoFocus
+              placeholder="Enter name"
+              placeholderTextColor="#9CA3AF"
+            />
+          ) : (
+            <TouchableOpacity onPress={startEditingName}>
+              <Text className="text-white text-2xl font-bold">
+                {playerName}
+              </Text>
+            </TouchableOpacity>
           )}
-        </ScrollView>
-      </LinearGradient>
+        </View>
+
+        <View className="gap-4">
+          <TouchableOpacity
+            className="bg-white py-4 px-6 rounded-xl shadow-lg"
+            onPress={createRoom}
+            disabled={isCreatingRoom}
+          >
+            {isCreatingRoom ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <Text className="text-black text-lg font-bold text-center">
+                Create Game
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            className="bg-white/20 py-4 px-6 rounded-xl border-2 border-white/30 shadow-lg"
+            onPress={() => {
+              setShowJoinGames(true);
+              loadAvailableGames();
+            }}
+          >
+            <Text className="text-white text-lg font-bold text-center">
+              Join Game
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {showJoinGames && (
+          <View className="mt-6">
+            <Text className="text-white text-xl font-semibold mb-4">
+              Available Games:
+            </Text>
+            {availableGames.length === 0 ? (
+              <Text className="text-gray-400 text-center py-4">
+                No games available
+              </Text>
+            ) : (
+              <View className="gap-3">
+                {availableGames.map((game) => (
+                  <TouchableOpacity
+                    key={game.id}
+                    className="bg-white/10 py-3 px-4 rounded-lg border border-white/20"
+                    onPress={() => joinGame(game)}
+                    disabled={isJoiningRoom}
+                  >
+                    <View className="flex-row justify-between items-center">
+                      <View>
+                        <Text className="text-white text-base font-semibold">
+                          {game.name}
+                        </Text>
+                        <Text className="text-gray-300 text-sm">
+                          {game.playerCount}/{game.maxPlayers} players
+                        </Text>
+                      </View>
+                      {isJoiningRoom && (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <TouchableOpacity
+              className="bg-gray-600 py-3 px-4 rounded-lg mt-4 shadow-lg"
+              onPress={() => setShowJoinGames(false)}
+            >
+              <Text className="text-white text-center font-semibold">
+                ← Back
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
 
-const getPlayerColor = (color: string) => {
-  switch (color) {
-    case "r":
-      return "#DC2626";
-    case "b":
-      return "#2563EB";
-    case "y":
-      return "#EAB308";
-    case "g":
-      return "#16A34A";
-    default:
-      return "#6B7280";
-  }
-};
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
-  },
-  header: {
-    alignItems: "center",
-    marginBottom: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 8,
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: "#E5E7EB",
-    textAlign: "center",
-    opacity: 0.9,
-  },
-  content: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  section: {
-    marginBottom: 32,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 24,
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  statusSection: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 32,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 20,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#10B981",
-    marginRight: 8,
-  },
-  connectedText: {
-    color: "#10B981",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  buttonsContainer: {
-    gap: 20,
-  },
-  input: {
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    borderRadius: 20,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    color: "#FFFFFF",
-    fontSize: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  button: {
-    borderRadius: 20,
-    paddingVertical: 20,
-    paddingHorizontal: 32,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  connectButton: {
-    backgroundColor: "#10B981",
-  },
-  createButton: {
-    backgroundColor: "#3B82F6",
-  },
-  joinButton: {
-    backgroundColor: "#8B5CF6",
-  },
-  startButton: {
-    backgroundColor: "#F59E0B",
-    marginTop: 16,
-  },
-  disconnectButton: {
-    backgroundColor: "#EF4444",
-    marginTop: 16,
-  },
-  buttonText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  divider: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    fontSize: 14,
-    color: "rgba(255, 255, 255, 0.7)",
-    fontWeight: "600",
-  },
-  playersSection: {
-    marginTop: 32,
-    marginBottom: 24,
-  },
-  playersTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 20,
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  playerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  colorIndicator: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    marginRight: 16,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-  },
-  playerName: {
-    flex: 1,
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 2,
-  },
-  playerColor: {
-    color: "rgba(255, 255, 255, 0.7)",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  loadingSection: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 40,
-  },
-  loadingText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-    marginTop: 16,
-    textAlign: "center",
-  },
-  errorText: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-});
+function getColorHex(color: string): string {
+  const colors = { r: "#EF4444", b: "#3B82F6", y: "#F59E0B", g: "#10B981" };
+  return colors[color as keyof typeof colors] || "#FFFFFF";
+}

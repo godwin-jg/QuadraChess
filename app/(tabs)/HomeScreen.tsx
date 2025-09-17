@@ -1,174 +1,83 @@
-import { StyleSheet, TouchableOpacity, Dimensions } from "react-native";
+import { TouchableOpacity, Text } from "react-native";
 import { Link } from "expo-router";
-import { Text, View } from "@/components/Themed";
-import { LinearGradient } from "expo-linear-gradient";
-
-const { width, height } = Dimensions.get("window");
+import { View } from "@/components/Themed";
 
 export default function HomeScreen() {
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={["#1e3a8a", "#1e40af", "#3b82f6"]}
-        style={styles.gradient}
-      >
-        <View style={styles.content}>
-          {/* Header Section */}
-          <View style={styles.header}>
-            <Text style={styles.title}>♔ Four Player Chess ♔</Text>
-            <Text style={styles.subtitle}>Strategic Multiplayer Chess</Text>
-            <View style={styles.chessIcon}>
-              <Text style={styles.chessSymbol}>♛</Text>
-            </View>
-          </View>
-
-          {/* Buttons Section */}
-          <View style={styles.buttonsContainer}>
-            <Link href="/(tabs)/GameScreen" asChild>
-              <TouchableOpacity style={styles.primaryButton}>
-                <Text style={styles.buttonIcon}>🎮</Text>
-                <Text style={styles.buttonText}>Start Single Player</Text>
-              </TouchableOpacity>
-            </Link>
-
-            <Link href="/(tabs)/LobbyScreen" asChild>
-              <TouchableOpacity style={styles.secondaryButton}>
-                <Text style={styles.buttonIcon}>🌐</Text>
-                <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-                  Local Multiplayer
-                </Text>
-              </TouchableOpacity>
-            </Link>
-          </View>
-
-          {/* Features Section */}
-          <View style={styles.featuresContainer}>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>👥</Text>
-              <Text style={styles.featureText}>Up to 4 Players</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>⚡</Text>
-              <Text style={styles.featureText}>Real-time Play</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>🏆</Text>
-              <Text style={styles.featureText}>Strategic Gameplay</Text>
-            </View>
+    <View className="flex-1 bg-black">
+      <View className="flex-1 px-6 pt-16 pb-8 justify-between">
+        {/* Header Section */}
+        <View className="items-center mb-8">
+          <Text className="text-4xl font-bold text-white text-center mb-2">
+            ♔ Four Player Chess ♔
+          </Text>
+          <Text className="text-lg text-gray-300 text-center mb-4">
+            Strategic Multiplayer Chess
+          </Text>
+          <View className="w-20 h-20 rounded-full bg-white/10 justify-center items-center border-2 border-white/20">
+            <Text className="text-4xl text-white">♛</Text>
           </View>
         </View>
-      </LinearGradient>
+
+        {/* Buttons Section */}
+        <View className="gap-3">
+          <Link href="/(tabs)/GameScreen" asChild>
+            <TouchableOpacity className="bg-white py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center">
+              <Text className="text-2xl text-center mb-1">🎮</Text>
+              <Text className="text-black text-lg font-bold text-center mb-1">
+                Single Player
+              </Text>
+              <Text className="text-gray-600 text-xs text-center">
+                Play against AI
+              </Text>
+            </TouchableOpacity>
+          </Link>
+
+          <Link href="/(tabs)/LobbyScreen" asChild>
+            <TouchableOpacity className="bg-white/20 py-3 px-5 rounded-xl border-2 border-white/30 shadow-lg active:opacity-80 items-center">
+              <Text className="text-2xl text-center mb-1">🏠</Text>
+              <Text className="text-white text-lg font-bold text-center mb-1">
+                Local Multiplayer
+              </Text>
+              <Text className="text-gray-300 text-xs text-center">
+                Play with friends
+              </Text>
+            </TouchableOpacity>
+          </Link>
+
+          <TouchableOpacity className="bg-blue-600 py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center">
+            <Text className="text-2xl text-center mb-1">🌍</Text>
+            <Text className="text-white text-lg font-bold text-center mb-1">
+              Online Multiplayer
+            </Text>
+            <Text className="text-blue-100 text-xs text-center">
+              Coming Soon
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Features Section */}
+        <View className="flex-row justify-around px-5 mt-4">
+          <View className="items-center flex-1">
+            <Text className="text-2xl mb-2">👥</Text>
+            <Text className="text-gray-300 text-sm font-semibold text-center">
+              Up to 4 Players
+            </Text>
+          </View>
+          <View className="items-center flex-1">
+            <Text className="text-2xl mb-2">⚡</Text>
+            <Text className="text-gray-300 text-sm font-semibold text-center">
+              Real-time Play
+            </Text>
+          </View>
+          <View className="items-center flex-1">
+            <Text className="text-2xl mb-2">🏆</Text>
+            <Text className="text-gray-300 text-sm font-semibold text-center">
+              Strategic Gameplay
+            </Text>
+          </View>
+        </View>
+      </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 40,
-    justifyContent: "space-between",
-  },
-  header: {
-    alignItems: "center",
-    marginBottom: 40,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-    textAlign: "center",
-    marginBottom: 8,
-    textShadowColor: "rgba(0, 0, 0, 0.3)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: "#E5E7EB",
-    textAlign: "center",
-    marginBottom: 24,
-    opacity: 0.9,
-  },
-  chessIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  chessSymbol: {
-    fontSize: 40,
-    color: "#FFFFFF",
-  },
-  buttonsContainer: {
-    gap: 20,
-  },
-  primaryButton: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    paddingVertical: 20,
-    paddingHorizontal: 32,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  secondaryButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderRadius: 20,
-    paddingVertical: 20,
-    paddingHorizontal: 32,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  buttonIcon: {
-    fontSize: 28,
-    marginBottom: 8,
-  },
-  buttonText: {
-    color: "#1F2937",
-    fontSize: 20,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  secondaryButtonText: {
-    color: "#FFFFFF",
-  },
-  featuresContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    paddingHorizontal: 20,
-  },
-  featureItem: {
-    alignItems: "center",
-    flex: 1,
-  },
-  featureIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  featureText: {
-    color: "#E5E7EB",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
-    opacity: 0.9,
-  },
-});

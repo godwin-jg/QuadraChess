@@ -12,7 +12,7 @@ import {
   getRookIdentifier,
   isCastlingMove,
 } from "./gameHelpers";
-import networkService from "../services/networkService";
+import networkService, { Player } from "../app/services/networkService";
 
 // Helper function to create a deep copy of the game state
 const createStateSnapshot = (state: GameState): GameState => {
@@ -74,6 +74,10 @@ const baseInitialState: GameState = {
   },
   history: [],
   historyIndex: -1,
+  // Multiplayer state
+  players: [],
+  isHost: false,
+  canStartGame: false,
 };
 
 // Create initial state with proper history initialization
@@ -81,6 +85,10 @@ const initialState: GameState = {
   ...baseInitialState,
   history: [createStateSnapshot(baseInitialState)],
   historyIndex: 0,
+  // Ensure multiplayer state is included
+  players: baseInitialState.players,
+  isHost: baseInitialState.isHost,
+  canStartGame: baseInitialState.canStartGame,
 };
 
 const gameSlice = createSlice({
@@ -851,6 +859,16 @@ const gameSlice = createSlice({
         networkService.sendMove(moveData);
       }
     },
+    // Multiplayer actions
+    setPlayers: (state, action: PayloadAction<Player[]>) => {
+      state.players = action.payload;
+    },
+    setIsHost: (state, action: PayloadAction<boolean>) => {
+      state.isHost = action.payload;
+    },
+    setCanStartGame: (state, action: PayloadAction<boolean>) => {
+      state.canStartGame = action.payload;
+    },
   },
 });
 
@@ -869,6 +887,9 @@ export const {
   syncGameState,
   setGameState,
   sendMoveToServer,
+  setPlayers,
+  setIsHost,
+  setCanStartGame,
 } = gameSlice.actions;
 
 export default gameSlice.reducer;

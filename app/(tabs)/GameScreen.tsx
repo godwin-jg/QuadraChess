@@ -1,7 +1,7 @@
 import { View, Text } from "@/components/Themed";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState, resetGame, completePromotion } from "../state";
-import { applyNetworkMove, setGameState } from "../state/gameSlice";
+import { RootState, resetGame, completePromotion } from "../../state";
+import { applyNetworkMove, setGameState } from "../../state/gameSlice";
 import Board from "../components/board/Board";
 import GameOverModal from "../components/ui/GameOverModal";
 import GameNotification from "../components/ui/GameNotification";
@@ -31,19 +31,23 @@ export default function GameScreen() {
     };
 
     const handleMoveRejected = (data: any) => {
-      console.log("Move rejected by server:", data);
-      // You could show a notification to the user here
-      // For now, just log it
+      // Move was rejected by server
+    };
+
+    const handleGameDestroyed = (data: { reason: string }) => {
+      dispatch(resetGame());
     };
 
     networkService.on("move-made", handleMoveMade);
     networkService.on("game-state-updated", handleGameStateUpdated);
     networkService.on("move-rejected", handleMoveRejected);
+    networkService.on("game-destroyed", handleGameDestroyed);
 
     return () => {
       networkService.off("move-made", handleMoveMade);
       networkService.off("game-state-updated", handleGameStateUpdated);
       networkService.off("move-rejected", handleMoveRejected);
+      networkService.off("game-destroyed", handleGameDestroyed);
     };
   }, [dispatch]);
 
@@ -124,7 +128,7 @@ export default function GameScreen() {
   ];
 
   return (
-    <View className="flex-1 bg-gray-800 justify-center items-center">
+    <View className="flex-1 bg-black justify-center items-center">
       {/* History Controls - Top Center */}
       <View className="absolute top-4 z-10">
         <HistoryControls />

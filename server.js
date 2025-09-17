@@ -8,11 +8,7 @@ const server = http.createServer(app);
 
 const io = socketIo(server, {
   cors: {
-    origin: [
-      "http://localhost:8081",
-      "http://localhost:8082",
-      "http://192.168.1.9:3001",
-    ],
+    origin: "*", // Allow all origins for development
     methods: ["GET", "POST"],
   },
   transports: ["websocket", "polling"],
@@ -20,6 +16,7 @@ const io = socketIo(server, {
 
 const rooms = new Map();
 const players = new Map();
+const availableGames = new Map(); // Simple game list for discovery
 
 function generateRoomId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -38,9 +35,20 @@ function getRoomInfo(roomId) {
   };
 }
 
-io.on("connection", (socket) => {
-  console.log(`Player connected: ${socket.id}`);
+// Simple endpoint to get available games
+app.get("/api/games", (req, res) => {
+  const games = Array.from(availableGames.values()).map((game) => ({
+    id: game.id,
+    name: game.name,
+    host: game.host,
+    playerCount: game.playerCount,
+    maxPlayers: 4,
+    status: game.status,
+  }));
+  res.json(games);
+});
 
+io.on("connection", (socket) => {
   socket.on("create-room", (playerData) => {
     const roomId = generateRoomId();
     const room = {
@@ -64,20 +72,21 @@ io.on("connection", (socket) => {
     rooms.set(roomId, room);
     players.set(socket.id, { roomId, isHost: true });
 
-    console.log(`Room created:`, {
-      roomId,
-      host: {
-        socketId: socket.id,
-        name: playerData.name,
-        color: hostColor,
-      },
+    // Add to available games list
+    availableGames.set(roomId, {
+      id: roomId,
+      name: `${playerData.name}'s Game`,
+      host: playerData.name,
+      playerCount: 1,
+      status: "waiting",
     });
 
     socket.join(roomId);
     socket.emit("room-created", {
       roomId,
       playerId: socket.id,
-      color: hostColor, // Send the assigned color back to the client
+      color: hostColor,
+      players: Array.from(room.players.values()),
     });
     socket.emit("update-players", {
       players: Array.from(room.players.values()),
@@ -87,14 +96,6 @@ io.on("connection", (socket) => {
   socket.on("join-room", (data) => {
     const { roomId, playerData } = data;
     const room = rooms.get(roomId);
-
-    console.log(`Join room attempt:`, {
-      socketId: socket.id,
-      roomId,
-      playerData,
-      roomExists: !!room,
-      roomPlayers: room ? Array.from(room.players.entries()) : null,
-    });
 
     if (!room) {
       socket.emit("room-error", { message: "Room not found" });
@@ -113,12 +114,6 @@ io.on("connection", (socket) => {
     );
     const playerColor = availableColors[0];
 
-    console.log(`Color assignment:`, {
-      usedColors,
-      availableColors,
-      assignedColor: playerColor,
-    });
-
     if (!playerColor) {
       socket.emit("room-error", { message: "No available colors" });
       return;
@@ -132,6 +127,13 @@ io.on("connection", (socket) => {
     });
 
     players.set(socket.id, { roomId, isHost: false });
+
+    // Update available games player count
+    if (availableGames.has(roomId)) {
+      const game = availableGames.get(roomId);
+      game.playerCount = room.players.size;
+      availableGames.set(roomId, game);
+    }
 
     socket.join(roomId);
     socket.emit("room-joined", {
@@ -164,6 +166,10 @@ io.on("connection", (socket) => {
       currentPlayerTurn: "r", // Start with red player
     };
     room.isGameStarted = true;
+
+    // Remove from available games when started
+    availableGames.delete(player.roomId);
+
     io.to(player.roomId).emit("game-started");
   });
 
@@ -174,26 +180,10 @@ io.on("connection", (socket) => {
     const room = rooms.get(player.roomId);
     if (!room || !room.isGameStarted) return; // Room not found or game not started
 
-    // --- START: NEW TURN VALIDATION LOGIC ---
-
-    // 1. Get the player's info (like their color) and the server's official current turn
     const playerInfo = room.players.get(socket.id);
     const serverCurrentTurn = room.gameState.currentPlayerTurn;
-
-    // Debug logging
-    console.log(`Move attempt by player:`, {
-      socketId: socket.id,
-      playerInfo,
-      serverCurrentTurn,
-      roomPlayers: Array.from(room.players.entries()),
-    });
-
-    // 2. VALIDATION CHECK: Is it this player's turn?
     if (!playerInfo || playerInfo.color !== serverCurrentTurn) {
       // If it's not their turn, reject the move and do nothing else.
-      console.log(
-        `REJECTED: Player ${playerInfo?.name || "Unknown"} (${playerInfo?.color || "undefined"}) tried to move on ${serverCurrentTurn}'s turn.`
-      );
 
       // Send rejection response to the specific player
       socket.emit("move-rejected", {
@@ -204,29 +194,17 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // 3. If the move is valid, update the server's state to the next player.
     const turnOrder = ["r", "b", "y", "g"]; // This must match your client's turn order
     const currentIndex = turnOrder.indexOf(serverCurrentTurn);
 
-    // This simple logic finds the next player in the sequence.
-    // A more advanced version would skip over eliminated players.
     const nextIndex = (currentIndex + 1) % turnOrder.length;
     room.gameState.currentPlayerTurn = turnOrder[nextIndex];
 
-    // --- END: NEW TURN VALIDATION LOGIC ---
-
-    // 4. If the move was from the correct player, broadcast it to ALL players in the room.
-    // Using io.to() sends it to everyone, including the original sender.
-    // This ensures every player's game state is updated based on the server's decision.
     io.to(player.roomId).emit("move-made", {
       move: moveData,
       playerId: socket.id,
       gameState: room.gameState, // Send the updated game state including current turn
     });
-
-    console.log(
-      `Move VALIDATED and broadcast for player ${playerInfo.name} in room ${player.roomId}`
-    );
   });
 
   socket.on("update-game-state", (gameState) => {
@@ -240,26 +218,85 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("disconnect", () => {
-    console.log(`Player disconnected: ${socket.id}`);
+  socket.on("leave-game", () => {
     const player = players.get(socket.id);
     if (player) {
       const room = rooms.get(player.roomId);
       if (room) {
+        const wasHost = player.isHost;
+        const roomId = player.roomId;
+
         room.players.delete(socket.id);
         players.delete(socket.id);
 
         if (room.players.size === 0) {
-          rooms.delete(player.roomId);
+          // Room is empty, destroy it completely
+          rooms.delete(roomId);
+          availableGames.delete(roomId);
+        } else if (wasHost) {
+          // Host left, destroy the game and notify remaining players
+          rooms.delete(roomId);
+          availableGames.delete(roomId);
+
+          // Notify remaining players that the game was destroyed
+          socket.to(roomId).emit("game-destroyed", {
+            reason: "Host left the game",
+          });
         } else {
-          if (player.isHost) {
-            const newHost = room.players.values().next().value;
-            if (newHost) {
-              newHost.isHost = true;
-              room.host = newHost.id;
-            }
+          // Regular player left, update the room
+
+          // Update available games player count
+          if (availableGames.has(roomId)) {
+            const game = availableGames.get(roomId);
+            game.playerCount = room.players.size;
+            availableGames.set(roomId, game);
           }
-          socket.to(player.roomId).emit("update-players", {
+
+          // Notify remaining players
+          socket.to(roomId).emit("update-players", {
+            players: Array.from(room.players.values()),
+          });
+        }
+      }
+    }
+  });
+
+  socket.on("disconnect", () => {
+    const player = players.get(socket.id);
+    if (player) {
+      const room = rooms.get(player.roomId);
+      if (room) {
+        const wasHost = player.isHost;
+        const roomId = player.roomId;
+
+        room.players.delete(socket.id);
+        players.delete(socket.id);
+
+        if (room.players.size === 0) {
+          // Room is empty, destroy it completely
+          rooms.delete(roomId);
+          availableGames.delete(roomId);
+        } else if (wasHost) {
+          // Host left, destroy the game and notify remaining players
+          rooms.delete(roomId);
+          availableGames.delete(roomId);
+
+          // Notify remaining players that the game was destroyed
+          socket.to(roomId).emit("game-destroyed", {
+            reason: "Host left the game",
+          });
+        } else {
+          // Regular player left, update the room
+
+          // Update available games player count
+          if (availableGames.has(roomId)) {
+            const game = availableGames.get(roomId);
+            game.playerCount = room.players.size;
+            availableGames.set(roomId, game);
+          }
+
+          // Notify remaining players
+          socket.to(roomId).emit("update-players", {
             players: Array.from(room.players.values()),
           });
         }

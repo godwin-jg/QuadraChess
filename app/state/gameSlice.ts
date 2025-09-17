@@ -12,6 +12,7 @@ import {
   getRookIdentifier,
   isCastlingMove,
 } from "./gameHelpers";
+import networkService from "../services/networkService";
 
 // Helper function to create a deep copy of the game state
 const createStateSnapshot = (state: GameState): GameState => {
@@ -540,6 +541,9 @@ const gameSlice = createSlice({
           state.history.push(createStateSnapshot(state));
           state.historyIndex = state.history.length - 1;
         }
+
+        // Note: In multiplayer mode, moves are sent to server via sendMoveToServer action
+        // and applied locally via applyNetworkMove when server confirms them
       }
     },
     resetGame: (state) => {
@@ -765,6 +769,88 @@ const gameSlice = createSlice({
       state.history.push(createStateSnapshot(state));
       state.historyIndex = state.history.length - 1;
     },
+    applyNetworkMove: (
+      state,
+      action: PayloadAction<{
+        from: { row: number; col: number };
+        to: { row: number; col: number };
+        pieceCode: string;
+        playerColor: string;
+      }>
+    ) => {
+      const { from, to, pieceCode, playerColor } = action.payload;
+
+      // Apply the move to the board
+      const { row: fromRow, col: fromCol } = from;
+      const { row: toRow, col: toCol } = to;
+
+      // Move the piece
+      state.boardState[toRow][toCol] = pieceCode;
+      state.boardState[fromRow][fromCol] = null;
+
+      // Note: Turn management is now handled by the server
+      // The server will send the updated gameState with the correct currentPlayerTurn
+
+      // Clear selection
+      state.selectedPiece = null;
+      state.validMoves = [];
+
+      // Update check status
+      state.checkStatus = updateAllCheckStatus(
+        state.boardState,
+        state.eliminatedPlayers,
+        state.hasMoved
+      );
+
+      // Save to history
+      if (state.historyIndex < state.history.length - 1) {
+        state.history = state.history.slice(0, state.historyIndex + 1);
+      }
+
+      state.history.push(createStateSnapshot(state));
+      state.historyIndex = state.history.length - 1;
+    },
+    syncGameState: (state, action: PayloadAction<GameState>) => {
+      // Sync the entire game state from network
+      const networkState = action.payload;
+      Object.assign(state, networkState);
+    },
+    setGameState: (state, action: PayloadAction<GameState>) => {
+      // Replace the entire game state (useful for syncing when game starts)
+      const newState = action.payload;
+      Object.assign(state, newState);
+    },
+    sendMoveToServer: (
+      state,
+      action: PayloadAction<{ row: number; col: number }>
+    ) => {
+      // Send move to server without applying locally (for multiplayer mode)
+      if (!networkService.connected || !networkService.roomId) {
+        return;
+      }
+
+      if (state.selectedPiece) {
+        const { row: targetRow, col: targetCol } = action.payload;
+        const { row: startRow, col: startCol } = state.selectedPiece;
+
+        const pieceToMove = state.boardState[startRow][startCol];
+        const pieceColor = pieceToMove?.charAt(0);
+
+        // Enforce player turn - only current player can make moves
+        if (pieceColor !== state.currentPlayerTurn) {
+          return; // Don't send the move
+        }
+
+        const moveData = {
+          from: { row: startRow, col: startCol },
+          to: { row: targetRow, col: targetCol },
+          pieceCode: pieceToMove!,
+          playerColor: pieceColor!,
+        };
+
+        networkService.sendMove(moveData);
+      }
+    },
   },
 });
 
@@ -779,6 +865,10 @@ export const {
   stepHistory,
   returnToLive,
   resignGame,
+  applyNetworkMove,
+  syncGameState,
+  setGameState,
+  sendMoveToServer,
 } = gameSlice.actions;
 
 export default gameSlice.reducer;

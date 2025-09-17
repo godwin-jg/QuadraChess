@@ -1,6 +1,7 @@
 import { View, Text } from "@/components/Themed";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState, resetGame, completePromotion } from "../state";
+import { applyNetworkMove, setGameState } from "../state/gameSlice";
 import Board from "../components/board/Board";
 import GameOverModal from "../components/ui/GameOverModal";
 import GameNotification from "../components/ui/GameNotification";
@@ -8,10 +9,43 @@ import PlayerInfoPod from "../components/ui/PlayerInfoPod";
 import PromotionModal from "../components/ui/PromotionModal";
 import HistoryControls from "../components/ui/HistoryControls";
 import GameMenu from "../components/ui/GameMenu";
+import networkService from "../services/networkService";
+import { useEffect } from "react";
 
 export default function GameScreen() {
   // Get dispatch function
   const dispatch = useDispatch();
+
+  // Set up network listeners for multiplayer
+  useEffect(() => {
+    const handleMoveMade = (data: any) => {
+      dispatch(applyNetworkMove(data.move));
+      // Update game state with server's turn information
+      if (data.gameState) {
+        dispatch(setGameState(data.gameState));
+      }
+    };
+
+    const handleGameStateUpdated = (data: any) => {
+      dispatch(setGameState(data.gameState));
+    };
+
+    const handleMoveRejected = (data: any) => {
+      console.log("Move rejected by server:", data);
+      // You could show a notification to the user here
+      // For now, just log it
+    };
+
+    networkService.on("move-made", handleMoveMade);
+    networkService.on("game-state-updated", handleGameStateUpdated);
+    networkService.on("move-rejected", handleMoveRejected);
+
+    return () => {
+      networkService.off("move-made", handleMoveMade);
+      networkService.off("game-state-updated", handleGameStateUpdated);
+      networkService.off("move-rejected", handleMoveRejected);
+    };
+  }, [dispatch]);
 
   // Get game state from Redux store
   const currentPlayerTurn = useSelector(
@@ -96,13 +130,11 @@ export default function GameScreen() {
         <HistoryControls />
       </View>
 
+      {/* Game Menu - Top Right */}
+      <GameMenu />
+
       {/* Chess Board - Centered */}
       <Board />
-
-      {/* Game Menu - Bottom Center */}
-      <View className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10">
-        <GameMenu />
-      </View>
 
       {/* Player Info Pods - Positioned in corners */}
 

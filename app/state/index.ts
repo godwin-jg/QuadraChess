@@ -16,9 +16,9 @@ export {
   makeMove,
   completePromotion,
   resetGame,
+  sendMoveToServer,
 } from "./gameSlice";
 
 // Re-export the store
 export { store } from "./store";
 export type { RootState } from "./store";
-

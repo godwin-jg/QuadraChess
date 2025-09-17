@@ -2,7 +2,8 @@ import React from "react";
 import { View, useWindowDimensions } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../state/store";
-import { selectPiece, makeMove } from "../../state/gameSlice";
+import { selectPiece, makeMove, sendMoveToServer } from "../../state/gameSlice";
+import networkService from "../../services/networkService";
 import { MoveInfo } from "../../logic";
 import Square from "./Square";
 
@@ -70,7 +71,13 @@ export default function Board() {
 
     // If a piece is selected AND the pressed square is a valid move
     if (selectedPiece && isAValidMove) {
-      dispatch(makeMove({ row, col }));
+      // In multiplayer mode, send move to server for validation
+      // In single-player mode, apply move locally
+      if (networkService.connected && networkService.roomId) {
+        dispatch(sendMoveToServer({ row, col }));
+      } else {
+        dispatch(makeMove({ row, col }));
+      }
     } else {
       // Otherwise, just try to select the piece on the pressed square
       dispatch(selectPiece({ row, col }));

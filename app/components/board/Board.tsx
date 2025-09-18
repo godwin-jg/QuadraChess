@@ -8,8 +8,11 @@ import {
   sendMoveToServer,
 } from "../../../state/gameSlice";
 import networkService from "../../services/networkService";
+import onlineGameService from "../../../services/onlineGameService";
+import enhancedOnlineGameService from "../../../services/enhancedOnlineGameService";
 import { MoveInfo } from "../../../logic";
 import Square from "./Square";
+import { useLocalSearchParams } from "expo-router";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -19,6 +22,7 @@ export default function Board() {
   const { width } = useWindowDimensions();
   const boardSize = Math.min(width * 0.98, 600); // Max 600px or 98% of screen width
   const squareSize = boardSize / 14;
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
 
   // Get board state and selection state from Redux store
   const boardState = useSelector((state: RootState) => state.game.boardState);
@@ -58,7 +62,7 @@ export default function Board() {
   };
 
   // Handle square press
-  const handleSquarePress = (row: number, col: number) => {
+  const handleSquarePress = async (row: number, col: number) => {
     const isAValidMove = validMoves.some(
       (move) => move.row === row && move.col === col
     );
@@ -75,11 +79,36 @@ export default function Board() {
 
     // If a piece is selected AND the pressed square is a valid move
     if (selectedPiece && isAValidMove) {
-      // In multiplayer mode, send move to server for validation
-      // In single-player mode, apply move locally
-      if (networkService.connected && networkService.roomId) {
+      const pieceToMove = boardState[selectedPiece.row][selectedPiece.col];
+      const pieceColor = pieceToMove?.charAt(0);
+
+      const moveData = {
+        from: { row: selectedPiece.row, col: selectedPiece.col },
+        to: { row, col },
+        pieceCode: pieceToMove!,
+        playerColor: pieceColor!,
+      };
+
+      // Handle different game modes
+      if (mode === "online" && enhancedOnlineGameService.isConnected) {
+        // Enhanced online multiplayer mode
+        try {
+          await enhancedOnlineGameService.makeMove(moveData);
+        } catch (error) {
+          console.error("Failed to make enhanced online move:", error);
+        }
+      } else if (mode === "online" && onlineGameService.isConnected) {
+        // Fallback to basic online multiplayer mode
+        try {
+          await onlineGameService.makeMove(moveData);
+        } catch (error) {
+          console.error("Failed to make online move:", error);
+        }
+      } else if (networkService.connected && networkService.roomId) {
+        // Local multiplayer mode
         dispatch(sendMoveToServer({ row, col }));
       } else {
+        // Single player mode
         dispatch(makeMove({ row, col }));
       }
     } else {

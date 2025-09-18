@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Games collection rules
+    match /games/{gameId} {
+      // Allow read access to all authenticated users
+      allow read: if request.auth != null;
+      
+      // Allow write access only to players in the game
+      allow write: if request.auth != null 
+        && (request.auth.uid in resource.data.players.map(p => p.id) 
+            || request.auth.uid == resource.data.hostId);
+      
+      // Allow create if user is authenticated
+      allow create: if request.auth != null;
+    }
+    
+    // Moves collection rules
+    match /moves/{gameId}/moves/{moveId} {
+      // Allow read access to all authenticated users
+      allow read: if request.auth != null;
+      
+      // Allow write access only to authenticated users
+      allow write: if request.auth != null;
+    }
+    
+    // Players collection rules (if we decide to use it)
+    match /players/{playerId} {
+      // Allow read/write access only to the player themselves
+      allow read, write: if request.auth != null && request.auth.uid == playerId;
+    }
+  }
+}
+
+

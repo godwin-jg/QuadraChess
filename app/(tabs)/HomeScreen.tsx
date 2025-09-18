@@ -45,15 +45,17 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </Link>
 
-          <TouchableOpacity className="bg-blue-600 py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center">
-            <Text className="text-2xl text-center mb-1">🌍</Text>
-            <Text className="text-white text-lg font-bold text-center mb-1">
-              Online Multiplayer
-            </Text>
-            <Text className="text-blue-100 text-xs text-center">
-              Coming Soon
-            </Text>
-          </TouchableOpacity>
+          <Link href="/(tabs)/OnlineLobbyScreen" asChild>
+            <TouchableOpacity className="bg-blue-600 py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center">
+              <Text className="text-2xl text-center mb-1">🌍</Text>
+              <Text className="text-white text-lg font-bold text-center mb-1">
+                Online Multiplayer
+              </Text>
+              <Text className="text-blue-100 text-xs text-center">
+                Play online
+              </Text>
+            </TouchableOpacity>
+          </Link>
         </View>
 
         {/* Features Section */}

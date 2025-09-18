@@ -11,8 +11,10 @@ import { useEffect } from "react";
 import { Provider } from "react-redux";
 import { store } from "../state";
 import "../global.css";
-
 import { useColorScheme } from "@/components/useColorScheme";
+
+// Initialize Firebase with a small delay to ensure proper initialization
+import "../services/firebaseInit";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -40,7 +42,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
-      SplashScreen.hideAsync();
+      // Add a small delay to ensure Firebase is fully initialized
+      setTimeout(() => {
+        SplashScreen.hideAsync();
+      }, 1000);
     }
   }, [loaded]);
 

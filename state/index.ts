@@ -20,6 +20,7 @@ export {
   setPlayers,
   setIsHost,
   setCanStartGame,
+  baseInitialState,
 } from "./gameSlice";
 
 // Re-export the store

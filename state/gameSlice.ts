@@ -39,7 +39,7 @@ const createStateSnapshot = (state: GameState): GameState => {
   };
 };
 
-const baseInitialState: GameState = {
+export const baseInitialState: GameState = {
   boardState: initialBoardState,
   currentPlayerTurn: "r", // Red starts first
   gameStatus: "active",

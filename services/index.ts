@@ -1,5 +1,4 @@
 // Firebase services exports
-export { testFirebaseConnection } from "./firebaseTest";
 
 // Network services exports
 export { default as networkConfigService } from "./networkConfigService";

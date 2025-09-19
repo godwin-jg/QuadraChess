@@ -1,4 +1,4 @@
-import { Position } from "../types/index";
+import { Position } from "../types";
 
 // Helper function to check if a position is within board bounds
 export const isWithinBounds = (row: number, col: number): boolean => {
@@ -41,8 +41,9 @@ export const isEnemy = (
     !boardState[row] ||
     !boardState[row][col] ||
     boardState[row][col] === ""
-  )
+  ) {
     return false;
+  }
   const piece = boardState[row][col]!;
   const targetPieceColor = piece[0];
 
@@ -67,8 +68,9 @@ export const isFriendly = (
     !boardState[row] ||
     !boardState[row][col] ||
     boardState[row][col] === ""
-  )
+  ) {
     return false;
+  }
   const piece = boardState[row][col]!;
   const targetPieceColor = piece[0];
 

@@ -9,7 +9,7 @@ import {
 } from "../../../state/gameSlice";
 import networkService from "../../services/networkService";
 import onlineGameService from "../../../services/onlineGameService";
-import { MoveInfo } from "../../../logic";
+import { MoveInfo } from "../../../types";
 import Square from "./Square";
 import { useLocalSearchParams } from "expo-router";
 

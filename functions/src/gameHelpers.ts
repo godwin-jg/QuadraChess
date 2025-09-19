@@ -1,4 +1,4 @@
-import { isKingInCheck } from "../functions/src/logic/gameLogic";
+import { isKingInCheck } from "./logic/gameLogic";
 import { turnOrder } from "./types";
 
 // Helper function to update check status for all players
@@ -30,30 +30,30 @@ export const getRookIdentifier = (
   col: number
 ): string | null => {
   switch (playerColor) {
-    case "r": // Red - bottom row
-      if (row === 13) {
-        if (col === 3) return "rR1"; // Left rook
-        if (col === 10) return "rR2"; // Right rook
-      }
-      break;
-    case "b": // Blue - left column
-      if (col === 0) {
-        if (row === 3) return "bR1"; // Top rook
-        if (row === 10) return "bR2"; // Bottom rook
-      }
-      break;
-    case "y": // Yellow - top row
-      if (row === 0) {
-        if (col === 3) return "yR1"; // Left rook
-        if (col === 10) return "yR2"; // Right rook
-      }
-      break;
-    case "g": // Green - right column
-      if (col === 13) {
-        if (row === 3) return "gR1"; // Top rook
-        if (row === 10) return "gR2"; // Bottom rook
-      }
-      break;
+  case "r": // Red - bottom row
+    if (row === 13) {
+      if (col === 3) return "rR1"; // Left rook
+      if (col === 10) return "rR2"; // Right rook
+    }
+    break;
+  case "b": // Blue - left column
+    if (col === 0) {
+      if (row === 3) return "bR1"; // Top rook
+      if (row === 10) return "bR2"; // Bottom rook
+    }
+    break;
+  case "y": // Yellow - top row
+    if (row === 0) {
+      if (col === 3) return "yR1"; // Left rook
+      if (col === 10) return "yR2"; // Right rook
+    }
+    break;
+  case "g": // Green - right column
+    if (col === 13) {
+      if (row === 3) return "gR1"; // Top rook
+      if (row === 10) return "gR2"; // Bottom rook
+    }
+    break;
   }
   return null;
 };
@@ -67,7 +67,6 @@ export const isCastlingMove = (
   targetCol: number
 ): boolean => {
   const pieceType = pieceCode[1];
-  const pieceColor = pieceCode[0];
 
   if (pieceType !== "K") return false;
 

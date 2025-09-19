@@ -3,15 +3,22 @@ import { View, Text, TouchableOpacity } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../../state";
 import { resignGame } from "../../../state/gameSlice";
+import onlineGameService from "../../../services/onlineGameService";
 import ResignConfirmationModal from "./ResignConfirmationModal";
+import { useLocalSearchParams } from "expo-router";
 
 export default function GameMenu() {
   const dispatch = useDispatch();
   const [showResignModal, setShowResignModal] = useState(false);
+  const { gameId, mode } = useLocalSearchParams<{
+    gameId?: string;
+    mode?: string;
+  }>();
   const { currentPlayerTurn, gameStatus, history, historyIndex } = useSelector(
     (state: RootState) => state.game
   );
 
+  const isOnlineMode = mode === "online" && !!gameId;
   const isViewingHistory = historyIndex < history.length - 1;
   const canResign =
     !isViewingHistory && gameStatus === "active" && currentPlayerTurn;
@@ -35,9 +42,20 @@ export default function GameMenu() {
     setShowResignModal(true);
   };
 
-  const handleConfirmResign = () => {
-    dispatch(resignGame());
-    setShowResignModal(false);
+  const handleConfirmResign = async () => {
+    try {
+      if (isOnlineMode) {
+        // Online multiplayer - call online service
+        await onlineGameService.resignGame();
+      } else {
+        // Local multiplayer or single player - use Redux action
+        dispatch(resignGame());
+      }
+      setShowResignModal(false);
+    } catch (error) {
+      console.error("Error resigning from game:", error);
+      // You might want to show an error message to the user here
+    }
   };
 
   const handleCancelResign = () => {

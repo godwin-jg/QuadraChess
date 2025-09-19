@@ -58,54 +58,8 @@ class RealtimeDatabaseService {
     }
   }
 
-  async signOut(): Promise<void> {
-    try {
-      await auth().signOut();
-      this.currentUser = null;
-      console.log("Successfully signed out");
-    } catch (error) {
-      console.error("Error signing out:", error);
-      // Clear current user even if Firebase signOut fails
-      this.currentUser = null;
-      console.log("Cleared local user state");
-    }
-  }
-
   getCurrentUser() {
     return this.currentUser || auth().currentUser;
-  }
-
-  // SECURE: Game creation request - client only sends intent, server creates state
-  async createGameRequest(hostName: string): Promise<string> {
-    try {
-      const user = this.getCurrentUser();
-      if (!user) throw new Error("User not authenticated");
-
-      console.log("Sending secure game creation request to server");
-
-      // Create game creation request
-      const gameCreationRequest = {
-        hostId: user.uid,
-        hostName: hostName,
-        timestamp: Date.now(),
-        status: "pending",
-      };
-
-      // Send request to server for processing
-      const requestRef = database().ref("game-creation-requests").push();
-      const requestId = requestRef.key!;
-
-      await requestRef.set(gameCreationRequest);
-
-      console.log("Game creation request sent:", requestId);
-
-      // Return the request ID - the actual game will be created by server
-      // Client should listen for the game to appear in available games
-      return requestId;
-    } catch (error) {
-      console.error("Error sending game creation request:", error);
-      throw error;
-    }
   }
 
   // NEW: Call Cloud Function to create game (server-authoritative)
@@ -129,159 +83,6 @@ class RealtimeDatabaseService {
       return gameId;
     } catch (error) {
       console.error("Error creating game via Cloud Function:", error);
-      throw error;
-    }
-  }
-
-  // SERVER-ONLY: Create authoritative initial game state
-  // This function should only be called by Firebase Cloud Functions
-  async createAuthoritativeGame(
-    hostId: string,
-    hostName: string
-  ): Promise<string> {
-    try {
-      console.log("Creating authoritative game state on server");
-
-      const gameRef = database().ref("games").push();
-      const gameId = gameRef.key!;
-
-      // Create secure, authoritative initial game state
-      const initialGameState = {
-        boardState: [
-          // Row 0-1: Yellow pieces
-          [
-            "",
-            "",
-            "",
-            "yR",
-            "yN",
-            "yB",
-            "yQ",
-            "yK",
-            "yB",
-            "yN",
-            "yR",
-            "",
-            "",
-            "",
-          ],
-          [
-            "",
-            "",
-            "",
-            "yP",
-            "yP",
-            "yP",
-            "yP",
-            "yP",
-            "yP",
-            "yP",
-            "yP",
-            "",
-            "",
-            "",
-          ],
-          // Row 2-11: Empty board
-          ...Array(10).fill(Array(14).fill("")),
-          // Row 12-13: Red pieces
-          [
-            "",
-            "",
-            "",
-            "rP",
-            "rP",
-            "rP",
-            "rP",
-            "rP",
-            "rP",
-            "rP",
-            "rP",
-            "",
-            "",
-            "",
-          ],
-          [
-            "",
-            "",
-            "",
-            "rR",
-            "rN",
-            "rB",
-            "rQ",
-            "rK",
-            "rB",
-            "rN",
-            "rR",
-            "",
-            "",
-            "",
-          ],
-        ],
-        currentPlayerTurn: "r", // Red starts first
-        gameStatus: "waiting" as const,
-        selectedPiece: null,
-        validMoves: [],
-        capturedPieces: { r: [], b: [], y: [], g: [] },
-        checkStatus: { r: false, b: false, y: false, g: false },
-        winner: null,
-        eliminatedPlayers: [],
-        justEliminated: null,
-        scores: { r: 0, b: 0, y: 0, g: 0 },
-        promotionState: { isAwaiting: false, position: null, color: null },
-        hasMoved: {
-          rK: false,
-          rR1: false,
-          rR2: false,
-          bK: false,
-          bR1: false,
-          bR2: false,
-          yK: false,
-          yR1: false,
-          yR2: false,
-          gK: false,
-          gR1: false,
-          gR2: false,
-        },
-        enPassantTargets: [],
-        gameOverState: {
-          isGameOver: false,
-          status: null,
-          eliminatedPlayer: null,
-        },
-        history: [],
-        historyIndex: 0,
-        players: [],
-        isHost: true,
-        canStartGame: false,
-      };
-
-      const hostPlayer: Player = {
-        id: hostId,
-        name: hostName,
-        color: "r", // Red starts first in 4-player chess
-        isHost: true,
-        isOnline: true,
-      };
-
-      const gameData: RealtimeGame = {
-        id: gameId,
-        hostId: hostId,
-        hostName,
-        players: { [hostId]: hostPlayer },
-        gameState: initialGameState,
-        status: "waiting",
-        createdAt: Date.now(),
-        maxPlayers: 4,
-        currentPlayerTurn: "r",
-        winner: null,
-        lastMove: null,
-      };
-
-      await gameRef.set(gameData);
-      console.log("Authoritative game created successfully:", gameId);
-      return gameId;
-    } catch (error) {
-      console.error("Error creating authoritative game:", error);
       throw error;
     }
   }
@@ -474,7 +275,7 @@ class RealtimeDatabaseService {
       .orderByChild("status")
       .equalTo("waiting");
 
-    return gamesRef.on("value", (snapshot) => {
+    const listener = gamesRef.on("value", (snapshot) => {
       const games: RealtimeGame[] = [];
       if (snapshot && snapshot.exists()) {
         snapshot.forEach((childSnapshot) => {
@@ -483,10 +284,15 @@ class RealtimeDatabaseService {
             ...childSnapshot.val(),
           } as RealtimeGame;
           games.push(gameData);
+          return true; // Continue iteration
         });
       }
       onUpdate(games);
     });
+
+    return () => {
+      gamesRef.off("value", listener);
+    };
   }
 
   // Move management - CLIENT ONLY SENDS MOVE REQUESTS
@@ -523,21 +329,31 @@ class RealtimeDatabaseService {
     }
   }
 
+  // Resign game - calls Cloud Function
+  async resignGame(gameId: string): Promise<void> {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
+
+      console.log("Calling resign Cloud Function for game:", gameId);
+
+      // Call the Cloud Function directly
+      const functions = require("@react-native-firebase/functions").default;
+      const resignGameFunction = functions().httpsCallable("resignGame");
+
+      const result = await resignGameFunction({
+        gameId: gameId,
+      });
+
+      console.log("Resign request processed:", result.data);
+    } catch (error) {
+      console.error("Error calling resign Cloud Function:", error);
+      throw error;
+    }
+  }
+
   // CRITICAL: This function is DANGEROUS and causes race conditions
   // Clients should NEVER update the authoritative game state
-  // Only server-side functions (Firebase Cloud Functions) should update game state
-  async updateGameState(gameId: string, gameState: GameState): Promise<void> {
-    console.error(
-      "CRITICAL ERROR: Clients should never update game state directly!"
-    );
-    console.error("This causes race conditions and desynchronization!");
-    console.error(
-      "Game state updates must be handled by server-side functions only."
-    );
-    throw new Error(
-      "Client-side game state updates are not allowed. Use server-side functions instead."
-    );
-  }
 
   // CRITICAL: Individual move subscriptions cause desynchronization
   // Only subscribe to the complete game state to prevent desync
@@ -577,39 +393,26 @@ class RealtimeDatabaseService {
     }
   }
 
-  // Cleanup
-  // Clean up abandoned games (games with no active players for 30 minutes)
-  async cleanupAbandonedGames(): Promise<void> {
+  async runManualCleanup(): Promise<{ cleaned: number; resigned: number }> {
     try {
-      console.log("Cleaning up abandoned games...");
-      const gamesRef = database().ref("games");
-      const snapshot = await gamesRef.once("value");
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
 
-      if (!snapshot.exists()) return;
+      console.log("Calling manual cleanup Cloud Function");
 
-      const now = Date.now();
-      const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+      const functions = require("@react-native-firebase/functions").default;
+      const manualCleanupFunction = functions().httpsCallable("manualCleanup");
 
-      const cleanupPromises: Promise<void>[] = [];
+      const result = await manualCleanupFunction({});
 
-      snapshot.forEach((gameSnapshot) => {
-        const gameData = gameSnapshot.val() as RealtimeGame;
-        const lastActivity = gameData.lastActivity || gameData.createdAt;
-
-        // If game has been inactive for 30 minutes, clean it up
-        if (now - lastActivity > thirtyMinutes) {
-          console.log("Cleaning up abandoned game:", gameSnapshot.key);
-          const gameRef = database().ref(`games/${gameSnapshot.key}`);
-          const movesRef = database().ref(`moves/${gameSnapshot.key}`);
-
-          cleanupPromises.push(gameRef.remove(), movesRef.remove());
-        }
-      });
-
-      await Promise.all(cleanupPromises);
-      console.log("Abandoned games cleanup completed");
+      console.log("Manual cleanup completed:", result.data);
+      return {
+        cleaned: result.data.cleaned || 0,
+        resigned: result.data.resigned || 0,
+      };
     } catch (error) {
-      console.error("Error cleaning up abandoned games:", error);
+      console.error("Error calling manual cleanup Cloud Function:", error);
+      throw error;
     }
   }
 

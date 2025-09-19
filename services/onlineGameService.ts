@@ -10,8 +10,11 @@ import {
   setGameState,
 } from "../state/gameSlice";
 import { store } from "../state/store";
-import { getValidMoves, isKingInCheck, hasAnyLegalMoves } from "../logic";
-import { updateAllCheckStatus } from "../state/gameHelpers";
+import {
+  getValidMoves,
+  isKingInCheck,
+  hasAnyLegalMoves,
+} from "../functions/src/logic/gameLogic";
 import { initialBoardState } from "../state/boardState";
 
 export interface OnlineGameService {
@@ -26,6 +29,7 @@ export interface OnlineGameService {
     pieceCode: string;
     playerColor: string;
   }) => Promise<void>;
+  resignGame: () => Promise<void>;
   onGameUpdate: (callback: (game: RealtimeGame | null) => void) => () => void;
   onMoveUpdate: (callback: (move: RealtimeMove) => void) => () => void;
   updatePlayerPresence: (isOnline: boolean) => Promise<void>;
@@ -164,6 +168,28 @@ class OnlineGameServiceImpl implements OnlineGameService {
       console.log("Move sent to server successfully");
     } catch (error) {
       console.error("Error sending move to server:", error);
+      throw error;
+    }
+  }
+
+  async resignGame(): Promise<void> {
+    if (!this.currentGameId || !this.isConnected) {
+      throw new Error("Not connected to a game");
+    }
+
+    if (!this.currentPlayer) {
+      throw new Error("No current player found");
+    }
+
+    try {
+      console.log("Sending resign request to server");
+
+      // Call the Cloud Function to resign
+      await realtimeDatabaseService.resignGame(this.currentGameId);
+
+      console.log("Resign request sent to server successfully");
+    } catch (error) {
+      console.error("Error sending resign request to server:", error);
       throw error;
     }
   }
@@ -328,10 +354,10 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   private setupPresenceTracking(): void {
-    // Update presence every 30 seconds
+    // Update presence every 10 seconds for better disconnect detection
     this.presenceInterval = setInterval(() => {
       this.updatePlayerPresence(true);
-    }, 30000);
+    }, 10000);
   }
 
   private validateMove(
@@ -394,25 +420,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
   // CRITICAL: Clients should NEVER calculate game state changes
   // This function is DANGEROUS and causes race conditions
-  // Game state calculation must happen server-side only
-  private applyMoveToState(
-    gameState: GameState,
-    moveData: {
-      from: { row: number; col: number };
-      to: { row: number; col: number };
-      pieceCode: string;
-      playerColor: string;
-    }
-  ): GameState {
-    console.error(
-      "CRITICAL ERROR: Clients should never calculate game state changes!"
-    );
-    console.error("This causes race conditions and desynchronization!");
-    console.error("Game state calculation must happen server-side only.");
-    throw new Error(
-      "Client-side game state calculation is not allowed. Use server-side functions instead."
-    );
-  }
 }
 
 export default new OnlineGameServiceImpl();

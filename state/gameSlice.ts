@@ -3,8 +3,8 @@ import {
   getValidMoves,
   isKingInCheck,
   hasAnyLegalMoves,
-  MoveInfo,
-} from "../logic";
+} from "../functions/src/logic/gameLogic";
+import { MoveInfo } from "../types";
 import { GameState, Position, turnOrder } from "./types";
 import { initialBoardState } from "./boardState";
 import {

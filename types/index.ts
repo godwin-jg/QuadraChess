@@ -8,7 +8,9 @@ export interface Position {
 export interface MoveInfo {
   row: number;
   col: number;
-  isCapture: boolean;
+  isCapture?: boolean;
   isPromotion?: boolean;
   isEnPassant?: boolean;
+  isCastling?: boolean;
+  promotionPiece?: string;
 }

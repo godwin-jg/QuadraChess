@@ -6,254 +6,22 @@
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onValueCreated } from "firebase-functions/v2/database";
-import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
+
+// Import game logic functions
+import {
+  getValidMoves,
+  isKingInCheck,
+  hasAnyLegalMoves,
+} from "./logic/gameLogic";
+import { updateAllCheckStatus } from "./gameHelpers";
 
 // Initialize Firebase Admin
 admin.initializeApp();
 const db = admin.database();
 
-// Complete initial board state for 4-player chess - matches local multiplayer exactly
-const initialBoardState = [
-  // Row 0: Yellow pieces (top) - King and Queen in correct positions
-  [
-    null,
-    null,
-    null,
-    "yR",
-    "yN",
-    "yB",
-    "yK",
-    "yQ",
-    "yB",
-    "yN",
-    "yR",
-    null,
-    null,
-    null,
-  ],
-  // Row 1: Yellow pawns
-  [
-    null,
-    null,
-    null,
-    "yP",
-    "yP",
-    "yP",
-    "yP",
-    "yP",
-    "yP",
-    "yP",
-    "yP",
-    null,
-    null,
-    null,
-  ],
-  // Row 2: Empty buffer
-  [
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-  ],
-  // Row 3: Blue pieces (left side) - Rooks and pawns
-  [
-    "bR",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gR",
-  ],
-  // Row 4: Blue pieces (left side) - Knights and pawns
-  [
-    "bN",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gN",
-  ],
-  // Row 5: Blue pieces (left side) - Bishops and pawns
-  [
-    "bB",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gB",
-  ],
-  // Row 6: Blue pieces (left side) - Queen and pawns, Green pieces (right side) - King and pawns
-  [
-    "bQ",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gK",
-  ],
-  // Row 7: Blue pieces (left side) - King and pawns, Green pieces (right side) - Queen and pawns
-  [
-    "bK",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gQ",
-  ],
-  // Row 8: Blue pieces (left side) - Bishops and pawns
-  [
-    "bB",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gB",
-  ],
-  // Row 9: Blue pieces (left side) - Knights and pawns
-  [
-    "bN",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gN",
-  ],
-  // Row 10: Blue pieces (left side) - Rooks and pawns
-  [
-    "bR",
-    "bP",
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    "gP",
-    "gR",
-  ],
-  // Row 11: Empty buffer
-  [
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-  ],
-  // Row 12: Red pieces (bottom) - Pawns
-  [
-    null,
-    null,
-    null,
-    "rP",
-    "rP",
-    "rP",
-    "rP",
-    "rP",
-    "rP",
-    "rP",
-    "rP",
-    null,
-    null,
-    null,
-  ],
-  // Row 13: Red pieces (bottom) - King and Queen in correct positions
-  [
-    null,
-    null,
-    null,
-    "rR",
-    "rN",
-    "rB",
-    "rQ",
-    "rK",
-    "rB",
-    "rN",
-    "rR",
-    null,
-    null,
-    null,
-  ],
-];
+// Import shared board state
+import { initialBoardState } from "../../state/boardState";
 
 /**
  * Function 1: Securely Create Games
@@ -418,6 +186,124 @@ export const leaveGame = onCall(async (request) => {
   }
 });
 
+export const resignGame = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError(
+      "unauthenticated",
+      "You must be logged in to resign from a game."
+    );
+  }
+
+  const { gameId } = request.data;
+  if (!gameId) {
+    throw new HttpsError("invalid-argument", "Game ID is required");
+  }
+
+  try {
+    const uid = request.auth.uid;
+    const gameRef = db.ref(`games/${gameId}`);
+
+    await gameRef.transaction((gameData) => {
+      if (gameData === null) {
+        console.warn(`Game ${gameId} not found`);
+        return null;
+      }
+
+      const player = gameData.players[uid];
+      if (!player) {
+        console.warn(`Player ${uid} not found in game ${gameId}`);
+        return;
+      }
+
+      // Don't allow resigning if game is already over
+      if (
+        gameData.gameState.gameStatus === "finished" ||
+        gameData.gameState.gameStatus === "checkmate" ||
+        gameData.gameState.gameStatus === "stalemate"
+      ) {
+        console.warn(`Player ${uid} cannot resign - game is already over`);
+        return;
+      }
+
+      // Add player to eliminated players
+      if (!gameData.gameState.eliminatedPlayers.includes(player.color)) {
+        gameData.gameState.eliminatedPlayers.push(player.color);
+        gameData.gameState.justEliminated = player.color;
+      }
+
+      // Remove the player from the game
+      delete gameData.players[uid];
+
+      // If no players left, delete the game
+      if (!gameData.players || Object.keys(gameData.players).length === 0) {
+        console.log(`Game ${gameId} is now empty after resignation, deleting`);
+        return null; // This will delete the game
+      }
+
+      // Update check status for all players
+      gameData.gameState.checkStatus = {
+        r: false,
+        b: false,
+        y: false,
+        g: false,
+      };
+
+      // Check if the entire game is over
+      if (gameData.gameState.eliminatedPlayers.length === 3) {
+        // Find the one player who is NOT in the eliminatedPlayers array
+        const turnOrder = ["r", "b", "y", "g"];
+        const winner = turnOrder.find(
+          (color) => !gameData.gameState.eliminatedPlayers.includes(color)
+        );
+
+        if (winner) {
+          gameData.gameState.winner = winner;
+          gameData.gameState.gameStatus = "finished";
+          gameData.gameState.gameOverState = {
+            isGameOver: true,
+            status: "finished",
+            eliminatedPlayer: null,
+          };
+        }
+      } else {
+        // Advance to next active player
+        const turnOrder = ["r", "b", "y", "g"];
+        const currentIndex = turnOrder.indexOf(
+          gameData.gameState.currentPlayerTurn
+        );
+        const nextIndex = (currentIndex + 1) % 4;
+        const nextPlayerInSequence = turnOrder[nextIndex];
+
+        // Find the next active player (skip eliminated players)
+        let nextActivePlayer = nextPlayerInSequence;
+        while (
+          gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)
+        ) {
+          const activeIndex = turnOrder.indexOf(nextActivePlayer);
+          const nextActiveIndex = (activeIndex + 1) % 4;
+          nextActivePlayer = turnOrder[nextActiveIndex];
+        }
+
+        gameData.gameState.currentPlayerTurn = nextActivePlayer;
+      }
+
+      gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
+      gameData.lastActivity = Date.now();
+
+      console.log(
+        `Player ${uid} (${player.color}) resigned from game ${gameId}`
+      );
+      return gameData;
+    });
+
+    console.log(`Player ${uid} successfully resigned from game ${gameId}`);
+    return { success: true, message: "Successfully resigned from the game" };
+  } catch (error) {
+    console.error("Error resigning from game:", error);
+    throw new HttpsError("internal", "Failed to resign from game");
+  }
+});
+
 export const makeMove = onValueCreated(
   "/move-requests/{gameId}/{moveId}",
   async (event) => {
@@ -452,19 +338,162 @@ export const makeMove = onValueCreated(
           return;
         }
 
-        const newBoardState = [...gameData.gameState.boardState];
+        // Convert flattened board state back to normal format for game logic
+        const boardState = gameData.gameState.boardState.map((row: any) =>
+          row.map((cell: string | null) => (cell === "" ? null : cell))
+        );
+
+        // Validate the move using game logic
+        const validMoves = getValidMoves(
+          moveData.pieceCode,
+          moveData.from,
+          boardState,
+          gameData.gameState.eliminatedPlayers || [],
+          gameData.gameState.hasMoved || {},
+          gameData.gameState.enPassantTargets || []
+        );
+
+        const isValidMove = validMoves.some(
+          (move) => move.row === moveData.to.row && move.col === moveData.to.col
+        );
+
+        if (!isValidMove) {
+          console.warn(`Invalid move from ${uid}:`, moveData);
+          return;
+        }
+
+        // Apply the move
+        const newBoardState = [...boardState];
         const piece = newBoardState[moveData.from.row][moveData.from.col];
-        newBoardState[moveData.from.row][moveData.from.col] = ""; // Use empty string for flattened state
+        newBoardState[moveData.from.row][moveData.from.col] = null;
         newBoardState[moveData.to.row][moveData.to.col] = piece;
 
-        gameData.gameState.boardState = newBoardState;
-
-        const turnOrder = ["r", "b", "y", "g"];
-        const currentIndex = turnOrder.indexOf(
-          gameData.gameState.currentPlayerTurn
+        // Convert back to flattened format for Firebase
+        const flattenedBoardState = newBoardState.map((row) =>
+          row.map((cell: string | null) => (cell === null ? "" : cell))
         );
-        const nextIndex = (currentIndex + 1) % 4;
-        gameData.gameState.currentPlayerTurn = turnOrder[nextIndex];
+
+        gameData.gameState.boardState = flattenedBoardState;
+
+        // Update check status for all players
+        gameData.gameState.checkStatus = updateAllCheckStatus(
+          newBoardState,
+          gameData.gameState.eliminatedPlayers || [],
+          gameData.gameState.hasMoved || {}
+        );
+
+        // Check if any opponent is in checkmate/stalemate after this move
+        const currentPlayer = gameData.gameState.currentPlayerTurn;
+        const turnOrder = ["r", "b", "y", "g"];
+        const otherPlayers = turnOrder.filter(
+          (color) =>
+            color !== currentPlayer &&
+            !(gameData.gameState.eliminatedPlayers || []).includes(color)
+        );
+
+        // Check each opponent for checkmate/stalemate
+        for (const opponent of otherPlayers) {
+          const opponentHasMoves = hasAnyLegalMoves(
+            opponent,
+            newBoardState,
+            gameData.gameState.eliminatedPlayers || [],
+            gameData.gameState.hasMoved || {},
+            gameData.gameState.enPassantTargets || []
+          );
+
+          if (!opponentHasMoves) {
+            // This opponent has no legal moves
+            const isInCheck = isKingInCheck(
+              opponent,
+              newBoardState,
+              gameData.gameState.eliminatedPlayers || [],
+              gameData.gameState.hasMoved || {}
+            );
+
+            if (isInCheck) {
+              // Checkmate - eliminate the player
+              gameData.gameState.gameStatus = "checkmate";
+              if (!gameData.gameState.eliminatedPlayers) {
+                gameData.gameState.eliminatedPlayers = [];
+              }
+              gameData.gameState.eliminatedPlayers.push(opponent);
+              gameData.gameState.justEliminated = opponent;
+              gameData.gameState.scores = gameData.gameState.scores || {
+                r: 0,
+                b: 0,
+                y: 0,
+                g: 0,
+              };
+              gameData.gameState.scores[
+                currentPlayer as keyof typeof gameData.gameState.scores
+              ] += 10;
+
+              // Set game over state for checkmate
+              gameData.gameState.gameOverState = {
+                isGameOver: true,
+                status: "checkmate",
+                eliminatedPlayer: opponent,
+              };
+            } else {
+              // Stalemate - eliminate the player
+              gameData.gameState.gameStatus = "stalemate";
+              if (!gameData.gameState.eliminatedPlayers) {
+                gameData.gameState.eliminatedPlayers = [];
+              }
+              gameData.gameState.eliminatedPlayers.push(opponent);
+              gameData.gameState.justEliminated = opponent;
+
+              // Set game over state for stalemate
+              gameData.gameState.gameOverState = {
+                isGameOver: true,
+                status: "stalemate",
+                eliminatedPlayer: opponent,
+              };
+            }
+            break; // Exit the loop after eliminating one player
+          }
+        }
+
+        // Check if the entire game is over
+        if ((gameData.gameState.eliminatedPlayers || []).length === 3) {
+          // Find the one player who is NOT in the eliminatedPlayers array
+          const winner = turnOrder.find(
+            (color) =>
+              !(gameData.gameState.eliminatedPlayers || []).includes(color)
+          );
+
+          if (winner) {
+            gameData.gameState.winner = winner;
+            gameData.gameState.gameStatus = "finished";
+            gameData.gameState.gameOverState = {
+              isGameOver: true,
+              status: "finished",
+              eliminatedPlayer: null,
+            };
+          }
+
+          // Schedule game for deletion after 5 minutes (to allow players to see results)
+          gameData.gameState.deleteAt = Date.now() + 5 * 60 * 1000;
+        } else {
+          // Advance to next active player
+          const currentIndex = turnOrder.indexOf(currentPlayer);
+          const nextIndex = (currentIndex + 1) % 4;
+          const nextPlayerInSequence = turnOrder[nextIndex];
+
+          // Find the next active player (skip eliminated players)
+          let nextActivePlayer = nextPlayerInSequence;
+          while (
+            (gameData.gameState.eliminatedPlayers || []).includes(
+              nextActivePlayer
+            )
+          ) {
+            const activeIndex = turnOrder.indexOf(nextActivePlayer);
+            const nextActiveIndex = (activeIndex + 1) % 4;
+            nextActivePlayer = turnOrder[nextActiveIndex];
+          }
+
+          gameData.gameState.currentPlayerTurn = nextActivePlayer;
+        }
 
         gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
         gameData.lastMove = {
@@ -490,170 +519,164 @@ export const makeMove = onValueCreated(
 );
 
 /**
- * Function 3: Simple test function to verify Cloud Functions are working
- * This is free-tier friendly and helps verify deployment
+ * Function 5: Manual cleanup function (no scheduled runs)
+ * This function can be called manually to clean up games
+ * Much more cost-effective than scheduled functions
  */
-export const testFunction = onCall(async (request) => {
-  return {
-    message: "Firebase Cloud Functions are working!",
-    timestamp: new Date().toISOString(),
-    userId: request.auth?.uid || "anonymous",
-    version: "1.0.0",
-  };
-});
-
-/**
- * Function 3: Fix Board State for Existing Games
- * This function updates the board state of an existing game to the correct layout
- */
-export const fixBoardState = onCall(async (request) => {
+export const manualCleanup = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError(
       "unauthenticated",
-      "You must be logged in to fix board state."
+      "You must be logged in to run cleanup."
     );
   }
-
-  const { gameId } = request.data;
-  if (!gameId) {
-    throw new HttpsError("invalid-argument", "Game ID is required");
-  }
-
   try {
-    const gameRef = db.ref(`games/${gameId}`);
-    const gameSnapshot = await gameRef.once("value");
-
-    if (!gameSnapshot.exists()) {
-      throw new HttpsError("not-found", "Game not found");
-    }
-
-    // const gameData = gameSnapshot.val(); // Not needed for this operation
-
-    // Update the board state to the correct layout
-    await gameRef.update({
-      "gameState/boardState": initialBoardState,
-      "gameState/history": [],
-      "gameState/historyIndex": 0,
-      "gameState/currentPlayerTurn": "r",
-      "gameState/gameStatus": "waiting",
-    });
-
-    console.log(`Board state fixed for game ${gameId}`);
-    return { success: true, message: "Board state updated successfully" };
-  } catch (error) {
-    console.error("Error fixing board state:", error);
-    throw new HttpsError("internal", "Failed to fix board state");
-  }
-});
-
-/**
- * Function 4: Clean up empty games
- * This function removes games that have no players
- */
-export const cleanupEmptyGames = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError(
-      "unauthenticated",
-      "You must be logged in to cleanup games."
-    );
-  }
-
-  try {
-    const gamesRef = db.ref("games");
-    const snapshot = await gamesRef.once("value");
-
-    if (!snapshot.exists()) {
-      return { message: "No games found", cleaned: 0 };
-    }
-
-    let cleanedCount = 0;
-    const updates: { [key: string]: null } = {};
-
-    snapshot.forEach((gameSnapshot) => {
-      const gameData = gameSnapshot.val();
-      const gameId = gameSnapshot.key;
-
-      // Check if game has no players or empty players object
-      if (!gameData.players || Object.keys(gameData.players).length === 0) {
-        console.log(`Removing empty game: ${gameId}`);
-        updates[gameId] = null;
-        cleanedCount++;
-      }
-    });
-
-    // Remove empty games in batch
-    if (cleanedCount > 0) {
-      await gamesRef.update(updates);
-      console.log(`Cleaned up ${cleanedCount} empty games`);
-    }
-
-    return {
-      message: `Cleaned up ${cleanedCount} empty games`,
-      cleaned: cleanedCount,
-    };
-  } catch (error) {
-    console.error("Error cleaning up empty games:", error);
-    throw new HttpsError("internal", "Failed to cleanup empty games");
-  }
-});
-
-/**
- * Function 5: Scheduled cleanup of abandoned games
- * This runs periodically to clean up games with no active players
- */
-export const scheduledCleanup = onSchedule("every 5 minutes", async (event) => {
-  try {
-    console.log("Running scheduled game cleanup...");
+    console.log("Running manual game cleanup...");
 
     const gamesRef = db.ref("games");
     const snapshot = await gamesRef.once("value");
 
     if (!snapshot.exists()) {
       console.log("No games found for cleanup");
-      return;
+      return { message: "No games found", cleaned: 0, resigned: 0 };
     }
 
     const now = Date.now();
-    const fiveMinutesAgo = now - 5 * 60 * 1000; // 5 minutes ago
+    const twoMinutesAgo = now - 2 * 60 * 1000; // 2 minutes ago
     let cleanedCount = 0;
-    const updates: { [key: string]: null } = {};
+    let resignedCount = 0;
+    const updates: { [key: string]: any } = {};
 
     snapshot.forEach((gameSnapshot) => {
       const gameData = gameSnapshot.val();
       const gameId = gameSnapshot.key;
 
-      // Check if game has no players
-      if (!gameData.players || Object.keys(gameData.players).length === 0) {
-        console.log(`Scheduled cleanup: Removing empty game ${gameId}`);
+      // Clean up finished games that are past their delete time
+      if (gameData.gameState?.deleteAt && gameData.gameState.deleteAt < now) {
+        console.log(`Deleting finished game ${gameId} (past delete time)`);
         updates[gameId] = null;
         cleanedCount++;
         return;
       }
 
-      // Check if all players have been offline for more than 5 minutes
+      // Skip games with no players (leaveGame handles these)
+      if (!gameData.players || Object.keys(gameData.players).length === 0) {
+        return;
+      }
+
+      // Check for disconnected players and auto-resign them
       const players = gameData.players;
-      const allPlayersOffline = Object.values(players).every((player: any) => {
-        return (
+      const disconnectedPlayers: string[] = [];
+
+      Object.entries(players).forEach(([playerId, player]: [string, any]) => {
+        if (
           !player.isOnline ||
-          (player.lastSeen && player.lastSeen < fiveMinutesAgo)
-        );
+          (player.lastSeen && player.lastSeen < twoMinutesAgo)
+        ) {
+          disconnectedPlayers.push(playerId);
+        }
       });
 
-      if (allPlayersOffline) {
-        console.log(`Scheduled cleanup: Removing abandoned game ${gameId}`);
-        updates[gameId] = null;
-        cleanedCount++;
+      // Auto-resign disconnected players
+      if (disconnectedPlayers.length > 0) {
+        console.log(
+          `Auto-resigning disconnected players in game ${gameId}:`,
+          disconnectedPlayers
+        );
+
+        const updatedGameData = { ...gameData };
+
+        // Remove disconnected players and add them to eliminated players
+        disconnectedPlayers.forEach((playerId) => {
+          const player = players[playerId];
+          if (
+            player &&
+            !updatedGameData.gameState.eliminatedPlayers.includes(player.color)
+          ) {
+            updatedGameData.gameState.eliminatedPlayers.push(player.color);
+            updatedGameData.gameState.justEliminated = player.color;
+          }
+          delete updatedGameData.players[playerId];
+        });
+
+        // If no players left after disconnections, delete the game
+        if (
+          !updatedGameData.players ||
+          Object.keys(updatedGameData.players).length === 0
+        ) {
+          console.log(
+            `Game ${gameId} is now empty after disconnections, deleting`
+          );
+          updates[gameId] = null;
+          cleanedCount++;
+          return;
+        }
+
+        // Check if game is over after auto-resignations
+        if (updatedGameData.gameState.eliminatedPlayers.length >= 3) {
+          const turnOrder = ["r", "b", "y", "g"];
+          const winner = turnOrder.find(
+            (color) =>
+              !updatedGameData.gameState.eliminatedPlayers.includes(color)
+          );
+
+          if (winner) {
+            updatedGameData.gameState.winner = winner;
+            updatedGameData.gameState.gameStatus = "finished";
+            updatedGameData.gameState.gameOverState = {
+              isGameOver: true,
+              status: "finished",
+              eliminatedPlayer: null,
+            };
+            // Schedule for deletion in 5 minutes
+            updatedGameData.gameState.deleteAt = now + 5 * 60 * 1000;
+          }
+        } else {
+          // Advance to next active player
+          const turnOrder = ["r", "b", "y", "g"];
+          const currentIndex = turnOrder.indexOf(
+            updatedGameData.gameState.currentPlayerTurn
+          );
+          const nextIndex = (currentIndex + 1) % 4;
+          const nextPlayerInSequence = turnOrder[nextIndex];
+
+          let nextActivePlayer = nextPlayerInSequence;
+          while (
+            updatedGameData.gameState.eliminatedPlayers.includes(
+              nextActivePlayer
+            )
+          ) {
+            const activeIndex = turnOrder.indexOf(nextActivePlayer);
+            const nextActiveIndex = (activeIndex + 1) % 4;
+            nextActivePlayer = turnOrder[nextActiveIndex];
+          }
+
+          updatedGameData.gameState.currentPlayerTurn = nextActivePlayer;
+          updatedGameData.currentPlayerTurn = nextActivePlayer;
+        }
+
+        updates[gameId] = updatedGameData;
+        resignedCount += disconnectedPlayers.length;
       }
     });
 
-    // Remove abandoned games in batch
-    if (cleanedCount > 0) {
+    // Apply all updates
+    if (Object.keys(updates).length > 0) {
       await gamesRef.update(updates);
-      console.log(`Scheduled cleanup: Removed ${cleanedCount} games`);
+      console.log(
+        `Manual cleanup: Removed ${cleanedCount} games, auto-resigned ${resignedCount} players`
+      );
     } else {
-      console.log("Scheduled cleanup: No games needed cleanup");
+      console.log("Manual cleanup: No games needed cleanup");
     }
+
+    return {
+      message: "Manual cleanup completed",
+      cleaned: cleanedCount,
+      resigned: resignedCount,
+    };
   } catch (error) {
-    console.error("Error in scheduled cleanup:", error);
+    console.error("Error in manual cleanup:", error);
+    throw new HttpsError("internal", "Failed to run manual cleanup");
   }
 });

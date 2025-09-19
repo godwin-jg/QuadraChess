@@ -1,13 +1,8 @@
-import { Position } from "../types/index";
-import { MoveInfo } from "./types";
-import {
-  isWithinBounds,
-  isCornerSquare,
-  isEmpty,
-  isEnemy,
-  cloneBoardState,
-  simulateMove,
-} from "./utils";
+import { Position, MoveInfo } from "../types";
+
+// Re-export MoveInfo for client use
+export { MoveInfo };
+import { simulateMove } from "./utils";
 import {
   getPawnMoves,
   getKnightMoves,
@@ -34,8 +29,6 @@ export const isSquareUnderAttack = (
 
       // If square contains an opponent's piece
       if (piece && piece[0] !== defendingColor) {
-        const opponentPieceColor = piece[0];
-
         // Get pseudo-legal moves for this opponent piece (without castling to prevent recursion)
         const validMoves = getPseudoLegalMovesWithoutCastling(
           piece,
@@ -171,7 +164,6 @@ export const getValidMoves = (
 ): MoveInfo[] => {
   if (!pieceCode || pieceCode.length < 2) return [];
 
-  const pieceType = pieceCode[1];
   const pieceColor = pieceCode[0];
 
   // If the piece belongs to an eliminated player, it cannot generate moves
@@ -246,8 +238,6 @@ export const isKingInCheck = (
 
       // If square contains an opponent's piece
       if (piece && piece[0] !== kingColor) {
-        const opponentPieceColor = piece[0];
-
         // Get pseudo-legal moves for this opponent piece (no self-check filtering needed)
         const validMoves = getPseudoLegalMovesWithoutCastling(
           piece,

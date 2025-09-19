@@ -6,6 +6,7 @@ export interface Player {
   color: string;
   isHost: boolean;
   isOnline?: boolean;
+  lastSeen?: number;
 }
 
 export interface RoomInfo {

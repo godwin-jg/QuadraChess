@@ -16,7 +16,6 @@ import { useColorScheme } from "@/components/useColorScheme";
 // Initialize Firebase with a small delay to ensure proper initialization
 import "../services/firebaseInit";
 // Start game cleanup service
-import "../services/gameCleanupService";
 
 export {
   // Catch any errors thrown by the Layout component.

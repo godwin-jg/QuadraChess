@@ -11,7 +11,13 @@ export { Position, MoveInfo };
 export interface GameState {
   boardState: (string | null)[][];
   currentPlayerTurn: string;
-  gameStatus: "active" | "checkmate" | "stalemate" | "finished" | "promotion";
+  gameStatus:
+    | "waiting"
+    | "active"
+    | "checkmate"
+    | "stalemate"
+    | "finished"
+    | "promotion";
   selectedPiece: Position | null;
   validMoves: MoveInfo[];
   capturedPieces: { r: string[]; b: string[]; y: string[]; g: string[] };
@@ -51,6 +57,7 @@ export interface GameState {
   };
   history: GameState[];
   historyIndex: number;
+  viewingHistoryIndex: number | null; // null = viewing live, number = viewing history
   // Multiplayer state
   players: Player[];
   isHost: boolean;

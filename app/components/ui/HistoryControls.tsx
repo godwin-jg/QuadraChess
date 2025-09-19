@@ -2,30 +2,47 @@ import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../../state";
-import { stepHistory, returnToLive } from "../../../state/gameSlice";
+import {
+  stepHistory,
+  returnToLive,
+  selectIsViewingHistory,
+} from "../../../state/gameSlice";
+import { useLocalSearchParams } from "expo-router";
 
 export default function HistoryControls() {
   const dispatch = useDispatch();
-  const { history, historyIndex } = useSelector(
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const { history, viewingHistoryIndex } = useSelector(
     (state: RootState) => state.game
   );
+  const isViewingHistory = useSelector(selectIsViewingHistory);
+  const totalMoves = Math.max(0, history.length - 1); // Subtract 1 because history[0] is initial state
+  const currentMoveNumber = isViewingHistory
+    ? viewingHistoryIndex || 0
+    : totalMoves;
 
-  const isViewingHistory = historyIndex < history.length - 1;
+  // Only show history controls in local mode
+  if (mode === "online") {
+    return null;
+  }
 
   const handleStepBack = () => {
-    if (historyIndex > 0) {
+    if (viewingHistoryIndex !== null && viewingHistoryIndex > 0) {
       dispatch(stepHistory("back"));
     }
   };
 
   const handleStepForward = () => {
-    if (historyIndex < history.length - 1) {
+    if (
+      viewingHistoryIndex === null ||
+      viewingHistoryIndex < history.length - 1
+    ) {
       dispatch(stepHistory("forward"));
     }
   };
 
   const handleReturnToLive = () => {
-    if (historyIndex < history.length - 1) {
+    if (viewingHistoryIndex !== null) {
       dispatch(returnToLive());
     }
   };
@@ -59,7 +76,7 @@ export default function HistoryControls() {
       </View>
 
       <Text className="text-white text-sm mt-2 text-center">
-        Move {historyIndex + 1} of {history.length}
+        Move {currentMoveNumber} of {totalMoves}
         {isViewingHistory && (
           <Text className="text-yellow-400 font-semibold">
             {" "}

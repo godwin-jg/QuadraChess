@@ -1,8 +1,38 @@
 import { TouchableOpacity, Text } from "react-native";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import { View } from "@/components/Themed";
+import modeSwitchService from "../../services/modeSwitchService";
+import { useState } from "react";
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const handleModeSwitch = async (
+    targetMode: "online" | "local" | "solo",
+    path: string
+  ) => {
+    if (isNavigating) return;
+
+    setIsNavigating(true);
+
+    try {
+      await modeSwitchService.handleModeSwitch(
+        targetMode,
+        () => {
+          // Confirm: Navigate to the target mode
+          router.push(path);
+        },
+        () => {
+          // Cancel: Stay on current screen
+          console.log("Mode switch cancelled by user");
+        }
+      );
+    } finally {
+      setIsNavigating(false);
+    }
+  };
+
   return (
     <View className="flex-1 bg-black">
       <View className="flex-1 px-6 pt-16 pb-8 justify-between">
@@ -21,41 +51,49 @@ export default function HomeScreen() {
 
         {/* Buttons Section */}
         <View className="gap-3">
-          <Link href="/(tabs)/GameScreen" asChild>
-            <TouchableOpacity className="bg-white py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center">
-              <Text className="text-2xl text-center mb-1">🎮</Text>
-              <Text className="text-black text-lg font-bold text-center mb-1">
-                Single Player
-              </Text>
-              <Text className="text-gray-600 text-xs text-center">
-                Play against AI
-              </Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity
+            className="bg-white py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center"
+            onPress={() => handleModeSwitch("solo", "/(tabs)/GameScreen")}
+            disabled={isNavigating}
+          >
+            <Text className="text-2xl text-center mb-1">🎮</Text>
+            <Text className="text-black text-lg font-bold text-center mb-1">
+              Single Player
+            </Text>
+            <Text className="text-gray-600 text-xs text-center">
+              Play against AI
+            </Text>
+          </TouchableOpacity>
 
-          <Link href="/(tabs)/LobbyScreen" asChild>
-            <TouchableOpacity className="bg-white/20 py-3 px-5 rounded-xl border-2 border-white/30 shadow-lg active:opacity-80 items-center">
-              <Text className="text-2xl text-center mb-1">🏠</Text>
-              <Text className="text-white text-lg font-bold text-center mb-1">
-                Local Multiplayer
-              </Text>
-              <Text className="text-gray-300 text-xs text-center">
-                Play with friends
-              </Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity
+            className="bg-white/20 py-3 px-5 rounded-xl border-2 border-white/30 shadow-lg active:opacity-80 items-center"
+            onPress={() => handleModeSwitch("local", "/(tabs)/LobbyScreen")}
+            disabled={isNavigating}
+          >
+            <Text className="text-2xl text-center mb-1">🏠</Text>
+            <Text className="text-white text-lg font-bold text-center mb-1">
+              Local Multiplayer
+            </Text>
+            <Text className="text-gray-300 text-xs text-center">
+              Play with friends
+            </Text>
+          </TouchableOpacity>
 
-          <Link href="/(tabs)/OnlineLobbyScreen" asChild>
-            <TouchableOpacity className="bg-blue-600 py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center">
-              <Text className="text-2xl text-center mb-1">🌍</Text>
-              <Text className="text-white text-lg font-bold text-center mb-1">
-                Online Multiplayer
-              </Text>
-              <Text className="text-blue-100 text-xs text-center">
-                Play online
-              </Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity
+            className="bg-blue-600 py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center"
+            onPress={() =>
+              handleModeSwitch("online", "/(tabs)/OnlineLobbyScreen")
+            }
+            disabled={isNavigating}
+          >
+            <Text className="text-2xl text-center mb-1">🌍</Text>
+            <Text className="text-white text-lg font-bold text-center mb-1">
+              Online Multiplayer
+            </Text>
+            <Text className="text-blue-100 text-xs text-center">
+              Play online
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Features Section */}

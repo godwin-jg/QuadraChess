@@ -15,6 +15,7 @@ import { setPlayers, setIsHost, setCanStartGame } from "../../state";
 import realtimeDatabaseService, {
   RealtimeGame,
 } from "../../services/realtimeDatabaseService";
+import onlineGameService from "../../services/onlineGameService";
 import { generateRandomName } from "../utils/nameGenerator";
 
 const OnlineLobbyScreen: React.FC = () => {
@@ -72,7 +73,33 @@ const OnlineLobbyScreen: React.FC = () => {
     return unsubscribe;
   }, [isConnected]);
 
-  // Subscribe to current game updates
+  // Connect to onlineGameService when currentGameId changes
+  useEffect(() => {
+    if (!currentGameId) return;
+
+    const connectToGame = async () => {
+      try {
+        console.log(
+          "OnlineLobbyScreen: Connecting to game via onlineGameService:",
+          currentGameId
+        );
+        await onlineGameService.connectToGame(currentGameId);
+        console.log("OnlineLobbyScreen: Successfully connected to game");
+      } catch (error) {
+        console.error("OnlineLobbyScreen: Failed to connect to game:", error);
+        Alert.alert("Connection Error", "Failed to connect to the game");
+      }
+    };
+
+    connectToGame();
+
+    // Cleanup on unmount or game change
+    return () => {
+      onlineGameService.disconnect();
+    };
+  }, [currentGameId]);
+
+  // Subscribe to current game updates for navigation
   useEffect(() => {
     if (!currentGameId) return;
 
@@ -80,19 +107,7 @@ const OnlineLobbyScreen: React.FC = () => {
       currentGameId,
       (game) => {
         if (game) {
-          const playersArray = Object.values(game.players);
-          dispatch(setPlayers(playersArray));
-          dispatch(
-            setIsHost(
-              game.hostId === realtimeDatabaseService.getCurrentUser()?.uid
-            )
-          );
-          dispatch(
-            setCanStartGame(
-              playersArray.length >= 2 && game.status === "waiting"
-            )
-          );
-
+          // Check if game status changed to playing
           if (game.status === "playing") {
             router.push(
               `/(tabs)/GameScreen?gameId=${currentGameId}&mode=online`

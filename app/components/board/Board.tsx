@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, useWindowDimensions, Text } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../../state/store";
@@ -23,28 +23,27 @@ export default function Board() {
   const squareSize = boardSize / 14;
   const { mode } = useLocalSearchParams<{ mode?: string }>();
 
-  // Get board state and selection state from Redux store
-  const boardState = useSelector((state: RootState) => state.game.boardState);
-  const selectedPiece = useSelector(
-    (state: RootState) => state.game.selectedPiece
-  );
-  const validMoves = useSelector((state: RootState) => state.game.validMoves);
-  const checkStatus = useSelector((state: RootState) => state.game.checkStatus);
-  const eliminatedPlayers = useSelector(
-    (state: RootState) => state.game.eliminatedPlayers
-  );
-  const currentPlayerTurn = useSelector(
-    (state: RootState) => state.game.currentPlayerTurn
-  );
-  const players = useSelector((state: RootState) => state.game.players);
+  // Get the entire live game state, including the history array and index
+  const liveGame = useSelector((state: RootState) => state.game);
+  const { history, historyIndex } = liveGame;
 
-  // Debug logging
-  console.log("Board: currentPlayerTurn:", currentPlayerTurn);
-  console.log("Board: players:", players);
-  console.log(
-    "Board: onlineGameService.currentPlayer:",
-    onlineGameService.currentPlayer
-  );
+  // Create displayed game state (either live or historical)
+  const displayedGameState = useMemo(() => {
+    // If we are in "review mode" and the index is valid...
+    if (historyIndex < history.length - 1 && history[historyIndex]) {
+      return history[historyIndex]; // ...show the historical state.
+    }
+    return liveGame; // ...otherwise, show the live game state.
+  }, [liveGame, history, historyIndex]);
+
+  // Extract properties from displayed state
+  const boardState = displayedGameState.boardState;
+  const selectedPiece = displayedGameState.selectedPiece;
+  const validMoves = displayedGameState.validMoves;
+  const checkStatus = displayedGameState.checkStatus;
+  const eliminatedPlayers = displayedGameState.eliminatedPlayers;
+  const currentPlayerTurn = displayedGameState.currentPlayerTurn;
+  const players = displayedGameState.players;
 
   // Get dispatch function
   const dispatch = useDispatch();
@@ -72,12 +71,16 @@ export default function Board() {
     return eliminatedPlayers.includes(pieceColor);
   };
 
+  // Check if we're viewing history (not at the live game state)
+  const isViewingHistory = historyIndex < history.length - 1;
+
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
-    console.log("Board: Square pressed at", row, col);
-    console.log("Board: Current selectedPiece:", selectedPiece);
-    console.log("Board: Current validMoves count:", validMoves.length);
-    console.log("Board: Piece at position:", boardState[row]?.[col]);
+    // If we're viewing history, don't allow any moves
+    if (isViewingHistory) {
+      console.log("Cannot make moves while viewing history");
+      return;
+    }
 
     const isAValidMove = validMoves.some(
       (move) => move.row === row && move.col === col
@@ -87,12 +90,8 @@ export default function Board() {
     const isSelectedPiece =
       selectedPiece && selectedPiece.row === row && selectedPiece.col === col;
 
-    console.log("Board: isAValidMove:", isAValidMove);
-    console.log("Board: isSelectedPiece:", isSelectedPiece);
-
     // If pressing the same selected piece again, deselect it
     if (isSelectedPiece) {
-      console.log("Board: Deselecting piece");
       dispatch(selectPiece({ row, col })); // This will deselect since it's the same piece
       return;
     }
@@ -110,22 +109,18 @@ export default function Board() {
       };
 
       // Handle different game modes
-      console.log("Board: Attempting move in mode:", mode);
-      console.log(
-        "Board: onlineGameService.isConnected:",
-        onlineGameService.isConnected
-      );
-      console.log(
-        "Board: onlineGameService.currentGameId:",
-        onlineGameService.currentGameId
-      );
-      console.log("Board: networkService.connected:", networkService.connected);
 
       if (mode === "online") {
+        console.log(
+          "Board: Online mode - isConnected:",
+          onlineGameService.isConnected,
+          "currentGameId:",
+          onlineGameService.currentGameId
+        );
         if (onlineGameService.isConnected && onlineGameService.currentGameId) {
           // Online multiplayer mode
-          console.log("Board: Using online service for move");
           try {
+            console.log("Board: Sending move to online service:", moveData);
             await onlineGameService.makeMove(moveData);
           } catch (error) {
             console.error("Failed to make online move:", error);
@@ -146,7 +141,6 @@ export default function Board() {
       }
     } else {
       // Otherwise, just try to select the piece on the pressed square
-      console.log("Board: Attempting to select piece at", row, col);
       dispatch(selectPiece({ row, col }));
     }
   };

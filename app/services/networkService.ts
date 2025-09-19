@@ -75,7 +75,7 @@ class NetworkService {
           resolve();
         });
 
-        this.socket.on("connect_error", (error) => {
+        this.socket.on("connect_error", (error: any) => {
           console.error("Connection failed:", error.message);
           reject(error);
         });
@@ -130,13 +130,13 @@ class NetworkService {
 
       this.socket.emit("create-room", playerData);
 
-      this.socket.once("room-created", (data) => {
+      this.socket.once("room-created", (data: any) => {
         this.currentRoomId = data.roomId;
         this.currentPlayerId = data.playerId;
         resolve(data);
       });
 
-      this.socket.once("room-error", (error) => {
+      this.socket.once("room-error", (error: any) => {
         reject(new Error(error.message));
       });
     });
@@ -159,13 +159,13 @@ class NetworkService {
 
       this.socket.emit("join-room", { roomId, playerData });
 
-      this.socket.once("room-joined", (data) => {
+      this.socket.once("room-joined", (data: any) => {
         this.currentRoomId = data.roomId;
         this.currentPlayerId = data.playerId;
         resolve(data);
       });
 
-      this.socket.once("room-error", (error) => {
+      this.socket.once("room-error", (error: any) => {
         reject(new Error(error.message));
       });
     });
@@ -184,7 +184,7 @@ class NetworkService {
         resolve();
       });
 
-      this.socket.once("error", (error) => {
+      this.socket.once("error", (error: any) => {
         reject(new Error(error.message));
       });
     });

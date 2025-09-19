@@ -16,7 +16,8 @@ import HistoryControls from "../components/ui/HistoryControls";
 import GameMenu from "../components/ui/GameMenu";
 import networkService from "../services/networkService";
 import onlineGameService from "../../services/onlineGameService";
-import { useEffect, useState } from "react";
+import modeSwitchService from "../../services/modeSwitchService";
+import { useEffect, useState, useMemo } from "react";
 import { useLocalSearchParams } from "expo-router";
 
 export default function GameScreen() {
@@ -35,17 +36,44 @@ export default function GameScreen() {
     setIsOnlineMode(mode === "online" && !!gameId);
   }, [gameId, mode]);
 
-  // Reset game state when component mounts (for single player mode)
+  // Handle mode switching with proper disconnection
   useEffect(() => {
-    if (mode !== "online") {
-      // Only reset if we're not already in a game
-      dispatch(resetGame());
-    }
+    const handleModeSwitch = async () => {
+      // Check if we need to disconnect from current game
+      const currentMode = onlineGameService.isConnected
+        ? "online"
+        : networkService.connected
+          ? "local"
+          : "solo";
+
+      // Only show warning if we're actually switching modes
+      if (currentMode !== mode) {
+        await modeSwitchService.handleModeSwitch(
+          mode as "online" | "local" | "solo",
+          () => {
+            // Confirm: Reset game and continue
+            dispatch(resetGame());
+          },
+          () => {
+            // Cancel: Navigate back to previous mode
+            // This would need to be handled by the parent component
+            console.log("Mode switch cancelled by user");
+          }
+        );
+      } else if (mode !== "online") {
+        // Same mode but not online, safe to reset
+        dispatch(resetGame());
+      }
+    };
+
+    handleModeSwitch();
   }, [mode, dispatch]);
 
   // Set up online game connection
   useEffect(() => {
-    if (isOnlineMode && gameId) {
+    // Only connect if we're actually in online mode AND have a gameId
+    // This prevents reconnection when switching to solo mode
+    if (isOnlineMode && gameId && mode === "online") {
       const connectToOnlineGame = async () => {
         try {
           setConnectionStatus("Connecting to game...");
@@ -64,8 +92,8 @@ export default function GameScreen() {
           // Set up online game listeners
           const unsubscribeGame = onlineGameService.onGameUpdate((game) => {
             if (game) {
-              console.log("Online game updated:", game);
-              dispatch(setGameState(game.gameState));
+              // onlineGameService handles all state management including history
+              // No need to dispatch setGameState here as it's handled internally
             } else {
               console.log("Game not found or ended");
               setConnectionStatus("Game not found");
@@ -73,7 +101,6 @@ export default function GameScreen() {
           });
 
           const unsubscribeMoves = onlineGameService.onMoveUpdate((move) => {
-            console.log("Online move received:", move);
             // The service handles move application internally
           });
 
@@ -94,7 +121,17 @@ export default function GameScreen() {
         onlineGameService.disconnect();
       };
     }
-  }, [isOnlineMode, gameId, dispatch]);
+  }, [isOnlineMode, gameId, mode, dispatch]);
+
+  // Cleanup online game connection when switching to solo mode
+  useEffect(() => {
+    if (mode === "solo" && onlineGameService.isConnected) {
+      console.log(
+        "GameScreen: Disconnecting from online game due to solo mode switch"
+      );
+      onlineGameService.disconnect();
+    }
+  }, [mode]);
 
   // Set up local network listeners for local multiplayer
   useEffect(() => {
@@ -133,29 +170,33 @@ export default function GameScreen() {
     }
   }, [isOnlineMode, dispatch]);
 
-  // Get game state from Redux store
-  const gameState = useSelector((state: RootState) => state.game);
-  const currentPlayerTurn = useSelector(
-    (state: RootState) => state.game.currentPlayerTurn
-  );
-  const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
-  const winner = useSelector((state: RootState) => state.game.winner);
-  const capturedPieces = useSelector(
-    (state: RootState) => state.game.capturedPieces
-  );
-  const scores = useSelector((state: RootState) => state.game.scores);
-  const promotionState = useSelector(
-    (state: RootState) => state.game.promotionState
-  );
-  const justEliminated = useSelector(
-    (state: RootState) => state.game.justEliminated
-  );
+  // Get the entire live game state, including the history array and index
+  const liveGame = useSelector((state: RootState) => state.game);
+  const { history, historyIndex } = liveGame;
+
+  // This is the magic: create a memoized variable for the state to display
+  const displayedGameState = useMemo(() => {
+    // If we are in "review mode" and the index is valid...
+    if (historyIndex < history.length - 1 && history[historyIndex]) {
+      return history[historyIndex]; // ...show the historical state.
+    }
+    return liveGame; // ...otherwise, show the live game state.
+  }, [liveGame, history, historyIndex]);
+
+  // Extract individual properties from displayedGameState for easier use
+  const currentPlayerTurn = displayedGameState.currentPlayerTurn;
+  const gameStatus = displayedGameState.gameStatus;
+  const winner = displayedGameState.winner;
+  const capturedPieces = displayedGameState.capturedPieces;
+  const scores = displayedGameState.scores;
+  const promotionState = displayedGameState.promotionState;
+  const justEliminated = displayedGameState.justEliminated;
 
   // Safety check for incomplete game state
   const isGameStateReady =
-    gameState.boardState &&
-    Array.isArray(gameState.boardState) &&
-    gameState.boardState.length > 0;
+    displayedGameState.boardState &&
+    Array.isArray(displayedGameState.boardState) &&
+    displayedGameState.boardState.length > 0;
 
   // Helper function to get player name
   const getPlayerName = (playerColor: string) => {
@@ -280,19 +321,22 @@ export default function GameScreen() {
         />
       </View>
 
-      {/* Game Notification (for eliminations) */}
+      {/* Game Notification (for eliminations during ongoing game) */}
       <GameNotification
         message={getNotificationMessage()}
-        isVisible={gameStatus === "checkmate" || gameStatus === "stalemate"}
+        isVisible={
+          (gameStatus === "checkmate" || gameStatus === "stalemate") && !winner
+        }
         duration={3000}
       />
 
-      {/* Game Over Modal (only for final winner) */}
+      {/* Game Over Modal (for final game end) */}
       {gameStatus === "finished" && (
         <GameOverModal
           status={gameStatus}
           winner={winner || undefined}
           eliminatedPlayer={justEliminated || undefined}
+          justEliminated={justEliminated || undefined}
           onReset={() => dispatch(resetGame())}
         />
       )}

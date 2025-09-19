@@ -50,11 +50,10 @@ class RealtimeDatabaseService {
       return userCredential.user.uid;
     } catch (error) {
       console.error("Error signing in anonymously:", error);
-      // Fallback to mock user for development
-      console.log("Falling back to mock user for development");
-      const mockUserId = `mock_user_${Date.now()}`;
-      this.currentUser = { uid: mockUserId };
-      return mockUserId;
+      // Don't fall back to mock user - throw the error so calling code can handle it
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to authenticate: ${errorMessage}`);
     }
   }
 
@@ -209,6 +208,7 @@ class RealtimeDatabaseService {
 
       await gameRef.update({
         status: "playing",
+        "gameState/gameStatus": "active",
       });
 
       console.log("Game started successfully:", gameId);
@@ -229,12 +229,6 @@ class RealtimeDatabaseService {
       if (snapshot.exists()) {
         const gameData = { id: gameId, ...snapshot.val() } as RealtimeGame;
 
-        // Debug: Log player data to see what's missing
-        console.log(
-          "Raw player data from Firebase:",
-          JSON.stringify(gameData.players, null, 2)
-        );
-
         // Ensure all players have required fields
         const processedPlayers: { [playerId: string]: Player } = {};
         Object.entries(gameData.players).forEach(([playerId, player]) => {
@@ -251,10 +245,6 @@ class RealtimeDatabaseService {
         });
 
         gameData.players = processedPlayers;
-        console.log(
-          "Processed player data:",
-          JSON.stringify(gameData.players, null, 2)
-        );
 
         onUpdate(gameData);
       } else {

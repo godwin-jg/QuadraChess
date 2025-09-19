@@ -14,14 +14,20 @@ export default function GameMenu() {
     gameId?: string;
     mode?: string;
   }>();
-  const { currentPlayerTurn, gameStatus, history, historyIndex } = useSelector(
+  const { currentPlayerTurn, gameStatus, viewingHistoryIndex } = useSelector(
     (state: RootState) => state.game
   );
 
   const isOnlineMode = mode === "online" && !!gameId;
-  const isViewingHistory = historyIndex < history.length - 1;
+  const isViewingHistory = viewingHistoryIndex !== null;
   const canResign =
-    !isViewingHistory && gameStatus === "active" && currentPlayerTurn;
+    !isViewingHistory &&
+    (gameStatus === "active" ||
+      gameStatus === "playing" ||
+      gameStatus === "waiting") &&
+    gameStatus !== "finished" &&
+    gameStatus !== "checkmate" &&
+    gameStatus !== "stalemate";
 
   const getPlayerName = (playerColor: string) => {
     switch (playerColor) {

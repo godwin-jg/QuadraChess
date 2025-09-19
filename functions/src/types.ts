@@ -1,18 +1,28 @@
-// Types for Firebase Cloud Functions
-// Re-export shared types from main types file
-export { Position } from "../../types";
-export { Player } from "../../app/services/networkService";
+// Shared types used across the application
+export interface Position {
+  row: number;
+  col: number;
+}
 
+export const turnOrder = ["r", "b", "y", "g"] as const;
+
+// Interface for move information including capture status and promotion
 export interface MoveInfo {
   row: number;
   col: number;
   isCapture?: boolean;
+  isPromotion?: boolean;
   isEnPassant?: boolean;
   isCastling?: boolean;
-  isPromotion?: boolean;
   promotionPiece?: string;
 }
 
-// Player interface is defined in the main types file
-
-export const turnOrder = ["r", "b", "y", "g"] as const;
+// Player interface for Cloud Functions
+export interface Player {
+  id: string;
+  name: string;
+  color: string;
+  isHost: boolean;
+  isOnline?: boolean;
+  lastSeen?: number;
+}

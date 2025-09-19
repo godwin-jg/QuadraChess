@@ -72,25 +72,25 @@ const getPseudoLegalMovesWithoutCastling = (
   }
 
   switch (pieceType) {
-    case "P": // Pawn
-      return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "N": // Knight
-      return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "R": // Rook
-      return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "B": // Bishop
-      return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "Q": // Queen
-      return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "K": // King (without castling)
-      return getKingMovesWithoutCastling(
-        pieceCode,
-        position,
-        boardState,
-        eliminatedPlayers
-      );
-    default:
-      return [];
+  case "P": // Pawn
+    return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "N": // Knight
+    return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "R": // Rook
+    return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "B": // Bishop
+    return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "Q": // Queen
+    return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "K": // King (without castling)
+    return getKingMovesWithoutCastling(
+      pieceCode,
+      position,
+      boardState,
+      eliminatedPlayers
+    );
+  default:
+    return [];
   }
 };
 
@@ -118,34 +118,34 @@ const getPseudoLegalMoves = (
   }
 
   switch (pieceType) {
-    case "P": // Pawn
-      return getPawnMoves(
-        pieceCode,
-        position,
-        boardState,
-        eliminatedPlayers,
-        enPassantTargets
-      );
-    case "N": // Knight
-      return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "R": // Rook
-      return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "B": // Bishop
-      return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "Q": // Queen
-      return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "K": // King
-      return getKingMoves(
-        pieceCode,
-        position,
-        boardState,
-        eliminatedPlayers,
-        hasMoved,
-        isKingInCheck,
-        isSquareUnderAttack
-      );
-    default:
-      return [];
+  case "P": // Pawn
+    return getPawnMoves(
+      pieceCode,
+      position,
+      boardState,
+      eliminatedPlayers,
+      enPassantTargets
+    );
+  case "N": // Knight
+    return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "R": // Rook
+    return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "B": // Bishop
+    return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "Q": // Queen
+    return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "K": // King
+    return getKingMoves(
+      pieceCode,
+      position,
+      boardState,
+      eliminatedPlayers,
+      hasMoved,
+      isKingInCheck,
+      isSquareUnderAttack
+    );
+  default:
+    return [];
   }
 };
 

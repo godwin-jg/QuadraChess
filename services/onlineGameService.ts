@@ -8,6 +8,7 @@ import {
   makeMove as makeMoveAction,
   applyNetworkMove,
   setGameState,
+  createStateSnapshot,
 } from "../state/gameSlice";
 import { store } from "../state/store";
 import {
@@ -48,28 +49,28 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
   async connectToGame(gameId: string): Promise<void> {
     try {
-      console.log("Connecting to enhanced online game:", gameId);
-
       // Sign in anonymously if not already signed in
       const user = realtimeDatabaseService.getCurrentUser();
       if (!user) {
-        try {
-          await realtimeDatabaseService.signInAnonymously();
-        } catch (authError) {
-          console.error("Failed to sign in, using mock user:", authError);
-          // Continue with mock user
-        }
+        await realtimeDatabaseService.signInAnonymously();
       }
 
       this.currentGameId = gameId;
+      this.isConnected = true; // Mark as connected immediately when connection is established
+      console.log(
+        "OnlineGameService: Connection established, isConnected:",
+        this.isConnected,
+        "currentGameId:",
+        this.currentGameId
+      );
 
       // Subscribe to game updates
       this.gameUnsubscribe = realtimeDatabaseService.subscribeToGame(
         gameId,
         (game) => {
-          console.log("Enhanced game update received:", game);
           if (game) {
-            this.isConnected = true; // Mark as connected when we receive game data
+            // Keep connected status true when we receive game data
+            this.isConnected = true;
           } else {
             this.isConnected = false; // Mark as disconnected if game is null
           }
@@ -87,8 +88,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
       // Set up player presence tracking
       await this.updatePlayerPresence(true);
       this.setupPresenceTracking();
-
-      console.log("Successfully connected to enhanced online game");
     } catch (error) {
       console.error("Error connecting to enhanced online game:", error);
       this.isConnected = false;
@@ -98,8 +97,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
   async disconnect(): Promise<void> {
     try {
-      console.log("Disconnecting from enhanced online game");
-
       if (this.currentGameId) {
         await this.updatePlayerPresence(false);
         await realtimeDatabaseService.leaveGame(this.currentGameId);
@@ -126,8 +123,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
       this.isConnected = false;
       this.gameUpdateCallbacks = [];
       this.moveUpdateCallbacks = [];
-
-      console.log("Successfully disconnected from enhanced online game");
     } catch (error) {
       console.error("Error disconnecting from enhanced online game:", error);
       throw error;
@@ -144,32 +139,63 @@ class OnlineGameServiceImpl implements OnlineGameService {
       throw new Error("Not connected to a game");
     }
 
-    try {
-      console.log("Sending move to server:", moveData);
+    // Add retry logic for network failures
+    let retryCount = 0;
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-      // Basic client-side validation for UX (not authoritative)
-      const state = store.getState();
-      const currentGameState = state.game;
+    while (retryCount < maxRetries) {
+      try {
+        // Basic client-side validation for UX (not authoritative)
+        const state = store.getState();
+        const currentGameState = state.game;
 
-      // Check if it's the player's turn (for immediate feedback)
-      if (currentGameState.currentPlayerTurn !== moveData.playerColor) {
-        throw new Error("Not your turn");
+        // Re-enable turn validation to prevent race conditions
+        if (currentGameState.currentPlayerTurn !== moveData.playerColor) {
+          throw new Error("Not your turn");
+        }
+
+        // Basic move validation (for immediate feedback)
+        const isValidMove = this.validateMove(currentGameState, moveData);
+        if (!isValidMove) {
+          throw new Error("Invalid move");
+        }
+
+        // ONLY send the move to the server - do NOT calculate game state
+        await realtimeDatabaseService.makeMove(this.currentGameId, moveData);
+
+        // If we get here, the move was sent successfully
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        retryCount++;
+
+        // Don't retry for validation errors
+        if (
+          error instanceof Error &&
+          (error.message.includes("Not your turn") ||
+            error.message.includes("Invalid move"))
+        ) {
+          throw error;
+        }
+
+        console.warn(`Move attempt ${retryCount} failed:`, error);
+
+        if (retryCount < maxRetries) {
+          // Wait before retrying (exponential backoff)
+          await new Promise((resolve) =>
+            setTimeout(resolve, 1000 * retryCount)
+          );
+        }
       }
-
-      // Basic move validation (for immediate feedback)
-      const isValidMove = this.validateMove(currentGameState, moveData);
-      if (!isValidMove) {
-        throw new Error("Invalid move");
-      }
-
-      // ONLY send the move to the server - do NOT calculate game state
-      await realtimeDatabaseService.makeMove(this.currentGameId, moveData);
-
-      console.log("Move sent to server successfully");
-    } catch (error) {
-      console.error("Error sending move to server:", error);
-      throw error;
     }
+
+    // If we get here, all retries failed
+    console.error(
+      `Failed to send move after ${maxRetries} attempts:`,
+      lastError
+    );
+    throw lastError || new Error("Failed to send move after multiple attempts");
   }
 
   async resignGame(): Promise<void> {
@@ -181,17 +207,36 @@ class OnlineGameServiceImpl implements OnlineGameService {
       throw new Error("No current player found");
     }
 
-    try {
-      console.log("Sending resign request to server");
+    // Add retry logic for network failures
+    let retryCount = 0;
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-      // Call the Cloud Function to resign
-      await realtimeDatabaseService.resignGame(this.currentGameId);
+    while (retryCount < maxRetries) {
+      try {
+        // Call the Cloud Function to resign
+        await realtimeDatabaseService.resignGame(this.currentGameId);
 
-      console.log("Resign request sent to server successfully");
-    } catch (error) {
-      console.error("Error sending resign request to server:", error);
-      throw error;
+        // If we get here, the resign was sent successfully
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        retryCount++;
+
+        console.warn(`Resign attempt ${retryCount} failed:`, error);
+
+        if (retryCount < maxRetries) {
+          // Wait before retrying (exponential backoff)
+          await new Promise((resolve) =>
+            setTimeout(resolve, 1000 * retryCount)
+          );
+        }
+      }
     }
+
+    // If we get here, all retries failed
+    console.error(`Failed to resign after ${maxRetries} attempts:`, lastError);
+    throw lastError || new Error("Failed to resign after multiple attempts");
   }
 
   onGameUpdate(callback: (game: RealtimeGame | null) => void): () => void {
@@ -227,68 +272,12 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
   private handleGameUpdate(game: RealtimeGame | null): void {
     if (game) {
-      // Update current player info
-      const user = realtimeDatabaseService.getCurrentUser();
-      console.log("OnlineGameService: Current user:", user);
-      console.log(
-        "OnlineGameService: Available player IDs:",
-        Object.keys(game.players)
-      );
-      console.log("OnlineGameService: Looking for user.uid:", user?.uid);
-
-      if (user) {
-        this.currentPlayer = game.players[user.uid] || null;
-        console.log(
-          "OnlineGameService: Found current player:",
-          this.currentPlayer
+      // Check if game data is complete
+      if (!game.gameState) {
+        console.warn(
+          "OnlineGameService: Game data incomplete, waiting for full data..."
         );
-      } else {
-        console.log("OnlineGameService: No current user found");
-      }
-
-      // Ensure game state is properly initialized
-      if (
-        game.gameState &&
-        game.gameState.boardState &&
-        Array.isArray(game.gameState.boardState) &&
-        game.gameState.boardState.length > 0
-      ) {
-        console.log("Updating game state with valid boardState");
-        console.log("Board state length:", game.gameState.boardState.length);
-        console.log("First row length:", game.gameState.boardState[0]?.length);
-        console.log(
-          "Sample pieces:",
-          game.gameState.boardState[0]?.slice(0, 5)
-        );
-
-        // Ensure board state is properly copied
-        const gameState = {
-          ...game.gameState,
-          boardState: game.gameState.boardState.map((row) => {
-            if (!row) return Array(14).fill(null);
-            // Handle both arrays and objects (Firebase sometimes converts arrays to objects)
-            if (Array.isArray(row)) {
-              return [...row];
-            } else if (typeof row === "object") {
-              // Convert object to array (Firebase object with numeric keys)
-              const arrayRow = Array(14).fill(null);
-              Object.keys(row).forEach((key) => {
-                const index = parseInt(key);
-                if (!isNaN(index) && index >= 0 && index < 14) {
-                  arrayRow[index] = row[key];
-                }
-              });
-              return arrayRow;
-            }
-            return Array(14).fill(null);
-          }),
-          history: game.gameState.history || [],
-          historyIndex: game.gameState.historyIndex || 0,
-        };
-        store.dispatch(setGameState(gameState));
-      } else {
-        console.warn("Game state is missing boardState, using fallback");
-        // Fallback to a complete game state with proper initialization
+        // Use fallback state with basic game info
         const fallbackState = {
           boardState: initialBoardState.map((row) => [...row]),
           currentPlayerTurn: "r",
@@ -324,10 +313,147 @@ class OnlineGameServiceImpl implements OnlineGameService {
           },
           history: [],
           historyIndex: 0,
+          viewingHistoryIndex: null,
           players: [],
-          isHost: false,
+          isHost: true,
           canStartGame: false,
         };
+        store.dispatch(setGameState(fallbackState));
+        return;
+      }
+
+      // Update current player info
+      const user = realtimeDatabaseService.getCurrentUser();
+      if (user) {
+        this.currentPlayer = game.players[user.uid] || null;
+      }
+
+      // Ensure game state is properly initialized
+      if (
+        game.gameState &&
+        game.gameState.boardState &&
+        Array.isArray(game.gameState.boardState) &&
+        game.gameState.boardState.length > 0
+      ) {
+        // Convert players object to array for Redux state
+        const playersArray = Object.values(game.players || {});
+
+        // Determine if current user is host
+        const user = realtimeDatabaseService.getCurrentUser();
+        const isHost = user ? game.hostId === user.uid : false;
+
+        // Determine if game can start (at least 2 players and waiting status)
+        const canStartGame =
+          playersArray.length >= 2 && game.status === "waiting";
+
+        // Ensure board state is properly copied
+        const gameState = {
+          ...game.gameState,
+          currentPlayerTurn:
+            game.currentPlayerTurn || game.gameState.currentPlayerTurn || "r",
+          gameStatus: (game.gameState.gameStatus || game.status || "active") as
+            | "waiting"
+            | "active"
+            | "checkmate"
+            | "stalemate"
+            | "finished"
+            | "promotion",
+          justEliminated: game.gameState.justEliminated || null,
+          winner: game.gameState.winner || null,
+          boardState: game.gameState.boardState.map((row) => {
+            if (!row) return Array(14).fill(null);
+            // Handle both arrays and objects (Firebase sometimes converts arrays to objects)
+            if (Array.isArray(row)) {
+              return [...row];
+            } else if (typeof row === "object") {
+              // Convert object to array (Firebase object with numeric keys)
+              const arrayRow = Array(14).fill(null);
+              Object.keys(row).forEach((key) => {
+                const index = parseInt(key);
+                if (!isNaN(index) && index >= 0 && index < 14) {
+                  arrayRow[index] = row[key];
+                }
+              });
+              return arrayRow;
+            }
+            return Array(14).fill(null);
+          }),
+          // Multiplayer state
+          players: playersArray,
+          isHost: isHost,
+          canStartGame: canStartGame,
+          // Use server-stored history for synchronization
+          history: game.gameState.history || [],
+          historyIndex: game.gameState.historyIndex || 0,
+        };
+
+        // Apply the complete game state from server (including history)
+        store.dispatch(setGameState(gameState));
+      } else {
+        console.warn("Game state is missing boardState, using fallback");
+
+        // Convert players object to array for Redux state
+        const playersArray = Object.values(game.players || {});
+
+        // Determine if current user is host
+        const user = realtimeDatabaseService.getCurrentUser();
+        const isHost = user ? game.hostId === user.uid : false;
+
+        // Determine if game can start (at least 2 players and waiting status)
+        const canStartGame =
+          playersArray.length >= 2 && game.status === "waiting";
+
+        // Fallback to a complete game state with proper initialization
+        const fallbackState = {
+          boardState: initialBoardState.map((row) => [...row]),
+          currentPlayerTurn: game.currentPlayerTurn || "r",
+          gameStatus: (game.status || "active") as
+            | "waiting"
+            | "active"
+            | "checkmate"
+            | "stalemate"
+            | "finished"
+            | "promotion",
+          selectedPiece: null,
+          validMoves: [],
+          capturedPieces: { r: [], b: [], y: [], g: [] },
+          checkStatus: { r: false, b: false, y: false, g: false },
+          winner: null,
+          eliminatedPlayers: [],
+          justEliminated: null,
+          scores: { r: 0, b: 0, y: 0, g: 0 },
+          promotionState: { isAwaiting: false, position: null, color: null },
+          hasMoved: {
+            rK: false,
+            rR1: false,
+            rR2: false,
+            bK: false,
+            bR1: false,
+            bR2: false,
+            yK: false,
+            yR1: false,
+            yR2: false,
+            gK: false,
+            gR1: false,
+            gR2: false,
+          },
+          enPassantTargets: [],
+          gameOverState: {
+            isGameOver: false,
+            status: null,
+            eliminatedPlayer: null,
+          },
+          // History state
+          history: game.gameState?.history || [],
+          historyIndex: game.gameState?.historyIndex || 0,
+          viewingHistoryIndex: null,
+          // Multiplayer state
+          players: playersArray,
+          isHost: isHost,
+          canStartGame: canStartGame,
+        };
+
+        // Apply the fallback state
         store.dispatch(setGameState(fallbackState));
       }
 
@@ -344,11 +470,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
     // This causes desynchronization if any game state update is missed
     // The only source of truth is the complete game state from handleGameUpdate
 
-    console.log("Move received from server:", move);
-    console.log(
-      "WARNING: Individual move processing disabled to prevent desync"
-    );
-
     // Notify callbacks (for UI feedback, not state changes)
     this.moveUpdateCallbacks.forEach((callback) => callback(move));
   }
@@ -358,6 +479,19 @@ class OnlineGameServiceImpl implements OnlineGameService {
     this.presenceInterval = setInterval(() => {
       this.updatePlayerPresence(true);
     }, 10000);
+  }
+
+  private hasBoardStateChanged(oldBoard: any[][], newBoard: any[][]): boolean {
+    if (!oldBoard || !newBoard) return true;
+    if (oldBoard.length !== newBoard.length) return true;
+
+    for (let i = 0; i < oldBoard.length; i++) {
+      if (oldBoard[i].length !== newBoard[i].length) return true;
+      for (let j = 0; j < oldBoard[i].length; j++) {
+        if (oldBoard[i][j] !== newBoard[i][j]) return true;
+      }
+    }
+    return false;
   }
 
   private validateMove(
@@ -418,8 +552,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
     }
   }
 
-  // CRITICAL: Clients should NEVER calculate game state changes
-  // This function is DANGEROUS and causes race conditions
+  // History navigation removed from online multiplayer
 }
 
 export default new OnlineGameServiceImpl();

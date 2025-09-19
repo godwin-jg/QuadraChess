@@ -15,7 +15,7 @@ import {
 import networkService, { Player } from "../app/services/networkService";
 
 // Helper function to create a deep copy of the game state
-const createStateSnapshot = (state: GameState): GameState => {
+export const createStateSnapshot = (state: GameState): GameState => {
   return {
     ...state,
     boardState: state.boardState.map((row) => [...row]),
@@ -76,6 +76,7 @@ export const baseInitialState: GameState = {
   },
   history: [],
   historyIndex: 0,
+  viewingHistoryIndex: null, // null = viewing live, number = viewing history
   // Multiplayer state
   players: [],
   isHost: false,
@@ -85,8 +86,9 @@ export const baseInitialState: GameState = {
 // Create initial state with proper history initialization
 const initialState: GameState = {
   ...baseInitialState,
-  history: [createStateSnapshot(baseInitialState)],
+  history: [], // Start with empty history - no initial snapshot
   historyIndex: 0, // This should be 0 for the initial state (not viewing history)
+  viewingHistoryIndex: null, // Start viewing live state
   // Ensure multiplayer state is included
   players: baseInitialState.players,
   isHost: baseInitialState.isHost,
@@ -114,7 +116,7 @@ const gameSlice = createSlice({
       );
 
       // Don't allow piece selection when viewing historical moves
-      if (state.historyIndex < state.history.length - 1) {
+      if (state.viewingHistoryIndex !== null) {
         console.log("Redux: Blocking piece selection - viewing history");
         return;
       }
@@ -166,7 +168,7 @@ const gameSlice = createSlice({
     },
     makeMove: (state, action: PayloadAction<{ row: number; col: number }>) => {
       // Don't allow moves when viewing historical moves
-      if (state.historyIndex < state.history.length - 1) {
+      if (state.viewingHistoryIndex !== null) {
         return;
       }
 
@@ -589,8 +591,8 @@ const gameSlice = createSlice({
         checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
       };
       Object.assign(state, resetState);
-      // Initialize history with the initial state
-      state.history = [createStateSnapshot(resetState)];
+      // Initialize history as empty - no initial snapshot
+      state.history = [];
       state.historyIndex = 0; // This should be 0 for the current state, not viewing history
 
       // Ensure the board state is properly set
@@ -641,102 +643,32 @@ const gameSlice = createSlice({
       }
     },
     stepHistory: (state, action: PayloadAction<"back" | "forward">) => {
-      if (action.payload === "back" && state.historyIndex > 0) {
-        state.historyIndex--;
-        const historicalState = state.history[state.historyIndex];
-        // Restore the historical state (excluding history properties)
-        state.boardState = historicalState.boardState.map((row) => [...row]);
-        state.currentPlayerTurn = historicalState.currentPlayerTurn;
-        state.gameStatus = historicalState.gameStatus;
-        state.selectedPiece = historicalState.selectedPiece;
-        state.validMoves = [...historicalState.validMoves];
-        state.capturedPieces = {
-          r: [...historicalState.capturedPieces.r],
-          b: [...historicalState.capturedPieces.b],
-          y: [...historicalState.capturedPieces.y],
-          g: [...historicalState.capturedPieces.g],
-        };
-        state.checkStatus = { ...historicalState.checkStatus };
-        state.winner = historicalState.winner;
-        state.eliminatedPlayers = [...historicalState.eliminatedPlayers];
-        state.justEliminated = historicalState.justEliminated;
-        state.scores = { ...historicalState.scores };
-        state.promotionState = { ...historicalState.promotionState };
-        state.hasMoved = { ...historicalState.hasMoved };
-        state.enPassantTargets = historicalState.enPassantTargets.map(
-          (target) => ({
-            ...target,
-            position: { ...target.position },
-          })
-        );
-        state.gameOverState = { ...historicalState.gameOverState };
+      if (action.payload === "back" && state.viewingHistoryIndex !== null) {
+        if (state.viewingHistoryIndex > 0) {
+          state.viewingHistoryIndex--;
+        } else {
+          state.viewingHistoryIndex = null; // Go to live state
+        }
       } else if (
         action.payload === "forward" &&
-        state.historyIndex < state.history.length - 1
+        state.viewingHistoryIndex !== null &&
+        state.viewingHistoryIndex < state.history.length - 1
       ) {
-        state.historyIndex++;
-        const historicalState = state.history[state.historyIndex];
-        // Restore the historical state (excluding history properties)
-        state.boardState = historicalState.boardState.map((row) => [...row]);
-        state.currentPlayerTurn = historicalState.currentPlayerTurn;
-        state.gameStatus = historicalState.gameStatus;
-        state.selectedPiece = historicalState.selectedPiece;
-        state.validMoves = [...historicalState.validMoves];
-        state.capturedPieces = {
-          r: [...historicalState.capturedPieces.r],
-          b: [...historicalState.capturedPieces.b],
-          y: [...historicalState.capturedPieces.y],
-          g: [...historicalState.capturedPieces.g],
-        };
-        state.checkStatus = { ...historicalState.checkStatus };
-        state.winner = historicalState.winner;
-        state.eliminatedPlayers = [...historicalState.eliminatedPlayers];
-        state.justEliminated = historicalState.justEliminated;
-        state.scores = { ...historicalState.scores };
-        state.promotionState = { ...historicalState.promotionState };
-        state.hasMoved = { ...historicalState.hasMoved };
-        state.enPassantTargets = historicalState.enPassantTargets.map(
-          (target) => ({
-            ...target,
-            position: { ...target.position },
-          })
-        );
-        state.gameOverState = { ...historicalState.gameOverState };
+        state.viewingHistoryIndex++;
+      } else if (
+        action.payload === "forward" &&
+        state.viewingHistoryIndex === null
+      ) {
+        // Start viewing history from the beginning
+        state.viewingHistoryIndex = 0;
       }
     },
     returnToLive: (state) => {
-      if (state.history.length > 0) {
-        state.historyIndex = state.history.length - 1;
-        const liveState = state.history[state.historyIndex];
-        // Restore the live state (excluding history properties)
-        state.boardState = liveState.boardState.map((row) => [...row]);
-        state.currentPlayerTurn = liveState.currentPlayerTurn;
-        state.gameStatus = liveState.gameStatus;
-        state.selectedPiece = liveState.selectedPiece;
-        state.validMoves = [...liveState.validMoves];
-        state.capturedPieces = {
-          r: [...liveState.capturedPieces.r],
-          b: [...liveState.capturedPieces.b],
-          y: [...liveState.capturedPieces.y],
-          g: [...liveState.capturedPieces.g],
-        };
-        state.checkStatus = { ...liveState.checkStatus };
-        state.winner = liveState.winner;
-        state.eliminatedPlayers = [...liveState.eliminatedPlayers];
-        state.justEliminated = liveState.justEliminated;
-        state.scores = { ...liveState.scores };
-        state.promotionState = { ...liveState.promotionState };
-        state.hasMoved = { ...liveState.hasMoved };
-        state.enPassantTargets = liveState.enPassantTargets.map((target) => ({
-          ...target,
-          position: { ...target.position },
-        }));
-        state.gameOverState = { ...liveState.gameOverState };
-      }
+      state.viewingHistoryIndex = null;
     },
     resignGame: (state) => {
       // Don't allow resigning when viewing historical moves
-      if (state.historyIndex < state.history.length - 1) {
+      if (state.viewingHistoryIndex !== null) {
         return;
       }
 
@@ -923,5 +855,45 @@ export const {
   setIsHost,
   setCanStartGame,
 } = gameSlice.actions;
+
+// Selectors for UI components to choose between live and historical state
+export const selectDisplayBoardState = (state: { game: GameState }) => {
+  const game = state.game;
+  if (game.viewingHistoryIndex !== null && game.history.length > 0) {
+    const historicalState = game.history[game.viewingHistoryIndex];
+    return historicalState ? historicalState.boardState : game.boardState;
+  }
+  return game.boardState;
+};
+
+export const selectDisplayGameState = (state: { game: GameState }) => {
+  const game = state.game;
+  if (game.viewingHistoryIndex !== null && game.history.length > 0) {
+    const historicalState = game.history[game.viewingHistoryIndex];
+    if (historicalState) {
+      return {
+        ...game,
+        boardState: historicalState.boardState,
+        currentPlayerTurn: historicalState.currentPlayerTurn,
+        gameStatus: historicalState.gameStatus,
+        capturedPieces: historicalState.capturedPieces,
+        checkStatus: historicalState.checkStatus,
+        winner: historicalState.winner,
+        eliminatedPlayers: historicalState.eliminatedPlayers,
+        justEliminated: historicalState.justEliminated,
+        scores: historicalState.scores,
+        promotionState: historicalState.promotionState,
+        hasMoved: historicalState.hasMoved,
+        enPassantTargets: historicalState.enPassantTargets,
+        gameOverState: historicalState.gameOverState,
+      };
+    }
+  }
+  return game;
+};
+
+export const selectIsViewingHistory = (state: { game: GameState }) => {
+  return state.game.viewingHistoryIndex !== null;
+};
 
 export default gameSlice.reducer;

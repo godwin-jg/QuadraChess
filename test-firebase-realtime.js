@@ -69,3 +69,7 @@ function testFirebaseConnection() {
 
 // Run the test
 testFirebaseConnection();
+
+
+
+

@@ -1,6 +1,7 @@
 import database from "@react-native-firebase/database";
 import auth from "@react-native-firebase/auth";
-import { GameState, Player } from "../state/types";
+import { GameState } from "../state/types";
+import { Player } from "../app/services/networkService";
 
 export interface RealtimeGame {
   id: string;
@@ -19,7 +20,9 @@ export interface RealtimeGame {
     pieceCode: string;
     playerColor: string;
     timestamp: number;
+    moveNumber?: number;
   } | null;
+  lastActivity?: number;
 }
 
 export interface RealtimeMove {
@@ -47,7 +50,11 @@ class RealtimeDatabaseService {
       return userCredential.user.uid;
     } catch (error) {
       console.error("Error signing in anonymously:", error);
-      throw error;
+      // Fallback to mock user for development
+      console.log("Falling back to mock user for development");
+      const mockUserId = `mock_user_${Date.now()}`;
+      this.currentUser = { uid: mockUserId };
+      return mockUserId;
     }
   }
 
@@ -58,7 +65,9 @@ class RealtimeDatabaseService {
       console.log("Successfully signed out");
     } catch (error) {
       console.error("Error signing out:", error);
-      throw error;
+      // Clear current user even if Firebase signOut fails
+      this.currentUser = null;
+      console.log("Cleared local user state");
     }
   }
 
@@ -66,74 +75,213 @@ class RealtimeDatabaseService {
     return this.currentUser || auth().currentUser;
   }
 
-  // Game management methods
-  async createGame(hostName: string, gameState: GameState): Promise<string> {
+  // SECURE: Game creation request - client only sends intent, server creates state
+  async createGameRequest(hostName: string): Promise<string> {
     try {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      console.log(
-        "Creating game with gameState:",
-        JSON.stringify(gameState, null, 2)
-      );
-      console.log("GameState keys:", Object.keys(gameState));
+      console.log("Sending secure game creation request to server");
+
+      // Create game creation request
+      const gameCreationRequest = {
+        hostId: user.uid,
+        hostName: hostName,
+        timestamp: Date.now(),
+        status: "pending",
+      };
+
+      // Send request to server for processing
+      const requestRef = database().ref("game-creation-requests").push();
+      const requestId = requestRef.key!;
+
+      await requestRef.set(gameCreationRequest);
+
+      console.log("Game creation request sent:", requestId);
+
+      // Return the request ID - the actual game will be created by server
+      // Client should listen for the game to appear in available games
+      return requestId;
+    } catch (error) {
+      console.error("Error sending game creation request:", error);
+      throw error;
+    }
+  }
+
+  // NEW: Call Cloud Function to create game (server-authoritative)
+  async createGame(hostName: string): Promise<string> {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
+
+      console.log("Creating game via Cloud Function:", hostName);
+
+      // Call the Cloud Function directly
+      const functions = require("@react-native-firebase/functions").default;
+      const createGameFunction = functions().httpsCallable("createGame");
+
+      const result = await createGameFunction({
+        playerName: hostName,
+      });
+
+      const gameId = result.data.gameId;
+      console.log("Game created via Cloud Function:", gameId);
+      return gameId;
+    } catch (error) {
+      console.error("Error creating game via Cloud Function:", error);
+      throw error;
+    }
+  }
+
+  // SERVER-ONLY: Create authoritative initial game state
+  // This function should only be called by Firebase Cloud Functions
+  async createAuthoritativeGame(
+    hostId: string,
+    hostName: string
+  ): Promise<string> {
+    try {
+      console.log("Creating authoritative game state on server");
 
       const gameRef = database().ref("games").push();
       const gameId = gameRef.key!;
 
+      // Create secure, authoritative initial game state
+      const initialGameState = {
+        boardState: [
+          // Row 0-1: Yellow pieces
+          [
+            "",
+            "",
+            "",
+            "yR",
+            "yN",
+            "yB",
+            "yQ",
+            "yK",
+            "yB",
+            "yN",
+            "yR",
+            "",
+            "",
+            "",
+          ],
+          [
+            "",
+            "",
+            "",
+            "yP",
+            "yP",
+            "yP",
+            "yP",
+            "yP",
+            "yP",
+            "yP",
+            "yP",
+            "",
+            "",
+            "",
+          ],
+          // Row 2-11: Empty board
+          ...Array(10).fill(Array(14).fill("")),
+          // Row 12-13: Red pieces
+          [
+            "",
+            "",
+            "",
+            "rP",
+            "rP",
+            "rP",
+            "rP",
+            "rP",
+            "rP",
+            "rP",
+            "rP",
+            "",
+            "",
+            "",
+          ],
+          [
+            "",
+            "",
+            "",
+            "rR",
+            "rN",
+            "rB",
+            "rQ",
+            "rK",
+            "rB",
+            "rN",
+            "rR",
+            "",
+            "",
+            "",
+          ],
+        ],
+        currentPlayerTurn: "r", // Red starts first
+        gameStatus: "waiting" as const,
+        selectedPiece: null,
+        validMoves: [],
+        capturedPieces: { r: [], b: [], y: [], g: [] },
+        checkStatus: { r: false, b: false, y: false, g: false },
+        winner: null,
+        eliminatedPlayers: [],
+        justEliminated: null,
+        scores: { r: 0, b: 0, y: 0, g: 0 },
+        promotionState: { isAwaiting: false, position: null, color: null },
+        hasMoved: {
+          rK: false,
+          rR1: false,
+          rR2: false,
+          bK: false,
+          bR1: false,
+          bR2: false,
+          yK: false,
+          yR1: false,
+          yR2: false,
+          gK: false,
+          gR1: false,
+          gR2: false,
+        },
+        enPassantTargets: [],
+        gameOverState: {
+          isGameOver: false,
+          status: null,
+          eliminatedPlayer: null,
+        },
+        history: [],
+        historyIndex: 0,
+        players: [],
+        isHost: true,
+        canStartGame: false,
+      };
+
       const hostPlayer: Player = {
-        id: user.uid,
+        id: hostId,
         name: hostName,
         color: "r", // Red starts first in 4-player chess
         isHost: true,
         isOnline: true,
       };
 
-      // Create a simplified game state for testing
-      const simplifiedGameState = {
-        boardState: gameState.boardState,
-        currentPlayerTurn: gameState.currentPlayerTurn,
-        gameStatus: gameState.gameStatus,
-        selectedPiece: gameState.selectedPiece,
-        validMoves: gameState.validMoves,
-        capturedPieces: gameState.capturedPieces,
-        checkStatus: gameState.checkStatus,
-        winner: gameState.winner,
-        eliminatedPlayers: gameState.eliminatedPlayers,
-        justEliminated: gameState.justEliminated,
-        scores: gameState.scores,
-        promotionState: gameState.promotionState,
-        hasMoved: gameState.hasMoved,
-        enPassantTargets: gameState.enPassantTargets,
-        gameOverState: gameState.gameOverState,
-        history: gameState.history,
-        historyIndex: gameState.historyIndex,
-        // Multiplayer state
-        players: [],
-        isHost: true,
-        canStartGame: false,
-      };
-
       const gameData: RealtimeGame = {
         id: gameId,
-        hostId: user.uid,
+        hostId: hostId,
         hostName,
-        players: { [user.uid]: hostPlayer },
-        gameState: simplifiedGameState,
+        players: { [hostId]: hostPlayer },
+        gameState: initialGameState,
         status: "waiting",
         createdAt: Date.now(),
         maxPlayers: 4,
-        currentPlayerTurn: gameState.currentPlayerTurn,
+        currentPlayerTurn: "r",
         winner: null,
         lastMove: null,
       };
 
       await gameRef.set(gameData);
-      console.log("Game created successfully:", gameId);
-      console.log("Game data stored:", JSON.stringify(gameData, null, 2));
+      console.log("Authoritative game created successfully:", gameId);
       return gameId;
     } catch (error) {
-      console.error("Error creating game:", error);
+      console.error("Error creating authoritative game:", error);
       throw error;
     }
   }
@@ -205,7 +353,14 @@ class RealtimeDatabaseService {
 
       if (Object.keys(updatedPlayers).length === 0) {
         // Delete game if no players left
+        console.log("No players left, destroying game:", gameId);
         await gameRef.remove();
+
+        // Also clean up moves collection
+        const movesRef = database().ref(`moves/${gameId}`);
+        await movesRef.remove();
+
+        console.log("Game and all associated data destroyed");
       } else {
         // Update players list
         await gameRef.child("players").set(updatedPlayers);
@@ -269,9 +424,37 @@ class RealtimeDatabaseService {
   ): () => void {
     const gameRef = database().ref(`games/${gameId}`);
 
-    this.gameUnsubscribe = gameRef.on("value", (snapshot) => {
+    const listener = gameRef.on("value", (snapshot) => {
       if (snapshot.exists()) {
         const gameData = { id: gameId, ...snapshot.val() } as RealtimeGame;
+
+        // Debug: Log player data to see what's missing
+        console.log(
+          "Raw player data from Firebase:",
+          JSON.stringify(gameData.players, null, 2)
+        );
+
+        // Ensure all players have required fields
+        const processedPlayers: { [playerId: string]: Player } = {};
+        Object.entries(gameData.players).forEach(([playerId, player]) => {
+          if (player && typeof player === "object") {
+            processedPlayers[playerId] = {
+              id: playerId,
+              name: player.name || `Player ${playerId.slice(0, 8)}`,
+              color: player.color || "g", // Default to green if missing
+              isHost: player.isHost || false,
+              isOnline: player.isOnline || false,
+              lastSeen: player.lastSeen || Date.now(),
+            };
+          }
+        });
+
+        gameData.players = processedPlayers;
+        console.log(
+          "Processed player data:",
+          JSON.stringify(gameData.players, null, 2)
+        );
+
         onUpdate(gameData);
       } else {
         onUpdate(null);
@@ -279,10 +462,7 @@ class RealtimeDatabaseService {
     });
 
     return () => {
-      if (this.gameUnsubscribe) {
-        gameRef.off("value", this.gameUnsubscribe);
-        this.gameUnsubscribe = null;
-      }
+      gameRef.off("value", listener);
     };
   }
 
@@ -296,18 +476,20 @@ class RealtimeDatabaseService {
 
     return gamesRef.on("value", (snapshot) => {
       const games: RealtimeGame[] = [];
-      snapshot.forEach((childSnapshot) => {
-        const gameData = {
-          id: childSnapshot.key!,
-          ...childSnapshot.val(),
-        } as RealtimeGame;
-        games.push(gameData);
-      });
+      if (snapshot && snapshot.exists()) {
+        snapshot.forEach((childSnapshot) => {
+          const gameData = {
+            id: childSnapshot.key!,
+            ...childSnapshot.val(),
+          } as RealtimeGame;
+          games.push(gameData);
+        });
+      }
       onUpdate(games);
     });
   }
 
-  // Move management
+  // Move management - CLIENT ONLY SENDS MOVE REQUESTS
   async makeMove(
     gameId: string,
     moveData: {
@@ -321,98 +503,58 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}`);
-      const gameSnapshot = await gameRef.once("value");
-
-      if (!gameSnapshot.exists()) {
-        throw new Error("Game not found");
-      }
-
-      const gameData = gameSnapshot.val() as RealtimeGame;
-
-      // Check if it's the player's turn
-      const currentPlayer = gameData.players[user.uid];
-      if (!currentPlayer) {
-        throw new Error("Player not in game");
-      }
-
-      // Use the top-level currentPlayerTurn for validation
-      console.log(
-        "Move validation - Current turn:",
-        gameData.currentPlayerTurn,
-        "Player color:",
-        currentPlayer.color
-      );
-      if (gameData.currentPlayerTurn !== currentPlayer.color) {
-        throw new Error(
-          `Not your turn. Current turn: ${gameData.currentPlayerTurn}, Your color: ${currentPlayer.color}`
-        );
-      }
-
-      // Create move data
-      const move: RealtimeMove = {
+      // CRITICAL: Client only sends move request, does NOT validate or calculate
+      // All validation and game state calculation must happen server-side
+      const moveRequest = {
         ...moveData,
         playerId: user.uid,
         timestamp: Date.now(),
-        moveNumber: (gameData.lastMove?.moveNumber || 0) + 1,
+        gameId: gameId,
       };
 
-      // Add move to moves collection
-      const moveRef = database().ref(`moves/${gameId}`).push();
-      await moveRef.set(move);
+      // Send move request to server for processing
+      const moveRequestRef = database().ref(`move-requests/${gameId}`).push();
+      await moveRequestRef.set(moveRequest);
 
-      // Update game with last move
-      await gameRef.update({
-        lastMove: move,
-      });
-
-      console.log("Move made successfully:", move);
+      console.log("Move request sent to server:", moveRequest);
     } catch (error) {
-      console.error("Error making move:", error);
+      console.error("Error sending move request:", error);
       throw error;
     }
   }
 
+  // CRITICAL: This function is DANGEROUS and causes race conditions
+  // Clients should NEVER update the authoritative game state
+  // Only server-side functions (Firebase Cloud Functions) should update game state
   async updateGameState(gameId: string, gameState: GameState): Promise<void> {
-    try {
-      const gameRef = database().ref(`games/${gameId}`);
-      const updateData = {
-        gameState,
-        currentPlayerTurn: gameState.currentPlayerTurn,
-        status: gameState.gameStatus === "finished" ? "finished" : "playing",
-        winner: gameState.winner,
-      };
-
-      console.log("Updating game state:", JSON.stringify(updateData, null, 2));
-      await gameRef.update(updateData);
-
-      console.log("Game state updated successfully");
-    } catch (error) {
-      console.error("Error updating game state:", error);
-      throw error;
-    }
+    console.error(
+      "CRITICAL ERROR: Clients should never update game state directly!"
+    );
+    console.error("This causes race conditions and desynchronization!");
+    console.error(
+      "Game state updates must be handled by server-side functions only."
+    );
+    throw new Error(
+      "Client-side game state updates are not allowed. Use server-side functions instead."
+    );
   }
 
-  // Subscribe to moves for a specific game
+  // CRITICAL: Individual move subscriptions cause desynchronization
+  // Only subscribe to the complete game state to prevent desync
   subscribeToMoves(
     gameId: string,
     onMove: (move: RealtimeMove) => void
   ): () => void {
-    const movesRef = database()
-      .ref(`moves/${gameId}`)
-      .orderByChild("timestamp")
-      .limitToLast(1);
+    console.warn(
+      "WARNING: subscribeToMoves is disabled to prevent desynchronization"
+    );
+    console.warn(
+      "Use subscribeToGame instead for reliable state synchronization"
+    );
 
-    this.movesUnsubscribe = movesRef.on("child_added", (snapshot) => {
-      const move = snapshot.val() as RealtimeMove;
-      onMove(move);
-    });
-
+    // Return a no-op unsubscribe function
     return () => {
-      if (this.movesUnsubscribe) {
-        movesRef.off("child_added", this.movesUnsubscribe);
-        this.movesUnsubscribe = null;
-      }
+      console.log("Move subscription disabled - no cleanup needed");
     };
   }
 
@@ -436,6 +578,41 @@ class RealtimeDatabaseService {
   }
 
   // Cleanup
+  // Clean up abandoned games (games with no active players for 30 minutes)
+  async cleanupAbandonedGames(): Promise<void> {
+    try {
+      console.log("Cleaning up abandoned games...");
+      const gamesRef = database().ref("games");
+      const snapshot = await gamesRef.once("value");
+
+      if (!snapshot.exists()) return;
+
+      const now = Date.now();
+      const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+
+      const cleanupPromises: Promise<void>[] = [];
+
+      snapshot.forEach((gameSnapshot) => {
+        const gameData = gameSnapshot.val() as RealtimeGame;
+        const lastActivity = gameData.lastActivity || gameData.createdAt;
+
+        // If game has been inactive for 30 minutes, clean it up
+        if (now - lastActivity > thirtyMinutes) {
+          console.log("Cleaning up abandoned game:", gameSnapshot.key);
+          const gameRef = database().ref(`games/${gameSnapshot.key}`);
+          const movesRef = database().ref(`moves/${gameSnapshot.key}`);
+
+          cleanupPromises.push(gameRef.remove(), movesRef.remove());
+        }
+      });
+
+      await Promise.all(cleanupPromises);
+      console.log("Abandoned games cleanup completed");
+    } catch (error) {
+      console.error("Error cleaning up abandoned games:", error);
+    }
+  }
+
   cleanup(): void {
     if (this.gameUnsubscribe) {
       this.gameUnsubscribe();

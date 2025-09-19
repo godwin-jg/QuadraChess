@@ -20,9 +20,7 @@
           "NSAllowsArbitraryLoads": true
         },
         "NSLocalNetworkUsageDescription": "This app needs to scan the local network to find and connect to other players for multiplayer games.",
-        "NSBonjourServices": [
-          "_fourchess._tcp."
-        ]
+        "NSBonjourServices": ["_fourchess._tcp."]
       }
     },
     "android": {
@@ -32,7 +30,6 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true,
       "package": "com.jgnsecrets.chess4d",
       "googleServicesFile": "./android/app/google-services.json"
     },

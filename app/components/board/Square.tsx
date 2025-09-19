@@ -61,15 +61,15 @@ export default function Square({
   const getCaptureBackgroundColor = (capturingColor: string) => {
     switch (capturingColor) {
       case "r":
-        return "bg-red-200";
+        return "#fecaca"; // red-200 equivalent
       case "b":
-        return "bg-blue-200";
+        return "#bfdbfe"; // blue-200 equivalent
       case "y":
-        return "bg-yellow-200";
+        return "#fef3c7"; // yellow-200 equivalent
       case "g":
-        return "bg-green-200";
+        return "#bbf7d0"; // green-200 equivalent
       default:
-        return color === "light" ? "bg-white" : "bg-gray-400";
+        return color === "light" ? "#f0d9b5" : "#b58863";
     }
   };
 
@@ -79,32 +79,42 @@ export default function Square({
       const pieceColor = getPieceColor(piece);
       switch (pieceColor) {
         case "r":
-          return "bg-red-200";
+          return "#fecaca"; // red-200 equivalent
         case "b":
-          return "bg-blue-200";
+          return "#bfdbfe"; // blue-200 equivalent
         case "y":
-          return "bg-yellow-200";
+          return "#fef3c7"; // yellow-200 equivalent
         case "g":
-          return "bg-green-200";
+          return "#bbf7d0"; // green-200 equivalent
         default:
-          return color === "light" ? "bg-white" : "bg-gray-400";
+          // Use the same brown color scheme as Board.tsx
+          return color === "light" ? "#f0d9b5" : "#b58863";
       }
     }
     if (moveType === "capture" && capturingPieceColor) {
       return getCaptureBackgroundColor(capturingPieceColor);
     }
-    return color === "light" ? "bg-white" : "bg-gray-400";
+    // Use the same brown color scheme as Board.tsx
+    return color === "light" ? "#f0d9b5" : "#b58863";
+  };
+
+  const handlePress = () => {
+    console.log("Square: Pressed at", row, col, "piece:", piece);
+    if (onPress) {
+      onPress();
+    }
   };
 
   return (
-    <Pressable onPress={onPress}>
+    <Pressable onPress={handlePress}>
       <View
-        style={{ width: size, height: size }}
-        className={`
-          ${getBackgroundColor()} 
-          justify-center 
-          items-center 
-        `}
+        style={{
+          width: size,
+          height: size,
+          backgroundColor: getBackgroundColor(),
+          justifyContent: "center",
+          alignItems: "center",
+        }}
       >
         {/* Render indicators for valid moves */}
         {moveType === "move" && !piece && (

@@ -11,17 +11,7 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { RootState } from "../../state/store";
-import {
-  setPlayers,
-  setIsHost,
-  setCanStartGame,
-  baseInitialState,
-} from "../../state";
-import {
-  firebaseService,
-  testFirebaseConnection,
-  FirebaseGame,
-} from "../../services";
+import { setPlayers, setIsHost, setCanStartGame } from "../../state";
 import realtimeDatabaseService, {
   RealtimeGame,
 } from "../../services/realtimeDatabaseService";
@@ -45,38 +35,21 @@ const OnlineLobbyScreen: React.FC = () => {
   const [playerName, setPlayerName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
-  const [availableGames, setAvailableGames] = useState<
-    (RealtimeGame | FirebaseGame)[]
-  >([]);
+  const [availableGames, setAvailableGames] = useState<RealtimeGame[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [useRealtimeDB, setUseRealtimeDB] = useState(true);
 
   // Initialize Firebase auth and generate player name
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        if (useRealtimeDB) {
-          // Use Realtime Database
-          await realtimeDatabaseService.signInAnonymously();
-          const name = generateRandomName();
-          setPlayerName(name);
-          setIsConnected(true);
-          console.log("Realtime Database initialization successful");
-        } else {
-          // Use Firestore
-          const isConnected = await testFirebaseConnection();
-          if (!isConnected) {
-            throw new Error("Firebase connection test failed");
-          }
-
-          await firebaseService.signInAnonymously();
-          const name = generateRandomName();
-          setPlayerName(name);
-          setIsConnected(true);
-          console.log("Firestore initialization successful");
-        }
+        // Use Realtime Database
+        await realtimeDatabaseService.signInAnonymously();
+        const name = generateRandomName();
+        setPlayerName(name);
+        setIsConnected(true);
+        console.log("Realtime Database initialization successful");
       } catch (error) {
         console.error("Failed to initialize Firebase auth:", error);
         Alert.alert("Connection Error", "Failed to connect to online services");
@@ -84,86 +57,60 @@ const OnlineLobbyScreen: React.FC = () => {
     };
 
     initializeAuth();
-  }, [useRealtimeDB]);
+  }, []);
 
   // Subscribe to available games
   useEffect(() => {
     if (!isConnected) return;
 
-    const unsubscribe = useRealtimeDB
-      ? realtimeDatabaseService.subscribeToAvailableGames((games) => {
-          setAvailableGames(games);
-        })
-      : firebaseService.subscribeToAvailableGames((games) => {
-          setAvailableGames(games);
-        });
+    const unsubscribe = realtimeDatabaseService.subscribeToAvailableGames(
+      (games) => {
+        setAvailableGames(games);
+      }
+    );
 
     return unsubscribe;
-  }, [isConnected, useRealtimeDB]);
+  }, [isConnected]);
 
   // Subscribe to current game updates
   useEffect(() => {
     if (!currentGameId) return;
 
-    const unsubscribe = useRealtimeDB
-      ? realtimeDatabaseService.subscribeToGame(currentGameId, (game) => {
-          if (game) {
-            const playersArray = Object.values(game.players);
-            dispatch(setPlayers(playersArray));
-            dispatch(
-              setIsHost(
-                game.hostId === realtimeDatabaseService.getCurrentUser()?.uid
-              )
-            );
-            dispatch(
-              setCanStartGame(
-                playersArray.length >= 2 && game.status === "waiting"
-              )
-            );
+    const unsubscribe = realtimeDatabaseService.subscribeToGame(
+      currentGameId,
+      (game) => {
+        if (game) {
+          const playersArray = Object.values(game.players);
+          dispatch(setPlayers(playersArray));
+          dispatch(
+            setIsHost(
+              game.hostId === realtimeDatabaseService.getCurrentUser()?.uid
+            )
+          );
+          dispatch(
+            setCanStartGame(
+              playersArray.length >= 2 && game.status === "waiting"
+            )
+          );
 
-            if (game.status === "playing") {
-              router.push(
-                `/(tabs)/GameScreen?gameId=${currentGameId}&mode=online`
-              );
-            }
-          } else {
-            // Game was deleted
-            setCurrentGameId(null);
-            dispatch(setPlayers([]));
-            dispatch(setIsHost(false));
-            dispatch(setCanStartGame(false));
-            Alert.alert("Game Ended", "The game you were in has ended");
-          }
-        })
-      : firebaseService.subscribeToGame(currentGameId, (game) => {
-          if (game) {
-            dispatch(setPlayers(game.players));
-            dispatch(
-              setIsHost(game.hostId === firebaseService.getCurrentUser()?.uid)
+          if (game.status === "playing") {
+            router.push(
+              `/(tabs)/GameScreen?gameId=${currentGameId}&mode=online`
             );
-            dispatch(
-              setCanStartGame(
-                game.players.length >= 2 && game.status === "waiting"
-              )
-            );
-
-            if (game.status === "playing") {
-              router.push(
-                `/(tabs)/GameScreen?gameId=${currentGameId}&mode=online`
-              );
-            }
-          } else {
-            // Game was deleted
-            setCurrentGameId(null);
-            dispatch(setPlayers([]));
-            dispatch(setIsHost(false));
-            dispatch(setCanStartGame(false));
-            Alert.alert("Game Ended", "The game you were in has ended");
           }
-        });
+        } else {
+          // Game was deleted
+          setCurrentGameId(null);
+          dispatch(setPlayers([]));
+          dispatch(setIsHost(false));
+          dispatch(setCanStartGame(false));
+          Alert.alert("Game Ended", "The game you were in has ended");
+        }
+      }
+    );
 
     return unsubscribe;
-  }, [currentGameId, dispatch, router, useRealtimeDB]);
+  }, [currentGameId, dispatch, router]);
 
   // Name editing functions
   const startEditingName = () => {
@@ -186,61 +133,14 @@ const OnlineLobbyScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const gameState = {
-        ...baseInitialState,
-        // Override only multiplayer-specific properties
-        players: [],
-        isHost: true,
-        canStartGame: false,
-      };
+      // SECURE: Use Cloud Function to create game with server-authoritative state
+      console.log("Creating game via Cloud Function");
 
-      console.log("baseInitialState keys:", Object.keys(baseInitialState));
-      console.log(
-        "baseInitialState sample:",
-        JSON.stringify(
-          {
-            boardState: baseInitialState.boardState ? "present" : "missing",
-            currentPlayerTurn: baseInitialState.currentPlayerTurn,
-            gameStatus: baseInitialState.gameStatus,
-            selectedPiece: baseInitialState.selectedPiece,
-            validMoves: baseInitialState.validMoves ? "present" : "missing",
-            capturedPieces: baseInitialState.capturedPieces
-              ? "present"
-              : "missing",
-            checkStatus: baseInitialState.checkStatus ? "present" : "missing",
-            winner: baseInitialState.winner,
-            eliminatedPlayers: baseInitialState.eliminatedPlayers
-              ? "present"
-              : "missing",
-            justEliminated: baseInitialState.justEliminated,
-            scores: baseInitialState.scores ? "present" : "missing",
-            promotionState: baseInitialState.promotionState
-              ? "present"
-              : "missing",
-            hasMoved: baseInitialState.hasMoved ? "present" : "missing",
-            enPassantTargets: baseInitialState.enPassantTargets
-              ? "present"
-              : "missing",
-            gameOverState: baseInitialState.gameOverState
-              ? "present"
-              : "missing",
-            history: baseInitialState.history ? "present" : "missing",
-            historyIndex: baseInitialState.historyIndex,
-            players: baseInitialState.players ? "present" : "missing",
-            isHost: baseInitialState.isHost,
-            canStartGame: baseInitialState.canStartGame,
-          },
-          null,
-          2
-        )
+      const gameId = await realtimeDatabaseService.createGame(
+        playerName.trim()
       );
-      console.log("Game state to create:", JSON.stringify(gameState, null, 2));
-
-      const gameId = useRealtimeDB
-        ? await realtimeDatabaseService.createGame(playerName, gameState)
-        : await firebaseService.createGame(playerName, gameState);
-
       setCurrentGameId(gameId);
+      console.log("Game created successfully via Cloud Function:", gameId);
     } catch (error) {
       console.error("Error creating game:", error);
       Alert.alert("Error", "Failed to create game");
@@ -257,11 +157,7 @@ const OnlineLobbyScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
-      if (useRealtimeDB) {
-        await realtimeDatabaseService.joinGame(gameId, playerName);
-      } else {
-        await firebaseService.joinGame(gameId, playerName);
-      }
+      await realtimeDatabaseService.joinGame(gameId, playerName);
       setCurrentGameId(gameId);
     } catch (error) {
       console.error("Error joining game:", error);
@@ -274,11 +170,7 @@ const OnlineLobbyScreen: React.FC = () => {
   const leaveGame = async () => {
     if (currentGameId) {
       try {
-        if (useRealtimeDB) {
-          await realtimeDatabaseService.leaveGame(currentGameId);
-        } else {
-          await firebaseService.leaveGame(currentGameId);
-        }
+        await realtimeDatabaseService.leaveGame(currentGameId);
         setCurrentGameId(null);
         dispatch(setPlayers([]));
         dispatch(setIsHost(false));
@@ -293,21 +185,15 @@ const OnlineLobbyScreen: React.FC = () => {
     if (!currentGameId) return;
 
     try {
-      if (useRealtimeDB) {
-        await realtimeDatabaseService.startGame(currentGameId);
-      } else {
-        await firebaseService.startGame(currentGameId);
-      }
+      await realtimeDatabaseService.startGame(currentGameId);
     } catch (error) {
       console.error("Error starting game:", error);
       Alert.alert("Error", "Failed to start game");
     }
   };
 
-  const renderGameItem = ({ item }: { item: RealtimeGame | FirebaseGame }) => {
-    const playerCount = useRealtimeDB
-      ? Object.keys((item as RealtimeGame).players).length
-      : (item as FirebaseGame).players.length;
+  const renderGameItem = ({ item }: { item: RealtimeGame }) => {
+    const playerCount = Object.keys(item.players).length;
 
     return (
       <TouchableOpacity
@@ -386,13 +272,15 @@ const OnlineLobbyScreen: React.FC = () => {
                   </Text>
                   <View
                     className={`w-3 h-3 rounded-full ${
-                      player.color === "white"
-                        ? "bg-white"
-                        : player.color === "black"
-                          ? "bg-gray-800"
-                          : player.color === "red"
-                            ? "bg-red-500"
-                            : "bg-blue-500"
+                      player.color === "r"
+                        ? "bg-red-500"
+                        : player.color === "b"
+                          ? "bg-blue-500"
+                          : player.color === "y"
+                            ? "bg-yellow-500"
+                            : player.color === "g"
+                              ? "bg-green-500"
+                              : "bg-gray-500"
                     }`}
                   />
                 </View>

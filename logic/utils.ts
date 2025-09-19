@@ -21,7 +21,11 @@ export const isEmpty = (
   row: number,
   col: number
 ): boolean => {
-  return isWithinBounds(row, col) && boardState[row][col] === null;
+  return (
+    isWithinBounds(row, col) &&
+    boardState[row] &&
+    (boardState[row][col] === null || boardState[row][col] === "")
+  );
 };
 
 // Helper function to check if a square contains an enemy piece
@@ -32,7 +36,13 @@ export const isEnemy = (
   pieceColor: string,
   eliminatedPlayers: string[] = []
 ): boolean => {
-  if (!isWithinBounds(row, col) || !boardState[row][col]) return false;
+  if (
+    !isWithinBounds(row, col) ||
+    !boardState[row] ||
+    !boardState[row][col] ||
+    boardState[row][col] === ""
+  )
+    return false;
   const piece = boardState[row][col]!;
   const targetPieceColor = piece[0];
 
@@ -52,7 +62,13 @@ export const isFriendly = (
   pieceColor: string,
   eliminatedPlayers: string[] = []
 ): boolean => {
-  if (!isWithinBounds(row, col) || !boardState[row][col]) return false;
+  if (
+    !isWithinBounds(row, col) ||
+    !boardState[row] ||
+    !boardState[row][col] ||
+    boardState[row][col] === ""
+  )
+    return false;
   const piece = boardState[row][col]!;
   const targetPieceColor = piece[0];
 

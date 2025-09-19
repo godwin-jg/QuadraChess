@@ -35,7 +35,9 @@ const createStateSnapshot = (state: GameState): GameState => {
     promotionState: { ...state.promotionState },
     gameOverState: { ...state.gameOverState },
     eliminatedPlayers: [...state.eliminatedPlayers],
-    history: [...state.history],
+    // Don't copy history when creating snapshots - this prevents circular references
+    history: [],
+    historyIndex: 0, // Always set to 0 for snapshots
   };
 };
 
@@ -73,7 +75,7 @@ export const baseInitialState: GameState = {
     eliminatedPlayer: null,
   },
   history: [],
-  historyIndex: -1,
+  historyIndex: 0,
   // Multiplayer state
   players: [],
   isHost: false,
@@ -84,7 +86,7 @@ export const baseInitialState: GameState = {
 const initialState: GameState = {
   ...baseInitialState,
   history: [createStateSnapshot(baseInitialState)],
-  historyIndex: 0,
+  historyIndex: 0, // This should be 0 for the initial state (not viewing history)
   // Ensure multiplayer state is included
   players: baseInitialState.players,
   isHost: baseInitialState.isHost,
@@ -102,15 +104,27 @@ const gameSlice = createSlice({
       state.validMoves = action.payload;
     },
     selectPiece: (state, action: PayloadAction<Position>) => {
+      console.log("Redux: selectPiece called with", action.payload);
+      console.log("Redux: currentPlayerTurn:", state.currentPlayerTurn);
+      console.log(
+        "Redux: historyIndex:",
+        state.historyIndex,
+        "history.length:",
+        state.history.length
+      );
+
       // Don't allow piece selection when viewing historical moves
       if (state.historyIndex < state.history.length - 1) {
+        console.log("Redux: Blocking piece selection - viewing history");
         return;
       }
 
       const { row, col } = action.payload;
       const pieceCode = state.boardState[row][col];
+      console.log("Redux: pieceCode at", row, col, ":", pieceCode);
 
       if (!pieceCode) {
+        console.log("Redux: No piece at position, clearing selection");
         state.selectedPiece = null;
         state.validMoves = [];
         return;
@@ -118,13 +132,22 @@ const gameSlice = createSlice({
 
       // Check if the piece belongs to an eliminated player
       const pieceColor = pieceCode.charAt(0);
+      console.log(
+        "Redux: pieceColor:",
+        pieceColor,
+        "eliminatedPlayers:",
+        state.eliminatedPlayers
+      );
       if (state.eliminatedPlayers.includes(pieceColor)) {
+        console.log(
+          "Redux: Blocking piece selection - piece belongs to eliminated player"
+        );
         return; // Do nothing if the piece belongs to an eliminated player
       }
 
       // Allow any player to select their pieces to see moves (including en passant)
       // But only the current player can actually make moves
-
+      console.log("Redux: Setting selectedPiece and calculating validMoves");
       state.selectedPiece = { row, col };
 
       state.validMoves = getValidMoves(
@@ -134,6 +157,11 @@ const gameSlice = createSlice({
         state.eliminatedPlayers,
         state.hasMoved,
         state.enPassantTargets
+      );
+      console.log(
+        "Redux: validMoves calculated:",
+        state.validMoves.length,
+        "moves"
       );
     },
     makeMove: (state, action: PayloadAction<{ row: number; col: number }>) => {
@@ -556,13 +584,17 @@ const gameSlice = createSlice({
     },
     resetGame: (state) => {
       // Reset the entire game state back to baseInitialState
-      Object.assign(state, {
+      const resetState = {
         ...baseInitialState,
         checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
-      });
+      };
+      Object.assign(state, resetState);
       // Initialize history with the initial state
-      state.history = [createStateSnapshot(baseInitialState)];
-      state.historyIndex = 0;
+      state.history = [createStateSnapshot(resetState)];
+      state.historyIndex = 0; // This should be 0 for the current state, not viewing history
+
+      // Ensure the board state is properly set
+      state.boardState = initialBoardState.map((row) => [...row]);
     },
     clearGameOver: (state) => {
       state.gameOverState = {

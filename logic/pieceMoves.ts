@@ -263,7 +263,9 @@ export const getRookMoves = (
     let newCol = col + direction.col;
 
     while (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow][newCol];
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -321,7 +323,9 @@ export const getBishopMoves = (
     let newCol = col + direction.col;
 
     while (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow][newCol];
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -383,7 +387,9 @@ export const getQueenMoves = (
     let newCol = col + direction.col;
 
     while (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow][newCol];
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -445,7 +451,9 @@ export const getKingMovesWithoutCastling = (
     const newCol = col + direction.col;
 
     if (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow][newCol];
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -525,6 +533,7 @@ export const getKingMoves = (
         if (
           !hasMoved.rR2 &&
           isEmpty(boardState, 13, 8) &&
+          boardState[13] &&
           boardState[13][10] === "rR"
         ) {
           // Check if squares are not under attack
@@ -558,6 +567,7 @@ export const getKingMoves = (
           !hasMoved.rR1 &&
           isEmpty(boardState, 13, 5) &&
           isEmpty(boardState, 13, 6) &&
+          boardState[13] &&
           boardState[13][3] === "rR"
         ) {
           const square1UnderAttack = isSquareUnderAttack(
@@ -591,6 +601,7 @@ export const getKingMoves = (
         if (
           !hasMoved.bR2 &&
           isEmpty(boardState, 8, 0) && // Intermediate square
+          boardState[10] &&
           boardState[10][0] === "bR" // Right rook at (10, 0)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
@@ -623,6 +634,7 @@ export const getKingMoves = (
           !hasMoved.bR1 &&
           isEmpty(boardState, 5, 0) && // Intermediate square 1
           isEmpty(boardState, 6, 0) && // Intermediate square 2
+          boardState[3] &&
           boardState[3][0] === "bR" // Left rook at (3, 0)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
@@ -656,6 +668,7 @@ export const getKingMoves = (
         if (
           !hasMoved.yR2 &&
           isEmpty(boardState, 0, 8) && // Intermediate square
+          boardState[0] &&
           boardState[0][10] === "yR" // Right rook at (0, 10)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
@@ -688,6 +701,7 @@ export const getKingMoves = (
           !hasMoved.yR1 &&
           isEmpty(boardState, 0, 4) && // Intermediate square 1
           isEmpty(boardState, 0, 5) && // Intermediate square 2
+          boardState[0] &&
           boardState[0][3] === "yR" // Left rook at (0, 3)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
@@ -721,6 +735,7 @@ export const getKingMoves = (
         if (
           !hasMoved.gR2 &&
           isEmpty(boardState, 8, 13) && // Intermediate square
+          boardState[10] &&
           boardState[10][13] === "gR" // Right rook at (10, 13)
         ) {
           const square1UnderAttack = isSquareUnderAttack(
@@ -753,6 +768,7 @@ export const getKingMoves = (
           !hasMoved.gR1 &&
           isEmpty(boardState, 4, 13) && // Intermediate square 1
           isEmpty(boardState, 5, 13) && // Intermediate square 2
+          boardState[3] &&
           boardState[3][13] === "gR" // Left rook at (3, 13)
         ) {
           const square1UnderAttack = isSquareUnderAttack(

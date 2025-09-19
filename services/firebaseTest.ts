@@ -1,6 +1,7 @@
 import { getApp } from "@react-native-firebase/app";
 import auth from "@react-native-firebase/auth";
 import firestore from "@react-native-firebase/firestore";
+import database from "@react-native-firebase/database";
 
 export const testFirebaseConnection = async () => {
   try {
@@ -17,6 +18,10 @@ export const testFirebaseConnection = async () => {
     // Test Firestore
     const firestoreInstance = firestore();
     console.log("Firestore instance available:", !!firestoreInstance);
+
+    // Test Realtime Database
+    const realtimeDbInstance = database();
+    console.log("Realtime Database instance available:", !!realtimeDbInstance);
 
     // Try to get current user (should be null initially)
     const currentUser = authInstance.currentUser;

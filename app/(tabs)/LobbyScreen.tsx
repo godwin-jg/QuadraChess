@@ -12,6 +12,11 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState, resetGame } from "../../state";
 import { setPlayers, setIsHost, setCanStartGame } from "../../state/gameSlice";
 import networkService, { Player } from "../services/networkService";
+import networkConfigService, {
+  ServerConfig,
+} from "../../services/networkConfigService";
+import gameHostService from "../../services/gameHostService";
+import ServerStartupGuide from "../../components/ServerStartupGuide";
 
 // Generate random player names
 const generateRandomName = (): string => {
@@ -60,6 +65,17 @@ export default function LobbyScreen() {
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const [availableGames, setAvailableGames] = useState<AvailableGame[]>([]);
   const [showJoinGames, setShowJoinGames] = useState(false);
+  const [discoveredServers, setDiscoveredServers] = useState<ServerConfig[]>(
+    []
+  );
+  const [showServerSelection, setShowServerSelection] = useState(false);
+  const [selectedServer, setSelectedServer] = useState<ServerConfig | null>(
+    null
+  );
+  const [showServerGuide, setShowServerGuide] = useState(false);
+  const [serverGuideInfo, setServerGuideInfo] = useState<
+    { host: string; port: number } | undefined
+  >();
   const isInGameRef = useRef(false);
 
   const {
@@ -74,9 +90,24 @@ export default function LobbyScreen() {
       if (!networkService.connected) {
         setIsConnecting(true);
         try {
-          await networkService.connect("192.168.1.9", 3001);
+          // Try to discover servers first
+          const servers = await networkConfigService.discoverServers();
+          setDiscoveredServers(servers);
+
+          if (servers.length > 0) {
+            // Use the first available server
+            const serverConfig = servers[0];
+            setSelectedServer(serverConfig);
+            await networkService.connect(serverConfig.host, serverConfig.port);
+          } else {
+            // Fallback to default configuration
+            const serverConfig = await networkConfigService.getServerConfig();
+            setSelectedServer(serverConfig);
+            await networkService.connect(serverConfig.host, serverConfig.port);
+          }
         } catch (error) {
-          Alert.alert("Connection Error", "Could not connect to server.");
+          console.error("Connection failed:", error);
+          setShowServerSelection(true);
         } finally {
           setIsConnecting(false);
         }
@@ -127,11 +158,54 @@ export default function LobbyScreen() {
   // Load available games
   const loadAvailableGames = async () => {
     try {
-      const response = await fetch("http://192.168.1.9:3001/api/games");
+      const serverConfig =
+        selectedServer || (await networkConfigService.getServerConfig());
+      const serverURL = networkConfigService.buildServerURL(serverConfig);
+      const response = await fetch(`${serverURL}/api/games`);
       const games = await response.json();
       setAvailableGames(games);
     } catch (error) {
+      console.error("Error loading games:", error);
       Alert.alert("Error", "Could not load available games");
+    }
+  };
+
+  const connectToSelectedServer = async (serverConfig: ServerConfig) => {
+    try {
+      setIsConnecting(true);
+      await networkService.connect(serverConfig.host, serverConfig.port);
+      setSelectedServer(serverConfig);
+      setShowServerSelection(false);
+    } catch (error) {
+      console.error("Failed to connect to server:", error);
+      Alert.alert(
+        "Connection Error",
+        `Could not connect to ${networkConfigService.getServerDisplayName(serverConfig)}`
+      );
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const discoverServers = async () => {
+    try {
+      setIsConnecting(true);
+      const servers = await networkConfigService.discoverServers();
+      setDiscoveredServers(servers);
+      if (servers.length === 0) {
+        Alert.alert(
+          "No Servers Found",
+          "No servers were discovered on your network. Make sure the server is running."
+        );
+      }
+    } catch (error) {
+      console.error("Server discovery failed:", error);
+      Alert.alert(
+        "Discovery Error",
+        "Failed to discover servers on your network."
+      );
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -144,15 +218,42 @@ export default function LobbyScreen() {
 
     setIsCreatingRoom(true);
     try {
+      // Check if we can host a game
+      const hostingCheck = await gameHostService.canHostGame();
+
+      if (!hostingCheck.canHost) {
+        // Show server startup guide
+        setServerGuideInfo(hostingCheck.serverInfo);
+        setShowServerGuide(true);
+        return;
+      }
+
+      // Start hosting
+      const hostingResult = await gameHostService.startHosting();
+
+      if (!hostingResult.success) {
+        Alert.alert(
+          "Hosting Failed",
+          hostingResult.instructions ||
+            "Failed to start hosting. Please try again."
+        );
+        return;
+      }
+
+      // Create the room
       const result = await networkService.createRoom({ name: playerName });
       dispatch(setIsHost(true));
       dispatch(setCanStartGame(false));
       dispatch(setPlayers(result.players || []));
       isInGameRef.current = true;
-      Alert.alert(
-        "Game Created!",
-        "Your game is now available for others to join."
-      );
+
+      // Show hosting instructions
+      const connectionInfo = gameHostService.getServerConnectionInfo();
+      const message = connectionInfo
+        ? `Game created! Server: ${connectionInfo.host}:${connectionInfo.port}\n\n${connectionInfo.instructions}`
+        : "Game created! Your game is now available for others to join.";
+
+      Alert.alert("Game Created!", message);
     } catch (error) {
       Alert.alert(
         "Error",
@@ -216,6 +317,74 @@ export default function LobbyScreen() {
     }
     setIsEditingName(false);
   };
+
+  // Server startup guide
+  if (showServerGuide) {
+    return (
+      <ServerStartupGuide
+        onDismiss={() => setShowServerGuide(false)}
+        serverInfo={serverGuideInfo}
+      />
+    );
+  }
+
+  // Server selection modal
+  if (showServerSelection) {
+    return (
+      <View className="flex-1 bg-black justify-center items-center p-6">
+        <View className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm">
+          <Text className="text-white text-2xl font-bold text-center mb-6">
+            Select Server
+          </Text>
+
+          <Text className="text-gray-300 text-center mb-6">
+            Choose a server to connect to for local multiplayer
+          </Text>
+
+          {discoveredServers.length > 0 ? (
+            <View className="space-y-3 mb-6">
+              {discoveredServers.map((server, index) => (
+                <TouchableOpacity
+                  key={index}
+                  className="bg-gray-700 p-4 rounded-xl border border-gray-600"
+                  onPress={() => connectToSelectedServer(server)}
+                >
+                  <Text className="text-white text-lg font-semibold">
+                    {networkConfigService.getServerDisplayName(server)}
+                  </Text>
+                  <Text className="text-gray-400 text-sm">
+                    {server.host}:{server.port}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <View className="mb-6">
+              <Text className="text-gray-400 text-center mb-4">
+                No servers discovered
+              </Text>
+              <TouchableOpacity
+                className="bg-blue-600 py-3 px-4 rounded-xl"
+                onPress={discoverServers}
+                disabled={isConnecting}
+              >
+                <Text className="text-white text-center font-semibold">
+                  {isConnecting ? "Discovering..." : "Discover Servers"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <TouchableOpacity
+            className="bg-gray-600 py-3 px-4 rounded-xl"
+            onPress={() => setShowServerSelection(false)}
+          >
+            <Text className="text-white text-center font-semibold">Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   // Loading state
   if (isConnecting) {
@@ -367,6 +536,20 @@ export default function LobbyScreen() {
             <Text className="text-white text-lg font-bold text-center">
               Join Game
             </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            className="bg-blue-600/20 py-4 px-6 rounded-xl border-2 border-blue-400/30 shadow-lg"
+            onPress={() => setShowServerSelection(true)}
+          >
+            <Text className="text-blue-300 text-lg font-bold text-center">
+              Change Server
+            </Text>
+            {selectedServer && (
+              <Text className="text-blue-200 text-sm text-center mt-1">
+                {networkConfigService.getServerDisplayName(selectedServer)}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
 

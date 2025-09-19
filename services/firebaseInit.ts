@@ -12,13 +12,18 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase if it hasn't been initialized already
-let app;
-if (getApps().length === 0) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApp();
+try {
+  if (getApps().length === 0) {
+    const app = initializeApp(firebaseConfig);
+    console.log("Firebase initialized:", app.name);
+  } else {
+    const app = getApp();
+    console.log("Firebase already initialized:", app.name);
+  }
+} catch (error) {
+  console.error("Firebase initialization failed:", error);
+  // Continue with app initialization even if Firebase fails
+  console.log("App will continue without Firebase");
 }
-
-console.log("Firebase initialized:", app.name);
 
 export default firebaseConfig;

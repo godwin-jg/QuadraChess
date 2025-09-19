@@ -30,7 +30,7 @@ export const isSquareUnderAttack = (
   // Check if any opponent piece can attack this square
   for (let r = 0; r < 14; r++) {
     for (let c = 0; c < 14; c++) {
-      const piece = boardState[r][c];
+      const piece = boardState[r] ? boardState[r][c] : null;
 
       // If square contains an opponent's piece
       if (piece && piece[0] !== defendingColor) {
@@ -225,7 +225,7 @@ export const isKingInCheck = (
 
   for (let row = 0; row < 14; row++) {
     for (let col = 0; col < 14; col++) {
-      const piece = boardState[row][col];
+      const piece = boardState[row] ? boardState[row][col] : null;
       if (piece && piece[0] === kingColor && piece[1] === "K") {
         kingPosition = { row, col };
         break;
@@ -242,7 +242,7 @@ export const isKingInCheck = (
   // Check if any opponent piece can attack the king
   for (let row = 0; row < 14; row++) {
     for (let col = 0; col < 14; col++) {
-      const piece = boardState[row][col];
+      const piece = boardState[row] ? boardState[row][col] : null;
 
       // If square contains an opponent's piece
       if (piece && piece[0] !== kingColor) {
@@ -288,7 +288,7 @@ export const hasAnyLegalMoves = (
   // Iterate through every square of the board
   for (let row = 0; row < 14; row++) {
     for (let col = 0; col < 14; col++) {
-      const piece = boardState[row][col];
+      const piece = boardState[row] ? boardState[row][col] : null;
 
       // If this square contains a piece belonging to the player
       if (piece && piece[0] === playerColor) {

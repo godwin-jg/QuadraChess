@@ -1,4 +1,5 @@
 import { View, Text } from "@/components/Themed";
+import { ActivityIndicator } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState, resetGame, completePromotion } from "../../state";
 import {
@@ -15,7 +16,6 @@ import HistoryControls from "../components/ui/HistoryControls";
 import GameMenu from "../components/ui/GameMenu";
 import networkService from "../services/networkService";
 import onlineGameService from "../../services/onlineGameService";
-import enhancedOnlineGameService from "../../services/enhancedOnlineGameService";
 import { useEffect, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 
@@ -35,41 +35,54 @@ export default function GameScreen() {
     setIsOnlineMode(mode === "online" && !!gameId);
   }, [gameId, mode]);
 
+  // Reset game state when component mounts (for single player mode)
+  useEffect(() => {
+    if (mode !== "online") {
+      // Only reset if we're not already in a game
+      dispatch(resetGame());
+    }
+  }, [mode, dispatch]);
+
   // Set up online game connection
   useEffect(() => {
     if (isOnlineMode && gameId) {
       const connectToOnlineGame = async () => {
         try {
           setConnectionStatus("Connecting to game...");
-          await enhancedOnlineGameService.connectToGame(gameId);
+          console.log(
+            "GameScreen: Attempting to connect to online game:",
+            gameId
+          );
+          await onlineGameService.connectToGame(gameId);
+          console.log("GameScreen: Successfully connected to online game");
+          console.log(
+            "GameScreen: onlineGameService.isConnected:",
+            onlineGameService.isConnected
+          );
           setConnectionStatus("Connected");
 
           // Set up online game listeners
-          const unsubscribeGame = enhancedOnlineGameService.onGameUpdate(
-            (game) => {
-              if (game) {
-                console.log("Enhanced online game updated:", game);
-                dispatch(setGameState(game.gameState));
-              } else {
-                console.log("Game not found or ended");
-                setConnectionStatus("Game not found");
-              }
+          const unsubscribeGame = onlineGameService.onGameUpdate((game) => {
+            if (game) {
+              console.log("Online game updated:", game);
+              dispatch(setGameState(game.gameState));
+            } else {
+              console.log("Game not found or ended");
+              setConnectionStatus("Game not found");
             }
-          );
+          });
 
-          const unsubscribeMoves = enhancedOnlineGameService.onMoveUpdate(
-            (move) => {
-              console.log("Enhanced online move received:", move);
-              // The enhanced service handles move application internally
-            }
-          );
+          const unsubscribeMoves = onlineGameService.onMoveUpdate((move) => {
+            console.log("Online move received:", move);
+            // The service handles move application internally
+          });
 
           return () => {
             unsubscribeGame();
             unsubscribeMoves();
           };
         } catch (error) {
-          console.error("Failed to connect to enhanced online game:", error);
+          console.error("Failed to connect to online game:", error);
           setConnectionStatus("Connection failed");
         }
       };
@@ -78,7 +91,7 @@ export default function GameScreen() {
 
       return () => {
         cleanup.then((cleanupFn) => cleanupFn?.());
-        enhancedOnlineGameService.disconnect();
+        onlineGameService.disconnect();
       };
     }
   }, [isOnlineMode, gameId, dispatch]);
@@ -121,6 +134,7 @@ export default function GameScreen() {
   }, [isOnlineMode, dispatch]);
 
   // Get game state from Redux store
+  const gameState = useSelector((state: RootState) => state.game);
   const currentPlayerTurn = useSelector(
     (state: RootState) => state.game.currentPlayerTurn
   );
@@ -136,6 +150,12 @@ export default function GameScreen() {
   const justEliminated = useSelector(
     (state: RootState) => state.game.justEliminated
   );
+
+  // Safety check for incomplete game state
+  const isGameStateReady =
+    gameState.boardState &&
+    Array.isArray(gameState.boardState) &&
+    gameState.boardState.length > 0;
 
   // Helper function to get player name
   const getPlayerName = (playerColor: string) => {
@@ -195,6 +215,19 @@ export default function GameScreen() {
       isCurrentTurn: currentPlayerTurn === "g",
     },
   ];
+
+  // Show loading screen if game state isn't ready
+  if (!isGameStateReady) {
+    return (
+      <View className="flex-1 bg-black justify-center items-center">
+        <ActivityIndicator size="large" color="#ffffff" />
+        <Text className="text-white text-lg mt-4">Loading game...</Text>
+        {isOnlineMode && (
+          <Text className="text-gray-400 text-sm mt-2">{connectionStatus}</Text>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-black justify-center items-center">

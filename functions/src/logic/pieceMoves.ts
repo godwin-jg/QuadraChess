@@ -113,16 +113,16 @@ export const getPawnMoves = (
         // Check if this pawn can attack the en passant target diagonally
         const canCapture = (() => {
           switch (pieceColor) {
-          case "r":
-            return row === targetRow + 1 && Math.abs(col - targetCol) === 1;
-          case "y":
-            return row === targetRow - 1 && Math.abs(col - targetCol) === 1;
-          case "b":
-            return col === targetCol - 1 && Math.abs(row - targetRow) === 1;
-          case "g":
-            return col === targetCol + 1 && Math.abs(row - targetRow) === 1;
-          default:
-            return false;
+            case "r":
+              return row === targetRow + 1 && Math.abs(col - targetCol) === 1;
+            case "y":
+              return row === targetRow - 1 && Math.abs(col - targetCol) === 1;
+            case "b":
+              return col === targetCol - 1 && Math.abs(row - targetRow) === 1;
+            case "g":
+              return col === targetCol + 1 && Math.abs(row - targetRow) === 1;
+            default:
+              return false;
           }
         })();
 
@@ -263,9 +263,9 @@ export const getRookMoves = (
     let newCol = col + direction.col;
 
     while (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow] ?
-        boardState[newRow][newCol] :
-        null;
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -323,9 +323,9 @@ export const getBishopMoves = (
     let newCol = col + direction.col;
 
     while (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow] ?
-        boardState[newRow][newCol] :
-        null;
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -387,9 +387,9 @@ export const getQueenMoves = (
     let newCol = col + direction.col;
 
     while (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow] ?
-        boardState[newRow][newCol] :
-        null;
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move
@@ -451,9 +451,9 @@ export const getKingMovesWithoutCastling = (
     const newCol = col + direction.col;
 
     if (isWithinBounds(newRow, newCol) && !isCornerSquare(newRow, newCol)) {
-      const targetPiece = boardState[newRow] ?
-        boardState[newRow][newCol] :
-        null;
+      const targetPiece = boardState[newRow]
+        ? boardState[newRow][newCol]
+        : null;
 
       if (!targetPiece) {
         // Empty square - valid move

@@ -12,6 +12,8 @@ import onlineGameService from "../../../services/onlineGameService";
 import { MoveInfo } from "../../../types";
 import Square from "./Square";
 import { useLocalSearchParams } from "expo-router";
+import { useSettings } from "../../../hooks/useSettings";
+import { getBoardTheme } from "./BoardThemeConfig";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -22,6 +24,8 @@ export default function Board() {
   const boardSize = Math.min(width * 0.98, 600); // Max 600px or 98% of screen width
   const squareSize = boardSize / 14;
   const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const { settings } = useSettings();
+  const boardTheme = getBoardTheme(settings);
 
   // Get the entire live game state, including the history array and index
   const liveGame = useSelector((state: RootState) => state.game);
@@ -187,7 +191,7 @@ export default function Board() {
                     width: squareSize,
                     height: squareSize,
                     backgroundColor:
-                      (rowIndex + colIndex) % 2 === 0 ? "#f0d9b5" : "#b58863",
+                      (rowIndex + colIndex) % 2 === 0 ? boardTheme.lightSquare : boardTheme.darkSquare,
                   }}
                 />
               ))}
@@ -222,6 +226,7 @@ export default function Board() {
                     )
                   }
                   isEliminated={isPieceEliminated(piece)}
+                  boardTheme={boardTheme}
                 />
               );
             })}

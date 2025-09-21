@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <!-- This is a placeholder king SVG - replace with your actual design -->
+  <g fill="currentColor">
+    <!-- Crown -->
+    <path d="M24 8 L20 16 L16 12 L12 16 L8 12 L12 8 L16 12 L20 8 L24 12 L28 8 L32 12 L36 8 L32 12 L28 16 L24 8 Z"/>
+    <!-- Base -->
+    <path d="M18 16 L30 16 L30 20 L18 20 Z"/>
+    <!-- Cross -->
+    <path d="M22 20 L22 24 L26 24 L26 20 Z"/>
+    <path d="M24 18 L24 26 L24 18 Z"/>
+  </g>
+</svg>
+

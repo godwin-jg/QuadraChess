@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Pressable } from "react-native";
 import Piece from "./Piece";
+import { BoardTheme } from "./BoardThemeConfig";
 
 interface SquareProps {
   piece: string | null;
@@ -14,6 +15,7 @@ interface SquareProps {
   capturingPieceColor?: string;
   isEliminated?: boolean;
   onPress?: () => void;
+  boardTheme?: BoardTheme;
 }
 
 export default function Square({
@@ -28,6 +30,7 @@ export default function Square({
   capturingPieceColor,
   isEliminated = false,
   onPress,
+  boardTheme,
 }: SquareProps) {
   // Check if this is a corner square that should not be playable
   const isCornerSquare =
@@ -69,7 +72,9 @@ export default function Square({
       case "g":
         return "#bbf7d0"; // green-200 equivalent
       default:
-        return color === "light" ? "#f0d9b5" : "#b58863";
+        return color === "light"
+          ? boardTheme?.lightSquare || "#f0d9b5"
+          : boardTheme?.darkSquare || "#b58863";
     }
   };
 
@@ -87,15 +92,19 @@ export default function Square({
         case "g":
           return "#bbf7d0"; // green-200 equivalent
         default:
-          // Use the same brown color scheme as Board.tsx
-          return color === "light" ? "#f0d9b5" : "#b58863";
+          // Use the board theme colors
+          return color === "light"
+            ? boardTheme?.lightSquare || "#f0d9b5"
+            : boardTheme?.darkSquare || "#b58863";
       }
     }
     if (moveType === "capture" && capturingPieceColor) {
       return getCaptureBackgroundColor(capturingPieceColor);
     }
-    // Use the same brown color scheme as Board.tsx
-    return color === "light" ? "#f0d9b5" : "#b58863";
+    // Use the board theme colors
+    return color === "light"
+      ? boardTheme?.lightSquare || "#f0d9b5"
+      : boardTheme?.darkSquare || "#b58863";
   };
 
   const handlePress = () => {

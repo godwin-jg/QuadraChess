@@ -3,10 +3,14 @@ import { Link, useRouter } from "expo-router";
 import { View } from "@/components/Themed";
 import modeSwitchService from "../../services/modeSwitchService";
 import { useState } from "react";
+import TestGallery from "../components/board/TestGallery";
+import ProfileSettings from "../components/settings/ProfileSettings";
 
 export default function HomeScreen() {
   const router = useRouter();
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showTestGallery, setShowTestGallery] = useState(false);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
 
   const handleModeSwitch = async (
     targetMode: "online" | "local" | "solo",
@@ -21,7 +25,7 @@ export default function HomeScreen() {
         targetMode,
         () => {
           // Confirm: Navigate to the target mode
-          router.push(path);
+          router.push(path as any);
         },
         () => {
           // Cancel: Stay on current screen
@@ -33,14 +37,31 @@ export default function HomeScreen() {
     }
   };
 
+  if (showTestGallery) {
+    return <TestGallery onBack={() => setShowTestGallery(false)} />;
+  }
+
+  if (showProfileSettings) {
+    return <ProfileSettings onClose={() => setShowProfileSettings(false)} />;
+  }
+
   return (
     <View className="flex-1 bg-black">
-      <View className="flex-1 px-6 pt-16 pb-8 justify-between">
+      {/* Top Navigation Bar */}
+      <View className="flex-row justify-between items-center px-6 pt-16 pb-4">
+        <View className="w-10" />
+        <Text className="text-2xl font-bold text-white">♔ Four Player Chess ♔</Text>
+        <TouchableOpacity
+          className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
+          onPress={() => setShowProfileSettings(true)}
+        >
+          <Text className="text-xl">⚙️</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View className="flex-1 px-6 pb-8 justify-between">
         {/* Header Section */}
         <View className="items-center mb-8">
-          <Text className="text-4xl font-bold text-white text-center mb-2">
-            ♔ Four Player Chess ♔
-          </Text>
           <Text className="text-lg text-gray-300 text-center mb-4">
             Strategic Multiplayer Chess
           </Text>
@@ -92,6 +113,21 @@ export default function HomeScreen() {
             </Text>
             <Text className="text-blue-100 text-xs text-center">
               Play online
+            </Text>
+          </TouchableOpacity>
+
+
+          {/* Temporary Test Button */}
+          <TouchableOpacity
+            className="bg-purple-600 py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center mt-4"
+            onPress={() => setShowTestGallery(true)}
+          >
+            <Text className="text-2xl text-center mb-1">🧪</Text>
+            <Text className="text-white text-lg font-bold text-center mb-1">
+              Test Gallery
+            </Text>
+            <Text className="text-purple-100 text-xs text-center">
+              View all test components
             </Text>
           </TouchableOpacity>
         </View>

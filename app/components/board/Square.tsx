@@ -1,7 +1,7 @@
 import React from "react";
-import { View, Pressable } from "react-native";
-import Piece from "./Piece";
+import { Pressable, View } from "react-native";
 import { BoardTheme } from "./BoardThemeConfig";
+import Piece from "./Piece";
 
 interface SquareProps {
   piece: string | null;

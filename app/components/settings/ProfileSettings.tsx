@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  Switch,
   Alert,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSettings } from "../../../hooks/useSettings";
 import { getBoardTheme } from "../board/BoardThemeConfig";
@@ -28,6 +28,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     updatePieces,
     updateGame,
     updateAccessibility,
+    updateDeveloper,
     saveSettings,
     discardChanges,
     resetToDefaults,
@@ -87,7 +88,10 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={theme.key}
-        style={[styles.horizontalOption, isSelected && styles.horizontalOptionSelected]}
+        style={[
+          styles.horizontalOption,
+          isSelected && styles.horizontalOptionSelected,
+        ]}
         onPress={() => updateBoard({ theme: theme.key })}
       >
         <View style={styles.themePreview}>
@@ -119,7 +123,10 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
         <View style={styles.horizontalInfo}>
           <Text
-            style={[styles.horizontalName, isSelected && styles.horizontalNameSelected]}
+            style={[
+              styles.horizontalName,
+              isSelected && styles.horizontalNameSelected,
+            ]}
           >
             {theme.name}
           </Text>
@@ -135,21 +142,24 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     // Create temporary settings with this style to get accurate preview
     const tempSettings = {
       ...settings,
-      pieces: { ...settings.pieces, style: style.key }
+      pieces: { ...settings.pieces, style: style.key },
     };
 
     return (
       <TouchableOpacity
         key={style.key}
-        style={[styles.horizontalOption, isSelected && styles.horizontalOptionSelected]}
+        style={[
+          styles.horizontalOption,
+          isSelected && styles.horizontalOptionSelected,
+        ]}
         onPress={() => updatePieces({ style: style.key })}
       >
         <View style={styles.stylePreview}>
           <View style={styles.singlePieceContainer}>
             <View style={styles.singlePieceSquare}>
-              <Piece 
-                piece="rK" 
-                size={32} 
+              <Piece
+                piece="rK"
+                size={32}
                 useSVG={true}
                 // Pass the temp settings to get accurate styling
                 settings={tempSettings}
@@ -159,7 +169,10 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
         <View style={styles.horizontalInfo}>
           <Text
-            style={[styles.horizontalName, isSelected && styles.horizontalNameSelected]}
+            style={[
+              styles.horizontalName,
+              isSelected && styles.horizontalNameSelected,
+            ]}
           >
             {style.name}
           </Text>
@@ -175,10 +188,18 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={size.key}
-        style={[styles.horizontalOption, isSelected && styles.horizontalOptionSelected]}
+        style={[
+          styles.horizontalOption,
+          isSelected && styles.horizontalOptionSelected,
+        ]}
         onPress={() => updatePieces({ size: size.key })}
       >
-        <Text style={[styles.horizontalName, isSelected && styles.horizontalNameSelected]}>
+        <Text
+          style={[
+            styles.horizontalName,
+            isSelected && styles.horizontalNameSelected,
+          ]}
+        >
           {size.name}
         </Text>
         {isSelected && <Text style={styles.checkmark}>✓</Text>}
@@ -389,6 +410,29 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 thumbColor={
                   settings.accessibility.reducedMotion ? "#FFFFFF" : "#9CA3AF"
                 }
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* Developer Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            🛠️ Developer (will be removed in release)
+          </Text>
+          <View style={styles.switchGroup}>
+            <View style={styles.switchRow}>
+              <View style={styles.switchLabelContainer}>
+                <Text style={styles.switchLabel}>Solo Mode</Text>
+                <Text style={styles.switchDescription}>
+                  Disable turn validation for analysis
+                </Text>
+              </View>
+              <Switch
+                value={settings.developer.soloMode}
+                onValueChange={(value) => updateDeveloper({ soloMode: value })}
+                trackColor={{ false: "#E5E7EB", true: "#EF4444" }}
+                thumbColor={settings.developer.soloMode ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
           </View>
@@ -716,6 +760,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#D1D5DB",
     flex: 1,
+  },
+  switchLabelContainer: {
+    flex: 1,
+  },
+  switchDescription: {
+    fontSize: 14,
+    color: "#9CA3AF",
+    marginTop: 2,
   },
   unsavedChangesText: {
     fontSize: 16,

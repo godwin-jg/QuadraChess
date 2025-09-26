@@ -1,18 +1,18 @@
 import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+import networkService, { Player } from "../app/services/networkService";
 import {
   getValidMoves,
-  isKingInCheck,
   hasAnyLegalMoves,
+  isKingInCheck,
 } from "../functions/src/logic/gameLogic";
 import { MoveInfo } from "../types";
-import { GameState, Position, turnOrder } from "./types";
 import { initialBoardState } from "./boardState";
 import {
-  updateAllCheckStatus,
   getRookIdentifier,
   isCastlingMove,
+  updateAllCheckStatus,
 } from "./gameHelpers";
-import networkService, { Player } from "../app/services/networkService";
+import { GameState, Position, turnOrder } from "./types";
 
 // Helper function to create a deep copy of the game state
 export const createStateSnapshot = (state: GameState): GameState => {
@@ -81,6 +81,8 @@ export const baseInitialState: GameState = {
   players: [],
   isHost: false,
   canStartGame: false,
+  // Game mode
+  gameMode: "single",
 };
 
 // Create initial state with proper history initialization
@@ -105,6 +107,11 @@ const gameSlice = createSlice({
     setValidMoves: (state, action: PayloadAction<MoveInfo[]>) => {
       state.validMoves = action.payload;
     },
+    deselectPiece: (state) => {
+      console.log("Redux: deselectPiece called");
+      state.selectedPiece = null;
+      state.validMoves = [];
+    },
     selectPiece: (state, action: PayloadAction<Position>) => {
       console.log("Redux: selectPiece called with", action.payload);
       console.log("Redux: currentPlayerTurn:", state.currentPlayerTurn);
@@ -124,6 +131,18 @@ const gameSlice = createSlice({
       const { row, col } = action.payload;
       const pieceCode = state.boardState[row][col];
       console.log("Redux: pieceCode at", row, col, ":", pieceCode);
+
+      // Check if clicking the same piece that's already selected - deselect it
+      if (
+        state.selectedPiece &&
+        state.selectedPiece.row === row &&
+        state.selectedPiece.col === col
+      ) {
+        console.log("Redux: Deselecting same piece");
+        state.selectedPiece = null;
+        state.validMoves = [];
+        return;
+      }
 
       if (!pieceCode) {
         console.log("Redux: No piece at position, clearing selection");
@@ -188,7 +207,21 @@ const gameSlice = createSlice({
         const pieceType = pieceToMove?.[1];
 
         // Enforce player turn - only current player can make moves
-        if (pieceColor !== state.currentPlayerTurn) {
+        // Skip turn validation ONLY in solo mode for testing purposes
+        console.log(
+          "makeMove: gameMode:",
+          state.gameMode,
+          "pieceColor:",
+          pieceColor,
+          "currentPlayerTurn:",
+          state.currentPlayerTurn
+        );
+
+        if (
+          state.gameMode !== "solo" &&
+          pieceColor !== state.currentPlayerTurn
+        ) {
+          console.log("makeMove: Turn validation blocked - not player's turn");
           return; // Don't make the move
         }
 
@@ -341,6 +374,11 @@ const gameSlice = createSlice({
 
         // B. Handle regular capture (only for non-castling moves and non-en passant captures)
         if (capturedPiece && !isCastling && !enPassantTarget) {
+          // Prevent king capture - kings cannot be captured
+          if (capturedPiece[1] === "K") {
+            return; // Don't make the move if trying to capture a king
+          }
+
           const capturingPlayer = pieceToMove?.charAt(0);
           state.capturedPieces[
             capturingPlayer as keyof typeof state.capturedPieces
@@ -372,21 +410,26 @@ const gameSlice = createSlice({
           state.scores[capturingPlayer as keyof typeof state.scores] += points;
         }
 
-        // Check if this is a pawn promotion
+        // Check if this is a pawn promotion using the move's isPromotion flag
         const isPawn = pieceToMove?.endsWith("P");
         let isPromotion = false;
 
         if (isPawn) {
-          const pieceColor = pieceToMove?.charAt(0);
-          if (pieceColor === "r" && targetRow === 6) {
-            isPromotion = true; // Red promotes on row 6
-          } else if (pieceColor === "y" && targetRow === 7) {
-            isPromotion = true; // Yellow promotes on row 7
-          } else if (pieceColor === "b" && targetCol === 7) {
-            isPromotion = true; // Blue promotes on col 7
-          } else if (pieceColor === "g" && targetCol === 6) {
-            isPromotion = true; // Green promotes on col 6
-          }
+          // Get valid moves for this pawn to check if the move is a promotion
+          const validMoves = getValidMoves(
+            pieceToMove!,
+            { row: startRow, col: startCol },
+            state.boardState,
+            state.eliminatedPlayers,
+            state.hasMoved,
+            state.enPassantTargets
+          );
+
+          // Find the specific move to check its isPromotion flag
+          const move = validMoves.find(
+            (move) => move.row === targetRow && move.col === targetCol
+          );
+          isPromotion = move?.isPromotion || false;
         }
 
         // Move the piece (for all moves, including promotions)
@@ -756,6 +799,12 @@ const gameSlice = createSlice({
       const { row: fromRow, col: fromCol } = from;
       const { row: toRow, col: toCol } = to;
 
+      // Check if trying to capture a king - prevent king capture
+      const capturedPiece = state.boardState[toRow][toCol];
+      if (capturedPiece && capturedPiece[1] === "K") {
+        return; // Don't apply the move if trying to capture a king
+      }
+
       // Move the piece
       state.boardState[toRow][toCol] = pieceCode;
       state.boardState[fromRow][fromCol] = null;
@@ -833,12 +882,25 @@ const gameSlice = createSlice({
     setCanStartGame: (state, action: PayloadAction<boolean>) => {
       state.canStartGame = action.payload;
     },
+    setGameMode: (
+      state,
+      action: PayloadAction<"solo" | "local" | "online" | "p2p" | "single">
+    ) => {
+      console.log(
+        "setGameMode: Setting game mode from",
+        state.gameMode,
+        "to",
+        action.payload
+      );
+      state.gameMode = action.payload;
+    },
   },
 });
 
 export const {
   setSelectedPiece,
   setValidMoves,
+  deselectPiece,
   selectPiece,
   makeMove,
   completePromotion,
@@ -854,6 +916,7 @@ export const {
   setPlayers,
   setIsHost,
   setCanStartGame,
+  setGameMode,
 } = gameSlice.actions;
 
 // Selectors for UI components to choose between live and historical state

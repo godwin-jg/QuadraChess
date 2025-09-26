@@ -1,17 +1,17 @@
-import { Position, MoveInfo } from "../types";
+import { MoveInfo, Position } from "../types";
+import {
+  getBishopMoves,
+  getKingMoves,
+  getKingMovesWithoutCastling,
+  getKnightMoves,
+  getPawnMoves,
+  getQueenMoves,
+  getRookMoves,
+} from "./pieceMoves";
+import { simulateMove } from "./utils";
 
 // Re-export MoveInfo for client use
 export { MoveInfo };
-import { simulateMove } from "./utils";
-import {
-  getPawnMoves,
-  getKnightMoves,
-  getRookMoves,
-  getBishopMoves,
-  getQueenMoves,
-  getKingMoves,
-  getKingMovesWithoutCastling,
-} from "./pieceMoves";
 
 // Helper function to check if a square is under attack (without castling to prevent recursion)
 export const isSquareUnderAttack = (
@@ -72,25 +72,25 @@ const getPseudoLegalMovesWithoutCastling = (
   }
 
   switch (pieceType) {
-  case "P": // Pawn
-    return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "N": // Knight
-    return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "R": // Rook
-    return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "B": // Bishop
-    return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "Q": // Queen
-    return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "K": // King (without castling)
-    return getKingMovesWithoutCastling(
-      pieceCode,
-      position,
-      boardState,
-      eliminatedPlayers
-    );
-  default:
-    return [];
+    case "P": // Pawn
+      return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "N": // Knight
+      return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "R": // Rook
+      return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "B": // Bishop
+      return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "Q": // Queen
+      return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "K": // King (without castling)
+      return getKingMovesWithoutCastling(
+        pieceCode,
+        position,
+        boardState,
+        eliminatedPlayers
+      );
+    default:
+      return [];
   }
 };
 
@@ -118,34 +118,34 @@ const getPseudoLegalMoves = (
   }
 
   switch (pieceType) {
-  case "P": // Pawn
-    return getPawnMoves(
-      pieceCode,
-      position,
-      boardState,
-      eliminatedPlayers,
-      enPassantTargets
-    );
-  case "N": // Knight
-    return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "R": // Rook
-    return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "B": // Bishop
-    return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "Q": // Queen
-    return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
-  case "K": // King
-    return getKingMoves(
-      pieceCode,
-      position,
-      boardState,
-      eliminatedPlayers,
-      hasMoved,
-      isKingInCheck,
-      isSquareUnderAttack
-    );
-  default:
-    return [];
+    case "P": // Pawn
+      return getPawnMoves(
+        pieceCode,
+        position,
+        boardState,
+        eliminatedPlayers,
+        enPassantTargets
+      );
+    case "N": // Knight
+      return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "R": // Rook
+      return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "B": // Bishop
+      return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "Q": // Queen
+      return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
+    case "K": // King
+      return getKingMoves(
+        pieceCode,
+        position,
+        boardState,
+        eliminatedPlayers,
+        hasMoved,
+        isKingInCheck,
+        isSquareUnderAttack
+      );
+    default:
+      return [];
   }
 };
 

@@ -1,8 +1,8 @@
-import { TouchableOpacity, Text } from "react-native";
-import { Link, useRouter } from "expo-router";
 import { View } from "@/components/Themed";
-import modeSwitchService from "../../services/modeSwitchService";
+import { useRouter } from "expo-router";
 import { useState } from "react";
+import { Text, TouchableOpacity } from "react-native";
+import modeSwitchService from "../../services/modeSwitchService";
 import TestGallery from "../components/board/TestGallery";
 import ProfileSettings from "../components/settings/ProfileSettings";
 
@@ -50,7 +50,9 @@ export default function HomeScreen() {
       {/* Top Navigation Bar */}
       <View className="flex-row justify-between items-center px-6 pt-16 pb-4">
         <View className="w-10" />
-        <Text className="text-2xl font-bold text-white">♔ Four Player Chess ♔</Text>
+        <Text className="text-2xl font-bold text-white">
+          ♔ Four Player Chess ♔
+        </Text>
         <TouchableOpacity
           className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
           onPress={() => setShowProfileSettings(true)}
@@ -74,10 +76,12 @@ export default function HomeScreen() {
         <View className="gap-3">
           <TouchableOpacity
             className="bg-white py-3 px-5 rounded-xl shadow-lg active:opacity-80 items-center"
-            onPress={() => handleModeSwitch("solo", "/(tabs)/GameScreen")}
+            onPress={() =>
+              handleModeSwitch("single", "/(tabs)/GameScreen?mode=single")
+            }
             disabled={isNavigating}
           >
-            <Text className="text-2xl text-center mb-1">🎮</Text>
+            <Text className="text-2xl text-center mb-1">🤖</Text>
             <Text className="text-black text-lg font-bold text-center mb-1">
               Single Player
             </Text>
@@ -115,7 +119,6 @@ export default function HomeScreen() {
               Play online
             </Text>
           </TouchableOpacity>
-
 
           {/* Temporary Test Button */}
           <TouchableOpacity

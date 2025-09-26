@@ -92,6 +92,14 @@ export function useSettings() {
     });
   };
 
+  const updateDeveloper = async (
+    developer: Partial<UserSettings["developer"]>
+  ) => {
+    await updateSettings({
+      developer: { ...settings.developer, ...developer },
+    });
+  };
+
   const resetToDefaults = async () => {
     await settingsService.resetToDefaults();
     const defaultSettings = settingsService.getSettings();
@@ -109,6 +117,7 @@ export function useSettings() {
     updatePieces,
     updateGame,
     updateAccessibility,
+    updateDeveloper,
     saveSettings,
     discardChanges,
     resetToDefaults,

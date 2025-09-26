@@ -1,3 +1,4 @@
+import { useColorScheme } from "@/components/useColorScheme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
   DarkTheme,
@@ -9,9 +10,8 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { Provider } from "react-redux";
-import { store } from "../state";
 import "../global.css";
-import { useColorScheme } from "@/components/useColorScheme";
+import { store } from "../state";
 
 // Initialize Firebase with a small delay to ensure proper initialization
 import "../services/firebaseInit";

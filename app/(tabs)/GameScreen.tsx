@@ -1,24 +1,26 @@
-import { View, Text } from "@/components/Themed";
+import { Text, View } from "@/components/Themed";
+import { useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator } from "react-native";
-import { useSelector, useDispatch } from "react-redux";
-import { RootState, resetGame, completePromotion } from "../../state";
+import { useDispatch, useSelector } from "react-redux";
+import { useSettings } from "../../hooks/useSettings";
+import modeSwitchService from "../../services/modeSwitchService";
+import onlineGameService from "../../services/onlineGameService";
+import p2pGameService from "../../services/p2pGameService";
+import { RootState, completePromotion, resetGame } from "../../state";
 import {
   applyNetworkMove,
+  setGameMode,
   setGameState,
-  makeMove,
 } from "../../state/gameSlice";
 import Board from "../components/board/Board";
-import GameOverModal from "../components/ui/GameOverModal";
+import GameMenu from "../components/ui/GameMenu";
 import GameNotification from "../components/ui/GameNotification";
+import GameOverModal from "../components/ui/GameOverModal";
+import HistoryControls from "../components/ui/HistoryControls";
 import PlayerInfoPod from "../components/ui/PlayerInfoPod";
 import PromotionModal from "../components/ui/PromotionModal";
-import HistoryControls from "../components/ui/HistoryControls";
-import GameMenu from "../components/ui/GameMenu";
 import networkService from "../services/networkService";
-import onlineGameService from "../../services/onlineGameService";
-import modeSwitchService from "../../services/modeSwitchService";
-import { useEffect, useState, useMemo } from "react";
-import { useLocalSearchParams } from "expo-router";
 
 export default function GameScreen() {
   // Get dispatch function
@@ -27,14 +29,33 @@ export default function GameScreen() {
     gameId?: string;
     mode?: string;
   }>();
+  const { settings } = useSettings();
   const [isOnlineMode, setIsOnlineMode] = useState(false);
+  const [isP2PMode, setIsP2PMode] = useState(false);
   const [connectionStatus, setConnectionStatus] =
     useState<string>("Connecting...");
 
-  // Determine if this is online multiplayer mode
+  // Determine if this is online or P2P multiplayer mode
   useEffect(() => {
     setIsOnlineMode(mode === "online" && !!gameId);
-  }, [gameId, mode]);
+    setIsP2PMode(mode === "p2p");
+
+    // Set the game mode in the Redux store
+    // Use solo mode from settings if enabled, otherwise use the route mode
+    const effectiveMode = settings.developer.soloMode
+      ? "solo"
+      : (mode as "solo" | "local" | "online" | "p2p" | "single");
+
+    console.log(
+      "GameScreen: Setting game mode:",
+      effectiveMode,
+      "from route mode:",
+      mode,
+      "solo mode enabled:",
+      settings.developer.soloMode
+    );
+    dispatch(setGameMode(effectiveMode));
+  }, [gameId, mode, settings.developer.soloMode, dispatch]);
 
   // Handle mode switching with proper disconnection
   useEffect(() => {
@@ -42,14 +63,16 @@ export default function GameScreen() {
       // Check if we need to disconnect from current game
       const currentMode = onlineGameService.isConnected
         ? "online"
+        : p2pGameService.isConnected
+        ? "p2p"
         : networkService.connected
-          ? "local"
-          : "solo";
+        ? "local"
+        : "solo";
 
       // Only show warning if we're actually switching modes
       if (currentMode !== mode) {
         await modeSwitchService.handleModeSwitch(
-          mode as "online" | "local" | "solo",
+          mode as "online" | "p2p" | "local" | "solo" | "single",
           () => {
             // Confirm: Reset game and continue
             dispatch(resetGame());
@@ -123,6 +146,52 @@ export default function GameScreen() {
     }
   }, [isOnlineMode, gameId, mode, dispatch]);
 
+  // Set up P2P game connection
+  useEffect(() => {
+    if (isP2PMode && mode === "p2p") {
+      const connectToP2PGame = async () => {
+        try {
+          setConnectionStatus("Connecting to P2P game...");
+          console.log("GameScreen: Attempting to connect to P2P game");
+          await p2pGameService.connectToGame("p2p-game");
+          console.log("GameScreen: Successfully connected to P2P game");
+          setConnectionStatus("Connected");
+
+          // Set up P2P game listeners
+          const unsubscribeGame = p2pGameService.onGameUpdate((game) => {
+            if (game) {
+              // p2pGameService handles all state management
+              console.log("P2P Game updated:", game);
+            } else {
+              console.log("P2P Game not found or ended");
+              setConnectionStatus("Game not found");
+            }
+          });
+
+          const unsubscribeMoves = p2pGameService.onMoveUpdate((move) => {
+            // The service handles move application internally
+            console.log("P2P Move received:", move);
+          });
+
+          return () => {
+            unsubscribeGame();
+            unsubscribeMoves();
+          };
+        } catch (error) {
+          console.error("Failed to connect to P2P game:", error);
+          setConnectionStatus("Connection failed");
+        }
+      };
+
+      const cleanup = connectToP2PGame();
+
+      return () => {
+        cleanup.then((cleanupFn) => cleanupFn?.());
+        p2pGameService.disconnect();
+      };
+    }
+  }, [isP2PMode, mode, dispatch]);
+
   // Cleanup online game connection when switching to solo mode
   useEffect(() => {
     if (mode === "solo" && onlineGameService.isConnected) {
@@ -133,9 +202,19 @@ export default function GameScreen() {
     }
   }, [mode]);
 
+  // Cleanup P2P game connection when switching to solo mode
+  useEffect(() => {
+    if (mode === "solo" && p2pGameService.isConnected) {
+      console.log(
+        "GameScreen: Disconnecting from P2P game due to solo mode switch"
+      );
+      p2pGameService.disconnect();
+    }
+  }, [mode]);
+
   // Set up local network listeners for local multiplayer
   useEffect(() => {
-    if (!isOnlineMode) {
+    if (!isOnlineMode && !isP2PMode) {
       const handleMoveMade = (data: any) => {
         dispatch(applyNetworkMove(data.move));
         // Update game state with server's turn information
@@ -168,7 +247,7 @@ export default function GameScreen() {
         networkService.off("game-destroyed", handleGameDestroyed);
       };
     }
-  }, [isOnlineMode, dispatch]);
+  }, [isOnlineMode, isP2PMode, dispatch]);
 
   // Get the entire live game state, including the history array and index
   const liveGame = useSelector((state: RootState) => state.game);
@@ -263,7 +342,7 @@ export default function GameScreen() {
       <View className="flex-1 bg-black justify-center items-center">
         <ActivityIndicator size="large" color="#ffffff" />
         <Text className="text-white text-lg mt-4">Loading game...</Text>
-        {isOnlineMode && (
+        {(isOnlineMode || isP2PMode) && (
           <Text className="text-gray-400 text-sm mt-2">{connectionStatus}</Text>
         )}
       </View>

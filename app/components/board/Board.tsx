@@ -1,19 +1,20 @@
+import { useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
-import { View, useWindowDimensions, Text } from "react-native";
-import { useSelector, useDispatch } from "react-redux";
-import { RootState } from "../../../state/store";
+import { Text, View, useWindowDimensions } from "react-native";
+import { useDispatch, useSelector } from "react-redux";
+import { useSettings } from "../../../hooks/useSettings";
+import onlineGameService from "../../../services/onlineGameService";
+import p2pGameService from "../../../services/p2pGameService";
 import {
-  selectPiece,
+  deselectPiece,
   makeMove,
+  selectPiece,
   sendMoveToServer,
 } from "../../../state/gameSlice";
+import { RootState } from "../../../state/store";
 import networkService from "../../services/networkService";
-import onlineGameService from "../../../services/onlineGameService";
-import { MoveInfo } from "../../../types";
-import Square from "./Square";
-import { useLocalSearchParams } from "expo-router";
-import { useSettings } from "../../../hooks/useSettings";
 import { getBoardTheme } from "./BoardThemeConfig";
+import Square from "./Square";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -26,6 +27,9 @@ export default function Board() {
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { settings } = useSettings();
   const boardTheme = getBoardTheme(settings);
+  
+  // Use solo mode from settings if enabled, otherwise use the route mode
+  const effectiveMode = settings.developer.soloMode ? "solo" : mode;
 
   // Get the entire live game state, including the history array and index
   const liveGame = useSelector((state: RootState) => state.game);
@@ -86,6 +90,7 @@ export default function Board() {
       return;
     }
 
+    const pieceCode = boardState[row][col];
     const isAValidMove = validMoves.some(
       (move) => move.row === row && move.col === col
     );
@@ -94,7 +99,7 @@ export default function Board() {
     const isSelectedPiece =
       selectedPiece && selectedPiece.row === row && selectedPiece.col === col;
 
-    // If pressing the same selected piece again, deselect it
+    // If pressing the same selected piece again, deselect it (handled in Redux reducer)
     if (isSelectedPiece) {
       dispatch(selectPiece({ row, col })); // This will deselect since it's the same piece
       return;
@@ -114,7 +119,7 @@ export default function Board() {
 
       // Handle different game modes
 
-      if (mode === "online") {
+      if (effectiveMode === "online") {
         console.log(
           "Board: Online mode - isConnected:",
           onlineGameService.isConnected,
@@ -136,6 +141,28 @@ export default function Board() {
           // Fallback to local move if online service is not connected
           dispatch(makeMove({ row, col }));
         }
+      } else if (effectiveMode === "p2p") {
+        console.log(
+          "Board: P2P mode - isConnected:",
+          p2pGameService.isConnected,
+          "currentGameId:",
+          p2pGameService.currentGameId
+        );
+        if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+          // P2P multiplayer mode
+          try {
+            console.log("Board: Sending move to P2P service:", moveData);
+            await p2pGameService.makeMove(moveData);
+          } catch (error) {
+            console.error("Failed to make P2P move:", error);
+          }
+        } else {
+          console.log(
+            "Board: P2P service not connected, falling back to local move"
+          );
+          // Fallback to local move if P2P service is not connected
+          dispatch(makeMove({ row, col }));
+        }
       } else if (networkService.connected && networkService.roomId) {
         // Local multiplayer mode
         dispatch(sendMoveToServer({ row, col }));
@@ -144,6 +171,12 @@ export default function Board() {
         dispatch(makeMove({ row, col }));
       }
     } else {
+      // If clicking on empty square and a piece is selected, deselect it
+      if (!pieceCode && selectedPiece) {
+        dispatch(deselectPiece());
+        return;
+      }
+
       // Otherwise, just try to select the piece on the pressed square
       dispatch(selectPiece({ row, col }));
     }
@@ -191,7 +224,9 @@ export default function Board() {
                     width: squareSize,
                     height: squareSize,
                     backgroundColor:
-                      (rowIndex + colIndex) % 2 === 0 ? boardTheme.lightSquare : boardTheme.darkSquare,
+                      (rowIndex + colIndex) % 2 === 0
+                        ? boardTheme.lightSquare
+                        : boardTheme.darkSquare,
                   }}
                 />
               ))}

@@ -1,6 +1,6 @@
 import { Position } from "../types";
 import { MoveInfo } from "./types";
-import { isWithinBounds, isCornerSquare, isEmpty, isEnemy } from "./utils";
+import { isCornerSquare, isEmpty, isEnemy, isWithinBounds } from "./utils";
 
 // Get valid moves for a pawn
 export const getPawnMoves = (
@@ -164,18 +164,58 @@ export const getPawnMoves = (
   }
 
   // Mark moves that would result in promotion
+  // PROMOTION RULE: Pawns promote when reaching:
+  // 1. OPPOSING player's first rank (new universal rule)
+  // 2. Traditional promotion ranks (old rule)
   const movesWithPromotion = validMoves.map((move) => {
-    // Check if the move lands on the correct promotion rank for each color
     let isPromotion = false;
 
-    if (pieceColor === "r" && move.row === 6) {
-      isPromotion = true; // Red promotes on row 6
-    } else if (pieceColor === "y" && move.row === 7) {
-      isPromotion = true; // Yellow promotes on row 7
-    } else if (pieceColor === "b" && move.col === 7) {
-      isPromotion = true; // Blue promotes on col 7
-    } else if (pieceColor === "g" && move.col === 6) {
-      isPromotion = true; // Green promotes on col 6
+    // NEW RULE: OPPOSING player's first rank promotion
+    // Yellow's first rank (row 0, cols 3-10) - OPPOSING pawns promote here
+    if (
+      move.row === 0 &&
+      move.col >= 3 &&
+      move.col <= 10 &&
+      pieceColor !== "y"
+    ) {
+      isPromotion = true;
+    } else if (
+      move.row === 13 &&
+      move.col >= 3 &&
+      move.col <= 10 &&
+      pieceColor !== "r"
+    ) {
+      // Red's first rank (row 13, cols 3-10) - OPPOSING pawns promote here
+      isPromotion = true;
+    } else if (
+      move.col === 0 &&
+      move.row >= 3 &&
+      move.row <= 10 &&
+      pieceColor !== "b"
+    ) {
+      // Blue's first rank (col 0, rows 3-10) - OPPOSING pawns promote here
+      isPromotion = true;
+    } else if (
+      move.col === 13 &&
+      move.row >= 3 &&
+      move.row <= 10 &&
+      pieceColor !== "g"
+    ) {
+      // Green's first rank (col 13, rows 3-10) - OPPOSING pawns promote here
+      isPromotion = true;
+    }
+
+    // OLD RULE: Traditional promotion ranks (if not already promoting)
+    if (!isPromotion) {
+      if (pieceColor === "r" && move.row === 6) {
+        isPromotion = true; // Red promotes on row 6
+      } else if (pieceColor === "y" && move.row === 7) {
+        isPromotion = true; // Yellow promotes on row 7
+      } else if (pieceColor === "b" && move.col === 7) {
+        isPromotion = true; // Blue promotes on col 7
+      } else if (pieceColor === "g" && move.col === 6) {
+        isPromotion = true; // Green promotes on col 6
+      }
     }
 
     return {
@@ -531,7 +571,8 @@ export const getKingMoves = (
         // Kingside castling (right)
         if (
           !hasMoved.rR2 &&
-          isEmpty(boardState, 13, 8) &&
+          isEmpty(boardState, 13, 8) && // Intermediate square 1
+          isEmpty(boardState, 13, 9) && // Intermediate square 2 (knight position)
           boardState[13] &&
           boardState[13][10] === "rR"
         ) {
@@ -564,6 +605,7 @@ export const getKingMoves = (
         // Queenside castling (left)
         if (
           !hasMoved.rR1 &&
+          isEmpty(boardState, 13, 4) &&
           isEmpty(boardState, 13, 5) &&
           isEmpty(boardState, 13, 6) &&
           boardState[13] &&
@@ -599,7 +641,8 @@ export const getKingMoves = (
         // Kingside castling (down) - King moves 2 squares down
         if (
           !hasMoved.bR2 &&
-          isEmpty(boardState, 8, 0) && // Intermediate square
+          isEmpty(boardState, 8, 0) && // Intermediate square 1
+          isEmpty(boardState, 9, 0) && // Intermediate square 2 (knight position)
           boardState[10] &&
           boardState[10][0] === "bR" // Right rook at (10, 0)
         ) {
@@ -631,8 +674,9 @@ export const getKingMoves = (
         // Queenside castling (up) - King moves 2 squares up
         if (
           !hasMoved.bR1 &&
-          isEmpty(boardState, 5, 0) && // Intermediate square 1
-          isEmpty(boardState, 6, 0) && // Intermediate square 2
+          isEmpty(boardState, 4, 0) && // Intermediate square 1 (knight position)
+          isEmpty(boardState, 5, 0) && // Intermediate square 2
+          isEmpty(boardState, 6, 0) && // Intermediate square 3
           boardState[3] &&
           boardState[3][0] === "bR" // Left rook at (3, 0)
         ) {
@@ -663,10 +707,12 @@ export const getKingMoves = (
         }
       } else if (pieceColor === "y") {
         // Yellow - top row
-        // Kingside castling (right) - King moves 2 squares right
+        // Queenside castling (right) - King moves 2 squares right
         if (
           !hasMoved.yR2 &&
-          isEmpty(boardState, 0, 8) && // Intermediate square
+          isEmpty(boardState, 0, 7) && // Intermediate square 1
+          isEmpty(boardState, 0, 8) && // Intermediate square 2
+          isEmpty(boardState, 0, 9) && // Intermediate square 3
           boardState[0] &&
           boardState[0][10] === "yR" // Right rook at (0, 10)
         ) {
@@ -695,7 +741,7 @@ export const getKingMoves = (
             });
           }
         }
-        // Queenside castling (left) - King moves 2 squares left
+        // Kingside castling (left) - King moves 2 squares left
         if (
           !hasMoved.yR1 &&
           isEmpty(boardState, 0, 4) && // Intermediate square 1
@@ -730,10 +776,11 @@ export const getKingMoves = (
         }
       } else if (pieceColor === "g") {
         // Green - right column
-        // Kingside castling (down) - King moves 2 squares down
+        // Queenside castling (down) - King moves 2 squares down
         if (
           !hasMoved.gR2 &&
-          isEmpty(boardState, 8, 13) && // Intermediate square
+          isEmpty(boardState, 8, 13) && // Intermediate square 1
+          isEmpty(boardState, 9, 13) && // Intermediate square 2
           boardState[10] &&
           boardState[10][13] === "gR" // Right rook at (10, 13)
         ) {
@@ -762,7 +809,7 @@ export const getKingMoves = (
             });
           }
         }
-        // Queenside castling (up) - King moves 2 squares up
+        // Kingside castling (up) - King moves 2 squares up
         if (
           !hasMoved.gR1 &&
           isEmpty(boardState, 4, 13) && // Intermediate square 1

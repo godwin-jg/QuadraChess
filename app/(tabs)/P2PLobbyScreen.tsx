@@ -3,61 +3,30 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
-import ServerStartupGuide from "../../components/ServerStartupGuide";
-import gameHostService from "../../services/gameHostService";
-import networkConfigService, {
-  ServerConfig,
-} from "../../services/networkConfigService";
+import p2pService, { P2PMessage } from "../../services/p2pService";
 import { RootState, resetGame } from "../../state";
 import { setCanStartGame, setIsHost, setPlayers } from "../../state/gameSlice";
-import networkService, { Player } from "../services/networkService";
-
-// Generate random player names
-const generateRandomName = (): string => {
-  const adjectives = [
-    "Swift",
-    "Bold",
-    "Clever",
-    "Sharp",
-    "Quick",
-    "Wise",
-    "Brave",
-    "Smart",
-  ];
-  const nouns = [
-    "Player",
-    "Chess",
-    "King",
-    "Queen",
-    "Rook",
-    "Knight",
-    "Bishop",
-    "Pawn",
-  ];
-  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  return `${adj}${noun}`;
-};
+import { generateRandomName } from "../utils/nameGenerator";
 
 interface AvailableGame {
   id: string;
-  name: string;
-  host: string;
+  hostName: string;
   playerCount: number;
   maxPlayers: number;
   status: string;
 }
 
-export default function LobbyScreen() {
+export default function P2PLobbyScreen() {
   const dispatch = useDispatch();
   const router = useRouter();
-  const [playerName, setPlayerName] = useState(generateRandomName());
+  const [playerName, setPlayerName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
@@ -65,17 +34,10 @@ export default function LobbyScreen() {
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const [availableGames, setAvailableGames] = useState<AvailableGame[]>([]);
   const [showJoinGames, setShowJoinGames] = useState(false);
-  const [discoveredServers, setDiscoveredServers] = useState<ServerConfig[]>(
-    []
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [signalingServerUrl, setSignalingServerUrl] = useState(
+    "http://localhost:3002"
   );
-  const [showServerSelection, setShowServerSelection] = useState(false);
-  const [selectedServer, setSelectedServer] = useState<ServerConfig | null>(
-    null
-  );
-  const [showServerGuide, setShowServerGuide] = useState(false);
-  const [serverGuideInfo, setServerGuideInfo] = useState<
-    { host: string; port: number } | undefined
-  >();
   const isInGameRef = useRef(false);
 
   const {
@@ -84,130 +46,64 @@ export default function LobbyScreen() {
     canStartGame = false,
   } = useSelector((state: RootState) => state.game);
 
-  // Auto-connect to server
+  // Initialize P2P service
   useEffect(() => {
-    const connectToServer = async () => {
-      if (!networkService.connected) {
+    const initializeP2P = async () => {
+      try {
         setIsConnecting(true);
-        try {
-          // Try to discover servers first
-          const servers = await networkConfigService.discoverServers();
-          setDiscoveredServers(servers);
+        await p2pService.initialize(signalingServerUrl);
+        setIsInitialized(true);
 
-          if (servers.length > 0) {
-            // Use the first available server
-            const serverConfig = servers[0];
-            setSelectedServer(serverConfig);
-            await networkService.connect(serverConfig.host, serverConfig.port);
-          } else {
-            // Fallback to default configuration
-            const serverConfig = await networkConfigService.getServerConfig();
-            setSelectedServer(serverConfig);
-            await networkService.connect(serverConfig.host, serverConfig.port);
-          }
-        } catch (error) {
-          console.error("Connection failed:", error);
-          setShowServerSelection(true);
-        } finally {
-          setIsConnecting(false);
+        // Set up message handlers
+        setupMessageHandlers();
+
+        // Generate random name
+        const name = generateRandomName();
+        setPlayerName(name);
+
+        console.log("P2P Service initialized successfully");
+      } catch (error) {
+        console.error("Failed to initialize P2P service:", error);
+        Alert.alert(
+          "Connection Error",
+          "Failed to connect to P2P services. Please check your network connection."
+        );
+      } finally {
+        setIsConnecting(false);
+      }
+    };
+
+    initializeP2P();
+  }, [signalingServerUrl]);
+
+  // Set up message handlers
+  const setupMessageHandlers = () => {
+    // Handle game state updates
+    p2pService.onMessage((message: P2PMessage) => {
+      if (message.type === "gameState") {
+        const { players: updatedPlayers, gameState } = message.data;
+
+        if (updatedPlayers) {
+          dispatch(setPlayers(updatedPlayers));
+        }
+
+        if (gameState) {
+          // Update game state in Redux store
+          // This would integrate with your existing game state management
+          console.log("Game state updated:", gameState);
         }
       }
-    };
-    connectToServer();
-  }, []);
-
-  // Handle game events
-  useEffect(() => {
-    if (!networkService.connected) return;
-
-    const handleGameDestroyed = (data: { reason: string }) => {
-      isInGameRef.current = false;
-      Alert.alert("Game Ended", data.reason, [
-        { text: "OK", onPress: () => dispatch(resetGame()) },
-      ]);
-    };
-
-    const handleGameStarted = () => {
-      router.push("/(tabs)/GameScreen?mode=local");
-    };
-
-    const handleUpdatePlayers = (data: { players: Player[] }) => {
-      dispatch(setPlayers(data.players));
-    };
-
-    networkService.on("game-destroyed", handleGameDestroyed);
-    networkService.on("game-started", handleGameStarted);
-    networkService.on("update-players", handleUpdatePlayers);
-
-    return () => {
-      networkService.off("game-destroyed", handleGameDestroyed);
-      networkService.off("game-started", handleGameStarted);
-      networkService.off("update-players", handleUpdatePlayers);
-    };
-  }, [networkService.connected, dispatch]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (isInGameRef.current) {
-        networkService.leaveGame();
-      }
-    };
-  }, []);
+    });
+  };
 
   // Load available games
   const loadAvailableGames = async () => {
     try {
-      const serverConfig =
-        selectedServer || (await networkConfigService.getServerConfig());
-      const serverURL = networkConfigService.buildServerURL(serverConfig);
-      const response = await fetch(`${serverURL}/api/games`);
-      const games = await response.json();
+      const games = await p2pService.discoverGames();
       setAvailableGames(games);
     } catch (error) {
       console.error("Error loading games:", error);
       Alert.alert("Error", "Could not load available games");
-    }
-  };
-
-  const connectToSelectedServer = async (serverConfig: ServerConfig) => {
-    try {
-      setIsConnecting(true);
-      await networkService.connect(serverConfig.host, serverConfig.port);
-      setSelectedServer(serverConfig);
-      setShowServerSelection(false);
-    } catch (error) {
-      console.error("Failed to connect to server:", error);
-      Alert.alert(
-        "Connection Error",
-        `Could not connect to ${networkConfigService.getServerDisplayName(
-          serverConfig
-        )}`
-      );
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const discoverServers = async () => {
-    try {
-      setIsConnecting(true);
-      const servers = await networkConfigService.discoverServers();
-      setDiscoveredServers(servers);
-      if (servers.length === 0) {
-        Alert.alert(
-          "No Servers Found",
-          "No servers were discovered on your network. Make sure the server is running."
-        );
-      }
-    } catch (error) {
-      console.error("Server discovery failed:", error);
-      Alert.alert(
-        "Discovery Error",
-        "Failed to discover servers on your network."
-      );
-    } finally {
-      setIsConnecting(false);
     }
   };
 
@@ -218,44 +114,34 @@ export default function LobbyScreen() {
       return;
     }
 
+    if (!isInitialized) {
+      Alert.alert("Error", "P2P service not initialized");
+      return;
+    }
+
     setIsCreatingRoom(true);
     try {
-      // Check if we can host a game
-      const hostingCheck = await gameHostService.canHostGame();
-
-      if (!hostingCheck.canHost) {
-        // Show server startup guide
-        setServerGuideInfo(hostingCheck.serverInfo);
-        setShowServerGuide(true);
-        return;
-      }
-
-      // Start hosting
-      const hostingResult = await gameHostService.startHosting();
-
-      if (!hostingResult.success) {
-        Alert.alert(
-          "Hosting Failed",
-          hostingResult.instructions ||
-            "Failed to start hosting. Please try again."
-        );
-        return;
-      }
-
-      // Create the room
-      const result = await networkService.createRoom({ name: playerName });
+      const result = await p2pService.createGame(playerName.trim());
       dispatch(setIsHost(true));
       dispatch(setCanStartGame(false));
-      dispatch(setPlayers(result.players || []));
+      dispatch(
+        setPlayers([
+          {
+            id: result.playerId,
+            name: playerName,
+            color: "r",
+            isHost: true,
+            isConnected: true,
+            lastSeen: Date.now(),
+          },
+        ])
+      );
       isInGameRef.current = true;
 
-      // Show hosting instructions
-      const connectionInfo = gameHostService.getServerConnectionInfo();
-      const message = connectionInfo
-        ? `Game created! Server: ${connectionInfo.host}:${connectionInfo.port}\n\n${connectionInfo.instructions}`
-        : "Game created! Your game is now available for others to join.";
-
-      Alert.alert("Game Created!", message);
+      Alert.alert(
+        "Game Created!",
+        "Your P2P game is now available for others to join."
+      );
     } catch (error) {
       Alert.alert(
         "Error",
@@ -273,18 +159,22 @@ export default function LobbyScreen() {
       return;
     }
 
+    if (!isInitialized) {
+      Alert.alert("Error", "P2P service not initialized");
+      return;
+    }
+
     setIsJoiningRoom(true);
     try {
-      const result = await networkService.joinRoom(game.id, {
-        name: playerName,
-      });
+      const result = await p2pService.joinGame(game.id, playerName.trim());
       dispatch(setIsHost(false));
-      dispatch(setPlayers(result.players));
+      dispatch(setPlayers([])); // Will be updated when we receive game state
       isInGameRef.current = true;
       setShowJoinGames(false);
-      Alert.alert("Joined Game!", `You joined ${game.name}`);
+      Alert.alert("Joined Game!", `You joined ${game.hostName}'s game`);
     } catch (error) {
       Alert.alert("Error", `Could not join game: ${(error as Error).message}`);
+    } finally {
       setIsJoiningRoom(false);
     }
   };
@@ -293,7 +183,8 @@ export default function LobbyScreen() {
   const startGame = async () => {
     if (!isHost) return;
     try {
-      await networkService.startGame();
+      p2pService.startGame();
+      router.push("/(tabs)/GameScreen?mode=p2p");
     } catch (error) {
       Alert.alert("Error", "Could not start game");
     }
@@ -301,8 +192,7 @@ export default function LobbyScreen() {
 
   // Disconnect
   const disconnect = () => {
-    networkService.leaveGame();
-    networkService.disconnect();
+    p2pService.leaveGame();
     dispatch(resetGame());
     isInGameRef.current = false;
   };
@@ -320,80 +210,26 @@ export default function LobbyScreen() {
     setIsEditingName(false);
   };
 
-  // Server startup guide
-  if (showServerGuide) {
-    return (
-      <ServerStartupGuide
-        onDismiss={() => setShowServerGuide(false)}
-        serverInfo={serverGuideInfo}
-      />
-    );
-  }
-
-  // Server selection modal
-  if (showServerSelection) {
-    return (
-      <View className="flex-1 bg-black justify-center items-center p-6">
-        <View className="bg-gray-800 rounded-2xl p-6 w-full max-w-sm">
-          <Text className="text-white text-2xl font-bold text-center mb-6">
-            Select Server
-          </Text>
-
-          <Text className="text-gray-300 text-center mb-6">
-            Choose a server to connect to for local multiplayer
-          </Text>
-
-          {discoveredServers.length > 0 ? (
-            <View className="space-y-3 mb-6">
-              {discoveredServers.map((server, index) => (
-                <TouchableOpacity
-                  key={index}
-                  className="bg-gray-700 p-4 rounded-xl border border-gray-600"
-                  onPress={() => connectToSelectedServer(server)}
-                >
-                  <Text className="text-white text-lg font-semibold">
-                    {networkConfigService.getServerDisplayName(server)}
-                  </Text>
-                  <Text className="text-gray-400 text-sm">
-                    {server.host}:{server.port}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : (
-            <View className="mb-6">
-              <Text className="text-gray-400 text-center mb-4">
-                No servers discovered
-              </Text>
-              <TouchableOpacity
-                className="bg-blue-600 py-3 px-4 rounded-xl"
-                onPress={discoverServers}
-                disabled={isConnecting}
-              >
-                <Text className="text-white text-center font-semibold">
-                  {isConnecting ? "Discovering..." : "Discover Servers"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <TouchableOpacity
-            className="bg-gray-600 py-3 px-4 rounded-xl"
-            onPress={() => setShowServerSelection(false)}
-          >
-            <Text className="text-white text-center font-semibold">Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (isInGameRef.current) {
+        p2pService.leaveGame();
+      }
+    };
+  }, []);
 
   // Loading state
-  if (isConnecting) {
+  if (isConnecting || !isInitialized) {
     return (
       <View className="flex-1 bg-black justify-center items-center">
         <ActivityIndicator size="large" color="#FFFFFF" />
-        <Text className="text-white text-lg mt-4">Connecting...</Text>
+        <Text className="text-white text-lg mt-4">
+          Connecting to P2P services...
+        </Text>
+        <Text className="text-gray-400 text-sm mt-2 text-center px-6">
+          Server: {signalingServerUrl}
+        </Text>
       </View>
     );
   }
@@ -405,10 +241,13 @@ export default function LobbyScreen() {
         <View className="flex-1 px-6 pt-16 pb-10 justify-between">
           <View className="items-center">
             <Text className="text-white text-3xl font-bold mb-2">
-              🌐 Multiplayer Chess
+              🔗 P2P Chess
             </Text>
             <Text className="text-gray-300 text-base mb-6">
               Playing as: {playerName}
+            </Text>
+            <Text className="text-blue-400 text-sm mb-2">
+              Peer ID: {p2pService.getPeerId().substring(0, 8)}...
             </Text>
           </View>
 
@@ -429,6 +268,11 @@ export default function LobbyScreen() {
                   <Text className="text-white text-base font-medium">
                     {player.name} {player.isHost && "(Host)"}
                   </Text>
+                  <View
+                    className={`w-2 h-2 rounded-full ${
+                      player.isConnected ? "bg-green-500" : "bg-red-500"
+                    }`}
+                  />
                 </View>
               ))}
             </View>
@@ -481,10 +325,10 @@ export default function LobbyScreen() {
       <View className="flex-1 px-6 pt-16 pb-10 justify-between">
         <View className="items-center">
           <Text className="text-white text-4xl font-bold mb-2">
-            🌐 Multiplayer Chess
+            🔗 P2P Chess
           </Text>
           <Text className="text-gray-300 text-lg mb-6">
-            Connect and Play with Friends
+            Peer-to-Peer Multiplayer
           </Text>
           <View className="w-20 h-20 rounded-full bg-white/10 justify-center items-center border-2 border-white/20">
             <Text className="text-4xl text-white">♛</Text>
@@ -511,6 +355,9 @@ export default function LobbyScreen() {
               </Text>
             </TouchableOpacity>
           )}
+          <Text className="text-blue-400 text-xs mt-2">
+            Peer ID: {p2pService.getPeerId().substring(0, 8)}...
+          </Text>
         </View>
 
         <View className="gap-4">
@@ -523,7 +370,7 @@ export default function LobbyScreen() {
               <ActivityIndicator color="#000" />
             ) : (
               <Text className="text-black text-lg font-bold text-center">
-                Create Game
+                Create P2P Game
               </Text>
             )}
           </TouchableOpacity>
@@ -536,50 +383,69 @@ export default function LobbyScreen() {
             }}
           >
             <Text className="text-white text-lg font-bold text-center">
-              Join Game
+              Join P2P Game
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             className="bg-blue-600/20 py-4 px-6 rounded-xl border-2 border-blue-400/30 shadow-lg"
-            onPress={() => setShowServerSelection(true)}
+            onPress={() => {
+              // Show server configuration modal
+              Alert.prompt(
+                "Signaling Server",
+                "Enter signaling server URL:",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Update",
+                    onPress: (url) => {
+                      if (url) {
+                        setSignalingServerUrl(url);
+                        setIsInitialized(false);
+                      }
+                    },
+                  },
+                ],
+                "plain-text",
+                signalingServerUrl
+              );
+            }}
           >
             <Text className="text-blue-300 text-lg font-bold text-center">
-              Change Server
+              Server Settings
             </Text>
-            {selectedServer && (
-              <Text className="text-blue-200 text-sm text-center mt-1">
-                {networkConfigService.getServerDisplayName(selectedServer)}
-              </Text>
-            )}
+            <Text className="text-blue-200 text-sm text-center mt-1">
+              {signalingServerUrl}
+            </Text>
           </TouchableOpacity>
         </View>
 
         {showJoinGames && (
           <View className="mt-6">
             <Text className="text-white text-xl font-semibold mb-4">
-              Available Games:
+              Available P2P Games:
             </Text>
             {availableGames.length === 0 ? (
               <Text className="text-gray-400 text-center py-4">
-                No games available
+                No P2P games available
               </Text>
             ) : (
-              <View className="gap-3">
-                {availableGames.map((game) => (
+              <FlatList
+                data={availableGames}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
                   <TouchableOpacity
-                    key={game.id}
-                    className="bg-white/10 py-3 px-4 rounded-lg border border-white/20"
-                    onPress={() => joinGame(game)}
+                    className="bg-white/10 py-3 px-4 rounded-lg border border-white/20 mb-3"
+                    onPress={() => joinGame(item)}
                     disabled={isJoiningRoom}
                   >
                     <View className="flex-row justify-between items-center">
                       <View>
                         <Text className="text-white text-base font-semibold">
-                          {game.name}
+                          {item.hostName}'s Game
                         </Text>
                         <Text className="text-gray-300 text-sm">
-                          {game.playerCount}/{game.maxPlayers} players
+                          {item.playerCount}/{item.maxPlayers} players
                         </Text>
                       </View>
                       {isJoiningRoom && (
@@ -587,8 +453,9 @@ export default function LobbyScreen() {
                       )}
                     </View>
                   </TouchableOpacity>
-                ))}
-              </View>
+                )}
+                showsVerticalScrollIndicator={false}
+              />
             )}
             <TouchableOpacity
               className="bg-gray-600 py-3 px-4 rounded-lg mt-4 shadow-lg"
@@ -609,3 +476,5 @@ function getColorHex(color: string): string {
   const colors = { r: "#EF4444", b: "#3B82F6", y: "#F59E0B", g: "#10B981" };
   return colors[color as keyof typeof colors] || "#FFFFFF";
 }
+
+

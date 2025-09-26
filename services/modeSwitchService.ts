@@ -1,10 +1,11 @@
 import { Alert } from "react-native";
 import onlineGameService from "./onlineGameService";
+import p2pGameService from "./p2pGameService";
 import networkService from "../app/services/networkService";
 
 export interface ModeSwitchOptions {
-  currentMode: "online" | "local" | "solo";
-  targetMode: "online" | "local" | "solo";
+  currentMode: "online" | "local" | "solo" | "single" | "p2p";
+  targetMode: "online" | "local" | "solo" | "single" | "p2p";
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -24,9 +25,12 @@ class ModeSwitchService {
     return false;
   }
 
-  private getCurrentMode(): "online" | "local" | "solo" {
+  private getCurrentMode(): "online" | "local" | "solo" | "single" | "p2p" {
     if (onlineGameService.isConnected && onlineGameService.currentGameId) {
       return "online";
+    }
+    if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+      return "p2p";
     }
     if (networkService.connected && networkService.roomId) {
       return "local";
@@ -35,7 +39,7 @@ class ModeSwitchService {
   }
 
   async handleModeSwitch(
-    targetMode: "online" | "local" | "solo",
+    targetMode: "online" | "local" | "solo" | "single" | "p2p",
     onConfirm: () => void,
     onCancel: () => void
   ): Promise<void> {

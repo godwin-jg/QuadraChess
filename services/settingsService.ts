@@ -50,6 +50,9 @@ export interface UserSettings {
     largeText: boolean;
     reducedMotion: boolean;
   };
+  developer: {
+    soloMode: boolean;
+  };
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -72,6 +75,9 @@ const DEFAULT_SETTINGS: UserSettings = {
     highContrast: false,
     largeText: false,
     reducedMotion: false,
+  },
+  developer: {
+    soloMode: false,
   },
 };
 

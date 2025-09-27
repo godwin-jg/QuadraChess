@@ -38,6 +38,7 @@ export const createStateSnapshot = (state: GameState): GameState => {
     // Don't copy history when creating snapshots - this prevents circular references
     history: [],
     historyIndex: 0, // Always set to 0 for snapshots
+    viewingHistoryIndex: null, // Snapshots represent live state, not viewing history
   };
 };
 
@@ -637,6 +638,7 @@ const gameSlice = createSlice({
       // Initialize history as empty - no initial snapshot
       state.history = [];
       state.historyIndex = 0; // This should be 0 for the current state, not viewing history
+      state.viewingHistoryIndex = null; // Start viewing live state
 
       // Ensure the board state is properly set
       state.boardState = initialBoardState.map((row) => [...row]);
@@ -685,26 +687,41 @@ const gameSlice = createSlice({
         state.currentPlayerTurn = turnOrder[nextIndex];
       }
     },
-    stepHistory: (state, action: PayloadAction<"back" | "forward">) => {
-      if (action.payload === "back" && state.viewingHistoryIndex !== null) {
-        if (state.viewingHistoryIndex > 0) {
-          state.viewingHistoryIndex--;
+    stepHistory: (state, action: PayloadAction<"back" | "previous" | "forward">) => {
+      console.log('stepHistory called:', {
+        action: action.payload,
+        currentViewingHistoryIndex: state.viewingHistoryIndex,
+        historyLength: state.history.length
+      });
+      
+      if (action.payload === "back") {
+        // Start button: Always go to the first move (index 0) or back to live if already at first move
+        if (state.viewingHistoryIndex === null) {
+          // From live state: go to first move
+          state.viewingHistoryIndex = 0;
+          console.log('Started viewing history at first move (index 0)');
         } else {
-          state.viewingHistoryIndex = null; // Go to live state
+          // From any other move: go to first move
+          state.viewingHistoryIndex = 0;
+          console.log('Went to first move from move:', state.viewingHistoryIndex);
         }
-      } else if (
-        action.payload === "forward" &&
-        state.viewingHistoryIndex !== null &&
-        state.viewingHistoryIndex < state.history.length - 1
-      ) {
+      } else if (action.payload === "previous" && state.viewingHistoryIndex === null) {
+        // Go one step back from live state (to the previous move)
+        if (state.history.length > 0) {
+          state.viewingHistoryIndex = state.history.length - 2;
+          console.log('Stepped previous from live state to move:', state.viewingHistoryIndex);
+        }
+      } else if (action.payload === "previous" && state.viewingHistoryIndex !== null && state.viewingHistoryIndex > 0) {
+        // Go one step back in history
+        state.viewingHistoryIndex--;
+        console.log('Stepped previous to index:', state.viewingHistoryIndex);
+      } else if (action.payload === "forward" && state.viewingHistoryIndex !== null && state.viewingHistoryIndex < state.history.length - 1) {
+        // Go one step forward in history
         state.viewingHistoryIndex++;
-      } else if (
-        action.payload === "forward" &&
-        state.viewingHistoryIndex === null
-      ) {
-        // Start viewing history from the beginning
-        state.viewingHistoryIndex = 0;
-      }
+        console.log('Stepped forward to index:', state.viewingHistoryIndex);
+      } 
+      
+      console.log('Final viewingHistoryIndex:', state.viewingHistoryIndex);
     },
     returnToLive: (state) => {
       state.viewingHistoryIndex = null;

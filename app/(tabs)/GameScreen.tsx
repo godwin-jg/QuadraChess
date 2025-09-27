@@ -251,16 +251,16 @@ export default function GameScreen() {
 
   // Get the entire live game state, including the history array and index
   const liveGame = useSelector((state: RootState) => state.game);
-  const { history, historyIndex } = liveGame;
+  const { history, viewingHistoryIndex } = liveGame;
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {
     // If we are in "review mode" and the index is valid...
-    if (historyIndex < history.length - 1 && history[historyIndex]) {
-      return history[historyIndex]; // ...show the historical state.
+    if (viewingHistoryIndex !== null && viewingHistoryIndex < history.length && history[viewingHistoryIndex]) {
+      return history[viewingHistoryIndex]; // ...show the historical state.
     }
     return liveGame; // ...otherwise, show the live game state.
-  }, [liveGame, history, historyIndex]);
+  }, [liveGame, history, viewingHistoryIndex]);
 
   // Extract individual properties from displayedGameState for easier use
   const currentPlayerTurn = displayedGameState.currentPlayerTurn;

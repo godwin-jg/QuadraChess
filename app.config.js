@@ -26,11 +26,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     expo: {
       ...config.expo,
-      slug: "FourPlayer",
-      scheme: "fourplayer",
+      slug: "chess4d",
+      scheme: "chess4d",
       android: {
         ...config.expo?.android,
-        package: "com.jgnsecrets.chess4d",
+        package: "com.chess4d",
         googleServicesFile: "./android/app/google-services.json",
       },
       owner: "jgnsecrets",

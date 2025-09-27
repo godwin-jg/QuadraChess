@@ -33,16 +33,16 @@ export default function Board() {
 
   // Get the entire live game state, including the history array and index
   const liveGame = useSelector((state: RootState) => state.game);
-  const { history, historyIndex } = liveGame;
+  const { history, viewingHistoryIndex } = liveGame;
 
   // Create displayed game state (either live or historical)
   const displayedGameState = useMemo(() => {
     // If we are in "review mode" and the index is valid...
-    if (historyIndex < history.length - 1 && history[historyIndex]) {
-      return history[historyIndex]; // ...show the historical state.
+    if (viewingHistoryIndex !== null && viewingHistoryIndex < history.length && history[viewingHistoryIndex]) {
+      return history[viewingHistoryIndex]; // ...show the historical state.
     }
     return liveGame; // ...otherwise, show the live game state.
-  }, [liveGame, history, historyIndex]);
+  }, [liveGame, history, viewingHistoryIndex]);
 
   // Extract properties from displayed state
   const boardState = displayedGameState.boardState;
@@ -80,7 +80,7 @@ export default function Board() {
   };
 
   // Check if we're viewing history (not at the live game state)
-  const isViewingHistory = historyIndex < history.length - 1;
+  const isViewingHistory = viewingHistoryIndex !== null && viewingHistoryIndex < history.length - 1;
 
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {

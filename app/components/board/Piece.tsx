@@ -3,7 +3,7 @@ import { View, Text } from "react-native";
 import Svg, { G, Path, Defs, LinearGradient, Stop } from "react-native-svg";
 import { getPieceAsset, getPieceColor } from "./PieceAssets";
 import { PIECE_CONFIG } from "./PieceConfig";
-import { useSettings } from "../../../hooks/useSettings";
+import { useSettings } from "../../../context/SettingsContext";
 import { getPieceStyle, getPieceSize } from "./PieceStyleConfig";
 
 interface PieceProps {

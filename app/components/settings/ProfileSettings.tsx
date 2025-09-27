@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSettings } from "../../../hooks/useSettings";
+import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "../board/BoardThemeConfig";
 import Piece from "../board/Piece";
 

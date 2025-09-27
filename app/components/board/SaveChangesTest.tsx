@@ -7,7 +7,7 @@ import {
   Alert,
   ScrollView,
 } from "react-native";
-import { useSettings } from "../../../hooks/useSettings";
+import { useSettings } from "../../../context/SettingsContext";
 
 export default function SaveChangesTest() {
   const {

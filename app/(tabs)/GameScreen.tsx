@@ -3,7 +3,7 @@ import { useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
-import { useSettings } from "../../hooks/useSettings";
+import { useSettings } from "../../context/SettingsContext";
 import modeSwitchService from "../../services/modeSwitchService";
 import onlineGameService from "../../services/onlineGameService";
 import p2pGameService from "../../services/p2pGameService";

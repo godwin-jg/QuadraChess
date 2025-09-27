@@ -2,7 +2,7 @@ import { useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
 import { Text, View, useWindowDimensions } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
-import { useSettings } from "../../../hooks/useSettings";
+import { useSettings } from "../../../context/SettingsContext";
 import onlineGameService from "../../../services/onlineGameService";
 import p2pGameService from "../../../services/p2pGameService";
 import {

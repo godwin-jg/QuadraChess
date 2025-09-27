@@ -1,39 +1,39 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { settingsService, UserSettings } from "../services/settingsService";
 
+// IMPROVEMENT: Initialize with a default or null state to prevent flickering.
+const defaultInitialState = settingsService.getSettings();
+
 export function useSettings() {
-  const [settings, setSettings] = useState<UserSettings>(
-    settingsService.getSettings()
-  );
+  const [settings, setSettings] = useState<UserSettings>(defaultInitialState);
   const [isLoading, setIsLoading] = useState(true);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const loadedSettings = await settingsService.loadSettings();
-        setSettings(loadedSettings);
-      } catch (error) {
-        console.warn("Failed to load settings, using defaults:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadSettings();
+  // IMPROVEMENT: Using useCallback for stable function references
+  const loadInitialSettings = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const loadedSettings = await settingsService.loadSettings();
+      setSettings(loadedSettings);
+    } catch (error) {
+      console.warn("Failed to load settings, using defaults:", error);
+      // The default state is already set, so we can just log the error.
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const updateSettings = async (updates: Partial<UserSettings>) => {
-    try {
-      const newSettings = { ...settings, ...updates };
-      // Update UI immediately for instant feedback
-      setSettings(newSettings);
-      // Mark as having unsaved changes
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error("Failed to update settings:", error);
-    }
+  useEffect(() => {
+    loadInitialSettings();
+  }, [loadInitialSettings]);
+
+  // This function is the single source of truth for updates
+  const updateSettings = (updates: Partial<UserSettings>) => {
+    // We create a new settings object to ensure React re-renders
+    const newSettings = { ...settings, ...updates };
+    setSettings(newSettings);
+    setHasUnsavedChanges(true);
   };
 
   const saveSettings = async () => {
@@ -42,8 +42,7 @@ export function useSettings() {
     setIsSaving(true);
     try {
       await settingsService.saveSettings(settings);
-      setHasUnsavedChanges(false);
-      console.log("Settings saved successfully");
+      setHasUnsavedChanges(false); // Settings are now saved
     } catch (error) {
       console.error("Failed to save settings:", error);
       throw error;
@@ -52,58 +51,42 @@ export function useSettings() {
     }
   };
 
-  const discardChanges = () => {
-    // Reload settings from storage
-    settingsService.loadSettings().then((loadedSettings) => {
-      setSettings(loadedSettings);
-      setHasUnsavedChanges(false);
-    });
+  const discardChanges = useCallback(async () => {
+    setHasUnsavedChanges(false);
+    // Just re-run the initial loading logic to discard changes
+    await loadInitialSettings();
+  }, [loadInitialSettings]);
+
+  // IMPROVEMENT: Helper functions are now synchronous as they don't await anything
+  const updateProfile = (profile: Partial<UserSettings["profile"]>) => {
+    updateSettings({ profile: { ...settings.profile, ...profile } });
   };
 
-  const updateProfile = async (profile: Partial<UserSettings["profile"]>) => {
-    await updateSettings({
-      profile: { ...settings.profile, ...profile },
-    });
+  const updateBoard = (board: Partial<UserSettings["board"]>) => {
+    updateSettings({ board: { ...settings.board, ...board } });
   };
 
-  const updateBoard = async (board: Partial<UserSettings["board"]>) => {
-    await updateSettings({
-      board: { ...settings.board, ...board },
-    });
+  const updatePieces = (pieces: Partial<UserSettings["pieces"]>) => {
+    updateSettings({ pieces: { ...settings.pieces, ...pieces } });
   };
 
-  const updatePieces = async (pieces: Partial<UserSettings["pieces"]>) => {
-    await updateSettings({
-      pieces: { ...settings.pieces, ...pieces },
-    });
+  const updateGame = (game: Partial<UserSettings["game"]>) => {
+    updateSettings({ game: { ...settings.game, ...game } });
   };
 
-  const updateGame = async (game: Partial<UserSettings["game"]>) => {
-    await updateSettings({
-      game: { ...settings.game, ...game },
-    });
+  const updateAccessibility = (accessibility: Partial<UserSettings["accessibility"]>) => {
+    updateSettings({ accessibility: { ...settings.accessibility, ...accessibility } });
   };
 
-  const updateAccessibility = async (
-    accessibility: Partial<UserSettings["accessibility"]>
-  ) => {
-    await updateSettings({
-      accessibility: { ...settings.accessibility, ...accessibility },
-    });
-  };
-
-  const updateDeveloper = async (
-    developer: Partial<UserSettings["developer"]>
-  ) => {
-    await updateSettings({
-      developer: { ...settings.developer, ...developer },
-    });
+  const updateDeveloper = (developer: Partial<UserSettings["developer"]>) => {
+    updateSettings({ developer: { ...settings.developer, ...developer } });
   };
 
   const resetToDefaults = async () => {
     await settingsService.resetToDefaults();
     const defaultSettings = settingsService.getSettings();
     setSettings(defaultSettings);
+    setHasUnsavedChanges(true); // Resetting is an unsaved change
   };
 
   return {

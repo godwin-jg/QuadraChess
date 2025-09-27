@@ -706,7 +706,7 @@ const gameSlice = createSlice({
           console.log('Went to first move from move:', state.viewingHistoryIndex);
         }
       } else if (action.payload === "previous" && state.viewingHistoryIndex === null) {
-        // Go one step back from live state (to the previous move)
+        // Go two steps back from live state (to the previous move)
         if (state.history.length > 0) {
           state.viewingHistoryIndex = state.history.length - 2;
           console.log('Stepped previous from live state to move:', state.viewingHistoryIndex);

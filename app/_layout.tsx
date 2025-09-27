@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { Provider } from "react-redux";
 import "../global.css";
 import { store } from "../state";
+import { SettingsProvider } from "../context/SettingsContext";
 
 // Initialize Firebase with a small delay to ensure proper initialization
 import "../services/firebaseInit";
@@ -55,9 +56,11 @@ export default function RootLayout() {
   }
 
   return (
-    <Provider store={store}>
-      <RootLayoutNav />
-    </Provider>
+    <SettingsProvider>
+      <Provider store={store}>
+        <RootLayoutNav />
+      </Provider>
+    </SettingsProvider>
   );
 }
 

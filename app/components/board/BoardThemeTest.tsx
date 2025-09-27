@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
-import { useSettings } from "../../../hooks/useSettings";
+import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "./BoardThemeConfig";
 import Board from "./Board";
 

@@ -14,11 +14,14 @@ interface SquareProps {
   isInCheck?: boolean;
   capturingPieceColor?: string;
   isEliminated?: boolean;
+  isInteractable?: boolean;
   onPress?: () => void;
+  onHover?: () => void;
+  onHoverOut?: () => void;
   boardTheme?: BoardTheme;
 }
 
-export default function Square({
+const Square = React.memo(function Square({
   piece,
   color,
   size,
@@ -29,7 +32,10 @@ export default function Square({
   isInCheck = false,
   capturingPieceColor,
   isEliminated = false,
+  isInteractable = true,
   onPress,
+  onHover,
+  onHoverOut,
   boardTheme,
 }: SquareProps) {
   // Check if this is a corner square that should not be playable
@@ -115,7 +121,15 @@ export default function Square({
   };
 
   return (
-    <Pressable onPress={handlePress}>
+    <Pressable
+      onPress={isInteractable ? handlePress : undefined}
+      onHoverIn={isInteractable ? onHover : undefined}
+      onHoverOut={isInteractable ? onHoverOut : undefined}
+      style={({ pressed, hovered }) => ({
+        opacity: !isInteractable ? 0.6 : pressed ? 0.8 : hovered ? 0.9 : 1,
+        transform: [{ scale: !isInteractable ? 1 : hovered ? 1.05 : 1 }],
+      })}
+    >
       <View
         style={{
           width: size,
@@ -139,4 +153,6 @@ export default function Square({
       </View>
     </Pressable>
   );
-}
+});
+
+export default Square;

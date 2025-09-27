@@ -31,18 +31,34 @@ export default function Board() {
   // Use solo mode from settings if enabled, otherwise use the route mode
   const effectiveMode = settings.developer.soloMode ? "solo" : mode;
 
-  // Get granular pieces of state - only re-render when specific data changes
+  // Optimized selectors - memoized to prevent unnecessary re-renders
   const history = useSelector((state: RootState) => state.game.history);
   const viewingHistoryIndex = useSelector((state: RootState) => state.game.viewingHistoryIndex);
   const boardState = useSelector((state: RootState) => state.game.boardState);
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
+  
+  // Memoize validMoves to use historical state when viewing history
+  const displayValidMoves = useMemo(() => {
+    if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
+      return history[viewingHistoryIndex].validMoves || [];
+    }
+    return validMoves;
+  }, [viewingHistoryIndex, history, validMoves]);
   const checkStatus = useSelector((state: RootState) => state.game.checkStatus);
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
+  
+  // Memoize expensive calculations
+  const displayBoardState = useMemo(() => {
+    if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
+      return history[viewingHistoryIndex].boardState;
+    }
+    return boardState;
+  }, [viewingHistoryIndex, history, boardState]);
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
   const players = useSelector((state: RootState) => state.game.players);
 
-  // Create displayed game state (either live or historical)
+  // Create displayed game state (either live or historical) - optimized
   const displayedGameState = useMemo(() => {
     // If we are in "review mode" and the index is valid...
     if (viewingHistoryIndex !== null && viewingHistoryIndex < history.length && history[viewingHistoryIndex]) {
@@ -50,9 +66,9 @@ export default function Board() {
     }
     // ...otherwise, show the live game state composed from individual selectors
     return {
-      boardState,
+      boardState: displayBoardState,
       selectedPiece,
-      validMoves,
+      validMoves: displayValidMoves,
       checkStatus,
       eliminatedPlayers,
       currentPlayerTurn,
@@ -60,14 +76,14 @@ export default function Board() {
       history,
       viewingHistoryIndex
     };
-  }, [history, viewingHistoryIndex, boardState, selectedPiece, validMoves, checkStatus, eliminatedPlayers, currentPlayerTurn, players]);
+  }, [history, viewingHistoryIndex, displayBoardState, selectedPiece, displayValidMoves, checkStatus, eliminatedPlayers, currentPlayerTurn, players]);
 
   // Get dispatch function
   const dispatch = useDispatch();
 
   // Helper function to get move type for a square
   const getMoveType = (row: number, col: number): "move" | "capture" | null => {
-    const move = validMoves.find(
+    const move = displayValidMoves.find(
       (move) => move.row === row && move.col === col
     );
     if (!move) return null;
@@ -77,7 +93,7 @@ export default function Board() {
   // Get the selected piece color for capture highlighting
   const getSelectedPieceColor = () => {
     if (!selectedPiece) return null;
-    const piece = boardState[selectedPiece.row][selectedPiece.col];
+    const piece = displayBoardState[selectedPiece.row][selectedPiece.col];
     return piece ? piece[0] : null;
   };
 
@@ -99,8 +115,21 @@ export default function Board() {
       return;
     }
 
-    const pieceCode = boardState[row][col];
-    const isAValidMove = validMoves.some(
+    const pieceCode = displayBoardState[row][col];
+    
+    // PIECE OWNERSHIP VALIDATION: Only allow players to interact with their own pieces
+    if (pieceCode && effectiveMode === "online") {
+      const pieceColor = pieceCode[0];
+      const currentPlayerColor = onlineGameService.currentPlayer?.color;
+      
+      // If there's a piece and it doesn't belong to the current player, ignore the press
+      if (currentPlayerColor && pieceColor !== currentPlayerColor) {
+        console.log(`Cannot select opponent piece: ${pieceCode} (you are ${currentPlayerColor})`);
+        return;
+      }
+    }
+    
+    const isAValidMove = displayValidMoves.some(
       (move) => move.row === row && move.col === col
     );
 
@@ -116,7 +145,7 @@ export default function Board() {
 
     // If a piece is selected AND the pressed square is a valid move
     if (selectedPiece && isAValidMove) {
-      const pieceToMove = boardState[selectedPiece.row][selectedPiece.col];
+      const pieceToMove = displayBoardState[selectedPiece.row][selectedPiece.col];
       const pieceColor = pieceToMove?.charAt(0);
 
       const moveData = {
@@ -228,7 +257,7 @@ export default function Board() {
         marginTop: 20,
       }}
     >
-      {boardState.map((row, rowIndex) => {
+      {displayBoardState.map((row, rowIndex) => {
         // Skip null rows (buffer rows in 4-player chess)
         if (!row || !Array.isArray(row)) {
           return (
@@ -280,6 +309,12 @@ export default function Board() {
                     )
                   }
                   isEliminated={isPieceEliminated(piece)}
+                  isInteractable={
+                    !piece || 
+                    effectiveMode !== "online" || 
+                    !onlineGameService.currentPlayer?.color ||
+                    piece[0] === onlineGameService.currentPlayer.color
+                  }
                   boardTheme={boardTheme}
                 />
               );

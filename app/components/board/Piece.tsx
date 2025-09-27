@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text } from "react-native";
+import { View, Text, Animated } from "react-native";
 import Svg, { G, Path, Defs, LinearGradient, Stop } from "react-native-svg";
 import { getPieceAsset, getPieceColor } from "./PieceAssets";
 import { PIECE_CONFIG } from "./PieceConfig";

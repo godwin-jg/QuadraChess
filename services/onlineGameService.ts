@@ -4,6 +4,7 @@ import realtimeDatabaseService, {
 } from "./realtimeDatabaseService";
 import { GameState } from "../state/types";
 import { Player } from "../app/services/networkService";
+import database from "@react-native-firebase/database";
 import {
   makeMove as makeMoveAction,
   applyNetworkMove,
@@ -45,7 +46,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
   private movesUnsubscribe: (() => void) | null = null;
   private gameUpdateCallbacks: ((game: RealtimeGame | null) => void)[] = [];
   private moveUpdateCallbacks: ((move: RealtimeMove) => void)[] = [];
-  private presenceInterval: ReturnType<typeof setInterval> | null = null;
 
   async connectToGame(gameId: string): Promise<void> {
     try {
@@ -113,10 +113,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
         this.movesUnsubscribe = null;
       }
 
-      if (this.presenceInterval) {
-        clearInterval(this.presenceInterval);
-        this.presenceInterval = null;
-      }
+      // No interval cleanup needed - Firebase onDisconnect handles presence automatically
 
       this.currentGameId = null;
       this.currentPlayer = null;
@@ -160,13 +157,23 @@ class OnlineGameServiceImpl implements OnlineGameService {
           throw new Error("Invalid move");
         }
 
-        // ONLY send the move to the server - do NOT calculate game state
+        // OPTIMISTIC UI: Apply move immediately for instant feedback
+        console.log("OnlineGameService: Applying optimistic move:", moveData);
+        store.dispatch(applyNetworkMove(moveData));
+
+        // Send move to server for validation
         await realtimeDatabaseService.makeMove(this.currentGameId, moveData);
 
         // If we get here, the move was sent successfully
+        // Server will send back the authoritative state which will override if needed
         return;
       } catch (error) {
         lastError = error as Error;
+        
+        // REVERT OPTIMISTIC MOVE: If server validation failed, revert the move
+        console.log("OnlineGameService: Server validation failed, reverting optimistic move:", error);
+        this.revertOptimisticMove(moveData);
+        
         retryCount++;
 
         // Don't retry for validation errors
@@ -384,6 +391,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
           // Use server-stored history for synchronization
           history: game.gameState.history || [],
           historyIndex: game.gameState.historyIndex || 0,
+          // CRITICAL: Always set viewingHistoryIndex to null when syncing from server
+          // This ensures we're viewing the live game state, not historical moves
+          viewingHistoryIndex: null,
         };
 
         // Apply the complete game state from server (including history)
@@ -474,10 +484,46 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   private setupPresenceTracking(): void {
-    // Update presence every 10 seconds for better disconnect detection
-    this.presenceInterval = setInterval(() => {
-      this.updatePlayerPresence(true);
-    }, 10000);
+    // Use Firebase onDisconnect for automatic presence management
+    // This is more reliable and efficient than polling
+    const user = realtimeDatabaseService.getCurrentUser();
+    if (!user || !this.currentGameId) return;
+
+    const userRef = database().ref(
+      `games/${this.currentGameId}/players/${user.uid}`
+    );
+
+    // Set online status immediately
+    userRef.update({ 
+      isOnline: true, 
+      lastSeen: Date.now() 
+    });
+
+    // Firebase automatically handles disconnection
+    userRef.onDisconnect().update({ 
+      isOnline: false, 
+      lastSeen: Date.now() 
+    });
+
+    console.log("Presence tracking set up with Firebase onDisconnect");
+  }
+
+  private revertOptimisticMove(moveData: {
+    from: { row: number; col: number };
+    to: { row: number; col: number };
+    pieceCode: string;
+    playerColor: string;
+  }): void {
+    // Revert the optimistic move by moving the piece back
+    const revertMoveData = {
+      from: moveData.to,
+      to: moveData.from,
+      pieceCode: moveData.pieceCode,
+      playerColor: moveData.playerColor,
+    };
+    
+    console.log("OnlineGameService: Reverting move:", revertMoveData);
+    store.dispatch(applyNetworkMove(revertMoveData));
   }
 
   private hasBoardStateChanged(oldBoard: any[][], newBoard: any[][]): boolean {

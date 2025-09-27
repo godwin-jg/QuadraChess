@@ -121,7 +121,7 @@ export default function PlayerInfoPod({
         </Text>
         {isEliminated && (
           <Text className="text-xs text-red-400 font-semibold mt-1">
-            RESIGNED
+            ELIMINATED
           </Text>
         )}
       </View>

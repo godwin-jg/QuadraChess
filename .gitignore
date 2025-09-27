@@ -40,6 +40,15 @@ yarn-error.*
 /ios
 /android
 
+# But track important Android build configuration files
+!/android/gradle.properties
+!/android/app/proguard-rules.pro
+!/android/app/build.gradle
+!/android/build.gradle
+!/android/settings.gradle
+!/android/gradlew
+!/android/gradlew.bat
+
 # IDE and editor files
 .vscode/
 .idea/

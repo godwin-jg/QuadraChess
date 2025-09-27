@@ -22,6 +22,16 @@
       "env": {
         "GOOGLE_SERVICES_JSON": "$GOOGLE_SERVICES_JSON"
       }
+    },
+    "production-small": {
+      "autoIncrement": true,
+      "env": {
+        "GOOGLE_SERVICES_JSON": "$GOOGLE_SERVICES_JSON"
+      },
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease"
+      }
     }
   },
   "submit": {

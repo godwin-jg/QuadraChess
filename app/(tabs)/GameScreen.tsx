@@ -35,33 +35,35 @@ export default function GameScreen() {
   const [connectionStatus, setConnectionStatus] =
     useState<string>("Connecting...");
 
-  // Determine if this is online or P2P multiplayer mode
+  // Master connection management - single useEffect to prevent race conditions
   useEffect(() => {
-    setIsOnlineMode(mode === "online" && !!gameId);
-    setIsP2PMode(mode === "p2p");
+    // This function will be returned by the effect to clean up everything
+    let cleanupFunction = () => {};
 
-    // Set the game mode in the Redux store
-    // Use solo mode from settings if enabled, otherwise use the route mode
-    const effectiveMode = settings.developer.soloMode
-      ? "solo"
-      : (mode as "solo" | "local" | "online" | "p2p" | "single");
+    const setupConnectionForMode = async (currentMode: string) => {
+      console.log("GameScreen: Setting up connection for mode:", currentMode);
+      
+      // Update mode flags
+      setIsOnlineMode(currentMode === "online" && !!gameId);
+      setIsP2PMode(currentMode === "p2p");
 
-    console.log(
-      "GameScreen: Setting game mode:",
-      effectiveMode,
-      "from route mode:",
-      mode,
-      "solo mode enabled:",
-      settings.developer.soloMode
-    );
-    dispatch(setGameMode(effectiveMode));
-  }, [gameId, mode, settings.developer.soloMode, dispatch]);
+      // Set the game mode in the Redux store
+      const effectiveMode = settings.developer.soloMode
+        ? "solo"
+        : (currentMode as "solo" | "local" | "online" | "p2p" | "single");
 
-  // Handle mode switching with proper disconnection
-  useEffect(() => {
-    const handleModeSwitch = async () => {
-      // Check if we need to disconnect from current game
-      const currentMode = onlineGameService.isConnected
+      console.log(
+        "GameScreen: Setting game mode:",
+        effectiveMode,
+        "from route mode:",
+        currentMode,
+        "solo mode enabled:",
+        settings.developer.soloMode
+      );
+      dispatch(setGameMode(effectiveMode));
+
+      // Handle mode switching with proper disconnection
+      const currentConnectedMode = onlineGameService.isConnected
         ? "online"
         : p2pGameService.isConnected
         ? "p2p"
@@ -70,53 +72,37 @@ export default function GameScreen() {
         : "solo";
 
       // Only show warning if we're actually switching modes
-      if (currentMode !== mode) {
+      if (currentConnectedMode !== currentMode) {
         await modeSwitchService.handleModeSwitch(
-          mode as "online" | "p2p" | "local" | "solo" | "single",
+          currentMode as "online" | "p2p" | "local" | "solo" | "single",
           () => {
             // Confirm: Reset game and continue
             dispatch(resetGame());
           },
           () => {
             // Cancel: Navigate back to previous mode
-            // This would need to be handled by the parent component
             console.log("Mode switch cancelled by user");
           }
         );
-      } else if (mode !== "online") {
+      } else if (currentMode !== "online") {
         // Same mode but not online, safe to reset
         dispatch(resetGame());
       }
-    };
 
-    handleModeSwitch();
-  }, [mode, dispatch]);
-
-  // Set up online game connection
-  useEffect(() => {
-    // Only connect if we're actually in online mode AND have a gameId
-    // This prevents reconnection when switching to solo mode
-    if (isOnlineMode && gameId && mode === "online") {
-      const connectToOnlineGame = async () => {
+      // Set up connection based on mode
+      if (currentMode === "online" && gameId) {
+        // Online game connection
         try {
           setConnectionStatus("Connecting to game...");
-          console.log(
-            "GameScreen: Attempting to connect to online game:",
-            gameId
-          );
+          console.log("GameScreen: Attempting to connect to online game:", gameId);
           await onlineGameService.connectToGame(gameId);
           console.log("GameScreen: Successfully connected to online game");
-          console.log(
-            "GameScreen: onlineGameService.isConnected:",
-            onlineGameService.isConnected
-          );
           setConnectionStatus("Connected");
 
           // Set up online game listeners
           const unsubscribeGame = onlineGameService.onGameUpdate((game) => {
             if (game) {
               // onlineGameService handles all state management including history
-              // No need to dispatch setGameState here as it's handled internally
             } else {
               console.log("Game not found or ended");
               setConnectionStatus("Game not found");
@@ -127,29 +113,18 @@ export default function GameScreen() {
             // The service handles move application internally
           });
 
-          return () => {
+          cleanupFunction = () => {
+            console.log("GameScreen: Cleaning up online game connection");
             unsubscribeGame();
             unsubscribeMoves();
+            onlineGameService.disconnect();
           };
         } catch (error) {
           console.error("Failed to connect to online game:", error);
           setConnectionStatus("Connection failed");
         }
-      };
-
-      const cleanup = connectToOnlineGame();
-
-      return () => {
-        cleanup.then((cleanupFn) => cleanupFn?.());
-        onlineGameService.disconnect();
-      };
-    }
-  }, [isOnlineMode, gameId, mode, dispatch]);
-
-  // Set up P2P game connection
-  useEffect(() => {
-    if (isP2PMode && mode === "p2p") {
-      const connectToP2PGame = async () => {
+      } else if (currentMode === "p2p") {
+        // P2P game connection
         try {
           setConnectionStatus("Connecting to P2P game...");
           console.log("GameScreen: Attempting to connect to P2P game");
@@ -160,7 +135,6 @@ export default function GameScreen() {
           // Set up P2P game listeners
           const unsubscribeGame = p2pGameService.onGameUpdate((game) => {
             if (game) {
-              // p2pGameService handles all state management
               console.log("P2P Game updated:", game);
             } else {
               console.log("P2P Game not found or ended");
@@ -169,85 +143,79 @@ export default function GameScreen() {
           });
 
           const unsubscribeMoves = p2pGameService.onMoveUpdate((move) => {
-            // The service handles move application internally
             console.log("P2P Move received:", move);
           });
 
-          return () => {
+          cleanupFunction = () => {
+            console.log("GameScreen: Cleaning up P2P game connection");
             unsubscribeGame();
             unsubscribeMoves();
+            p2pGameService.disconnect();
           };
         } catch (error) {
           console.error("Failed to connect to P2P game:", error);
           setConnectionStatus("Connection failed");
         }
-      };
+      } else {
+        // Local multiplayer or solo mode
+        if (currentMode !== "solo") {
+          // Set up local network listeners for local multiplayer
+          const handleMoveMade = (data: any) => {
+            dispatch(applyNetworkMove(data.move));
+            if (data.gameState) {
+              dispatch(setGameState(data.gameState));
+            }
+          };
 
-      const cleanup = connectToP2PGame();
+          const handleGameStateUpdated = (data: any) => {
+            dispatch(setGameState(data.gameState));
+          };
 
-      return () => {
-        cleanup.then((cleanupFn) => cleanupFn?.());
-        p2pGameService.disconnect();
-      };
-    }
-  }, [isP2PMode, mode, dispatch]);
+          const handleMoveRejected = (data: any) => {
+            // Move was rejected by server
+          };
 
-  // Cleanup online game connection when switching to solo mode
-  useEffect(() => {
-    if (mode === "solo" && onlineGameService.isConnected) {
-      console.log(
-        "GameScreen: Disconnecting from online game due to solo mode switch"
-      );
-      onlineGameService.disconnect();
-    }
-  }, [mode]);
+          const handleGameDestroyed = (data: { reason: string }) => {
+            dispatch(resetGame());
+          };
 
-  // Cleanup P2P game connection when switching to solo mode
-  useEffect(() => {
-    if (mode === "solo" && p2pGameService.isConnected) {
-      console.log(
-        "GameScreen: Disconnecting from P2P game due to solo mode switch"
-      );
-      p2pGameService.disconnect();
-    }
-  }, [mode]);
+          networkService.on("move-made", handleMoveMade);
+          networkService.on("game-state-updated", handleGameStateUpdated);
+          networkService.on("move-rejected", handleMoveRejected);
+          networkService.on("game-destroyed", handleGameDestroyed);
 
-  // Set up local network listeners for local multiplayer
-  useEffect(() => {
-    if (!isOnlineMode && !isP2PMode) {
-      const handleMoveMade = (data: any) => {
-        dispatch(applyNetworkMove(data.move));
-        // Update game state with server's turn information
-        if (data.gameState) {
-          dispatch(setGameState(data.gameState));
+          cleanupFunction = () => {
+            console.log("GameScreen: Cleaning up local network listeners");
+            networkService.off("move-made", handleMoveMade);
+            networkService.off("game-state-updated", handleGameStateUpdated);
+            networkService.off("move-rejected", handleMoveRejected);
+            networkService.off("game-destroyed", handleGameDestroyed);
+          };
+        } else {
+          // Solo mode - ensure all connections are cleaned up
+          cleanupFunction = () => {
+            console.log("GameScreen: Cleaning up for solo mode");
+            if (onlineGameService.isConnected) {
+              onlineGameService.disconnect();
+            }
+            if (p2pGameService.isConnected) {
+              p2pGameService.disconnect();
+            }
+          };
         }
-      };
+      }
+    };
 
-      const handleGameStateUpdated = (data: any) => {
-        dispatch(setGameState(data.gameState));
-      };
+    setupConnectionForMode(mode);
 
-      const handleMoveRejected = (data: any) => {
-        // Move was rejected by server
-      };
-
-      const handleGameDestroyed = (data: { reason: string }) => {
-        dispatch(resetGame());
-      };
-
-      networkService.on("move-made", handleMoveMade);
-      networkService.on("game-state-updated", handleGameStateUpdated);
-      networkService.on("move-rejected", handleMoveRejected);
-      networkService.on("game-destroyed", handleGameDestroyed);
-
-      return () => {
-        networkService.off("move-made", handleMoveMade);
-        networkService.off("game-state-updated", handleGameStateUpdated);
-        networkService.off("move-rejected", handleMoveRejected);
-        networkService.off("game-destroyed", handleGameDestroyed);
-      };
-    }
-  }, [isOnlineMode, isP2PMode, dispatch]);
+    // The single return function ensures the previous mode's
+    // connections and listeners are ALWAYS torn down before the
+    // next mode's effect runs.
+    return () => {
+      console.log("GameScreen: Cleaning up connections for previous mode...");
+      cleanupFunction();
+    };
+  }, [mode, gameId, settings.developer.soloMode, dispatch]);
 
   // Get granular pieces of state - only re-render when specific data changes
   const history = useSelector((state: RootState) => state.game.history);

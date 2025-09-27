@@ -232,6 +232,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                     text: "Discard",
                     style: "destructive",
                     onPress: () => {
+                      // FIX: Actually discard the changes first
+                      discardChanges();
                       if (onClose) onClose();
                     },
                   },

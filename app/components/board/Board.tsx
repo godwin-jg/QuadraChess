@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
-import { Text, View, useWindowDimensions } from "react-native";
+import { Alert, Text, View, useWindowDimensions } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import { useSettings } from "../../../context/SettingsContext";
 import onlineGameService from "../../../services/onlineGameService";
@@ -142,6 +142,11 @@ export default function Board() {
             await onlineGameService.makeMove(moveData);
           } catch (error) {
             console.error("Failed to make online move:", error);
+            // FIX: Inform the user about the failed move
+            Alert.alert(
+              "Move Failed",
+              "Your move could not be sent to the server. Please check your connection and try again."
+            );
           }
         } else {
           console.log(
@@ -164,6 +169,11 @@ export default function Board() {
             await p2pGameService.makeMove(moveData);
           } catch (error) {
             console.error("Failed to make P2P move:", error);
+            // FIX: Inform the user about the failed move
+            Alert.alert(
+              "Move Failed",
+              "Your move could not be sent to the other player. Please check your connection and try again."
+            );
           }
         } else {
           console.log(

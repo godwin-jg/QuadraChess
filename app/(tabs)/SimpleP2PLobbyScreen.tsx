@@ -16,7 +16,6 @@ import { RootState } from "../../state/store";
 import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state/gameSlice";
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
-import networkDiscoveryService from "../../services/networkDiscoveryService";
 
 const { width } = Dimensions.get("window");
 
@@ -34,8 +33,6 @@ export default function P2PLobbyScreen() {
   const [joinCode, setJoinCode] = useState("");
   const [gameId, setGameId] = useState("");
   const [currentGame, setCurrentGame] = useState<P2PGame | null>(null);
-  const [discoveredGames, setDiscoveredGames] = useState<any[]>([]);
-  const [isDiscovering, setIsDiscovering] = useState(false);
 
   // Initialize P2P service
   useEffect(() => {
@@ -155,32 +152,6 @@ export default function P2PLobbyScreen() {
     }
   };
 
-  // Discover games on the network
-  const discoverGames = async () => {
-    setIsDiscovering(true);
-    try {
-      const games = await p2pService.discoverGames();
-      setDiscoveredGames(games);
-      console.log("Discovered games:", games);
-    } catch (error) {
-      console.error("Failed to discover games:", error);
-      Alert.alert("Error", "Failed to discover games on network");
-    } finally {
-      setIsDiscovering(false);
-    }
-  };
-
-  // Join a discovered game
-  const joinDiscoveredGame = async (gameId: string) => {
-    try {
-      await p2pService.joinDiscoveredGame(gameId, settings.profile.name.trim());
-      Alert.alert("Success", "Joining discovered game!");
-    } catch (error) {
-      console.error("Failed to join discovered game:", error);
-      Alert.alert("Error", "Failed to join game");
-    }
-  };
-
   // Start the game (host only)
   const startGame = () => {
     if (!isHost || !currentGame) return;
@@ -230,45 +201,6 @@ export default function P2PLobbyScreen() {
             >
               <Text style={styles.joinButtonText}>Join with Code</Text>
             </TouchableOpacity>
-          </View>
-
-          {/* Discovered Games Option */}
-          <View style={styles.joinOption}>
-            <Text style={styles.optionTitle}>🌐 Discover Games</Text>
-            <Text style={styles.optionDescription}>
-              Automatically find games on your local network
-            </Text>
-            <TouchableOpacity
-              style={[styles.joinButton, isDiscovering && styles.disabledButton]}
-              onPress={discoverGames}
-              disabled={isDiscovering}
-            >
-              <Text style={styles.joinButtonText}>
-                {isDiscovering ? "Discovering..." : "Find Games"}
-              </Text>
-            </TouchableOpacity>
-            
-            {/* Show discovered games */}
-            {discoveredGames.length > 0 && (
-              <View style={styles.discoveredGamesList}>
-                <Text style={styles.discoveredGamesTitle}>Available Games:</Text>
-                {discoveredGames.map((game) => (
-                  <TouchableOpacity
-                    key={game.id}
-                    style={styles.discoveredGameItem}
-                    onPress={() => joinDiscoveredGame(game.id)}
-                  >
-                    <Text style={styles.discoveredGameName}>{game.name}</Text>
-                    <Text style={styles.discoveredGameInfo}>
-                      {game.hostName} • {game.playerCount}/{game.maxPlayers} players
-                    </Text>
-                    {game.joinCode && (
-                      <Text style={styles.discoveredGameCode}>Code: {game.joinCode}</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
           </View>
 
           {/* Game ID Option */}
@@ -619,40 +551,6 @@ const styles = StyleSheet.create({
   },
   disabledButtonText: {
     color: "#9CA3AF",
-  },
-  discoveredGamesList: {
-    marginTop: 16,
-    width: "100%",
-  },
-  discoveredGamesTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#fff",
-    marginBottom: 8,
-  },
-  discoveredGameItem: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  discoveredGameName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#fff",
-    marginBottom: 4,
-  },
-  discoveredGameInfo: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    marginBottom: 2,
-  },
-  discoveredGameCode: {
-    fontSize: 12,
-    color: "#10B981",
-    fontWeight: "500",
   },
   leaveButton: {
     backgroundColor: "#EF4444",

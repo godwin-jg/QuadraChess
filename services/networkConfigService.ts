@@ -1,150 +1,78 @@
-// Network configuration service for local multiplayer
 import { Platform } from "react-native";
-import * as Network from "expo-network";
 
-export interface ServerConfig {
-  host: string;
-  port: number;
-  protocol: "http" | "https";
+export interface NetworkConfig {
+  signalingServerUrl: string;
+  localServerUrl: string;
 }
 
 class NetworkConfigService {
-  private defaultPort = 3001;
-  private defaultProtocol: "http" | "https" = "http";
+  private static instance: NetworkConfigService;
+  private config: NetworkConfig;
 
-  // Get the device's local IP address
-  async getLocalIP(): Promise<string | null> {
+  private constructor() {
+    this.config = this.detectNetworkConfig();
+  }
+
+  public static getInstance(): NetworkConfigService {
+    if (!NetworkConfigService.instance) {
+      NetworkConfigService.instance = new NetworkConfigService();
+    }
+    return NetworkConfigService.instance;
+  }
+
+  private detectNetworkConfig(): NetworkConfig {
+    // For development, try to detect the local network IP
+    // In production, you would use your actual server URLs
+    
+    if (Platform.OS === 'web') {
+      // Web platform - use localhost
+      return {
+        signalingServerUrl: "http://localhost:3002",
+        localServerUrl: "http://localhost:3001",
+      };
+    } else {
+      // Mobile platforms - use network IP
+      // You can update this IP to match your development machine
+      return {
+        signalingServerUrl: "http://192.168.1.9:3002",
+        localServerUrl: "http://192.168.1.9:3001",
+      };
+    }
+  }
+
+  public getSignalingServerUrl(): string {
+    return this.config.signalingServerUrl;
+  }
+
+  public getLocalServerUrl(): string {
+    return this.config.localServerUrl;
+  }
+
+  public updateSignalingServerUrl(url: string): void {
+    this.config.signalingServerUrl = url;
+  }
+
+  public updateLocalServerUrl(url: string): void {
+    this.config.localServerUrl = url;
+  }
+
+  public getConfig(): NetworkConfig {
+    return { ...this.config };
+  }
+
+  // Helper method to get current network IP (for development)
+  public async getCurrentNetworkIP(): Promise<string | null> {
     try {
-      if (Platform.OS === "web") {
-        // For web, we can't get the local IP, so we'll use localhost
-        return "localhost";
-      }
-
-      const ipAddress = await Network.getIpAddressAsync();
-      return ipAddress;
+      // This is a simple way to detect the network IP
+      // In a real app, you might want to use a more sophisticated method
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      return data.ip;
     } catch (error) {
-      console.error("Error getting local IP:", error);
+      console.warn('Could not detect network IP:', error);
       return null;
     }
   }
-
-  // Get network configuration for local multiplayer
-  async getServerConfig(): Promise<ServerConfig> {
-    try {
-      // Try to get the local IP first
-      const localIP = await this.getLocalIP();
-
-      if (localIP && localIP !== "127.0.0.1" && localIP !== "localhost") {
-        return {
-          host: localIP,
-          port: this.defaultPort,
-          protocol: this.defaultProtocol,
-        };
-      }
-
-      // Fallback to localhost for development
-      return {
-        host: "localhost",
-        port: this.defaultPort,
-        protocol: this.defaultProtocol,
-      };
-    } catch (error) {
-      console.error("Error getting server config:", error);
-      // Ultimate fallback
-      return {
-        host: "localhost",
-        port: this.defaultPort,
-        protocol: this.defaultProtocol,
-      };
-    }
-  }
-
-  // Build server URL
-  buildServerURL(config: ServerConfig): string {
-    return `${config.protocol}://${config.host}:${config.port}`;
-  }
-
-  // Test server connectivity
-  async testServerConnection(config: ServerConfig): Promise<boolean> {
-    try {
-      const url = `${this.buildServerURL(config)}/api/health`;
-      const response = await fetch(url, {
-        method: "GET",
-        timeout: 5000, // 5 second timeout
-      });
-
-      return response.ok;
-    } catch (error) {
-      console.error("Server connection test failed:", error);
-      return false;
-    }
-  }
-
-  // Auto-discover available servers on the network
-  async discoverServers(): Promise<ServerConfig[]> {
-    const discoveredServers: ServerConfig[] = [];
-
-    try {
-      // Get local IP and try common network ranges
-      const localIP = await this.getLocalIP();
-
-      if (localIP && localIP !== "127.0.0.1" && localIP !== "localhost") {
-        // Extract network prefix (e.g., 192.168.1 from 192.168.1.100)
-        const ipParts = localIP.split(".");
-        if (ipParts.length === 4) {
-          const networkPrefix = ipParts.slice(0, 3).join(".");
-
-          // Test common IPs in the network range
-          const commonIPs = [
-            `${networkPrefix}.1`, // Router
-            `${networkPrefix}.2`, // Common server IP
-            `${networkPrefix}.100`, // Common server IP
-            `${networkPrefix}.101`, // Common server IP
-            localIP, // This device
-          ];
-
-          // Test each IP
-          for (const ip of commonIPs) {
-            const config: ServerConfig = {
-              host: ip,
-              port: this.defaultPort,
-              protocol: this.defaultProtocol,
-            };
-
-            const isReachable = await this.testServerConnection(config);
-            if (isReachable) {
-              discoveredServers.push(config);
-            }
-          }
-        }
-      }
-
-      // Always add localhost as fallback
-      const localhostConfig: ServerConfig = {
-        host: "localhost",
-        port: this.defaultPort,
-        protocol: this.defaultProtocol,
-      };
-
-      const isLocalhostReachable =
-        await this.testServerConnection(localhostConfig);
-      if (isLocalhostReachable) {
-        discoveredServers.push(localhostConfig);
-      }
-    } catch (error) {
-      console.error("Error discovering servers:", error);
-    }
-
-    return discoveredServers;
-  }
-
-  // Get user-friendly server display name
-  getServerDisplayName(config: ServerConfig): string {
-    if (config.host === "localhost" || config.host === "127.0.0.1") {
-      return "Local Server (This Device)";
-    }
-    return `Server at ${config.host}`;
-  }
 }
 
-export default new NetworkConfigService();
+export default NetworkConfigService.getInstance();

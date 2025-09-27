@@ -1,4 +1,5 @@
 import io, { Socket } from "socket.io-client";
+import networkConfigService from "./networkConfigService";
 
 // Simple UUID generation without crypto dependency
 function generateUUID(): string {
@@ -29,41 +30,66 @@ class P2PSignalingService {
   private signalingServerUrl: string = "";
 
   // Initialize signaling service
-  async initialize(serverUrl: string = "http://localhost:3002"): Promise<void> {
-    this.signalingServerUrl = serverUrl;
+  async initialize(serverUrl?: string): Promise<void> {
+    const defaultUrl = serverUrl || networkConfigService.getSignalingServerUrl();
+    this.signalingServerUrl = defaultUrl;
     this.peerId = generateUUID();
 
     return new Promise((resolve, reject) => {
-      this.socket = io(serverUrl, {
+      this.socket = io(defaultUrl, {
         transports: ["websocket", "polling"],
-        timeout: 10000,
+        timeout: 15000,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        maxReconnectionAttempts: 5,
+        forceNew: true,
       });
 
       this.socket.on("connect", () => {
-        console.log("P2PSignalingService: Connected to signaling server");
+        console.log("P2PSignalingService: Connected to signaling server at", defaultUrl);
         this.isConnected = true;
         resolve();
       });
 
       this.socket.on("connect_error", (error) => {
         console.error("P2PSignalingService: Connection error:", error);
-        reject(error);
+        console.error("P2PSignalingService: Attempting to connect to:", defaultUrl);
+        // Don't reject immediately, let reconnection attempts work
       });
 
-      this.socket.on("disconnect", () => {
-        console.log("P2PSignalingService: Disconnected from signaling server");
+      this.socket.on("reconnect", (attemptNumber) => {
+        console.log("P2PSignalingService: Reconnected after", attemptNumber, "attempts");
+        this.isConnected = true;
+        if (!this.isConnected) {
+          resolve(); // Resolve the promise on successful reconnection
+        }
+      });
+
+      this.socket.on("reconnect_error", (error) => {
+        console.error("P2PSignalingService: Reconnection error:", error);
+      });
+
+      this.socket.on("reconnect_failed", () => {
+        console.error("P2PSignalingService: Reconnection failed after all attempts");
+        reject(new Error("Failed to connect to signaling server after multiple attempts"));
+      });
+
+      this.socket.on("disconnect", (reason) => {
+        console.log("P2PSignalingService: Disconnected from signaling server:", reason);
         this.isConnected = false;
       });
 
       // Set up message handlers
       this.setupMessageHandlers();
 
-      // Timeout after 10 seconds
+      // Timeout after 15 seconds
       setTimeout(() => {
         if (!this.isConnected) {
-          reject(new Error("Connection timeout"));
+          reject(new Error("Connection timeout after 15 seconds"));
         }
-      }, 10000);
+      }, 15000);
     });
   }
 

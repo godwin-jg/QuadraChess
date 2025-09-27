@@ -31,9 +31,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       android: {
         ...config.expo?.android,
         package: "com.chess4d",
-        googleServicesFile: "./android/app/google-services.json",
+      },
+      ios: {
+        ...config.expo?.ios,
+        bundleIdentifier: "com.chess4d",
       },
       owner: "jgnsecrets",
+      plugins: [
+        [
+          "@config-plugins/react-native-webrtc",
+          {
+            cameraPermission: "Allow $(PRODUCT_NAME) to access your camera for P2P connections",
+            microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone for P2P connections",
+          },
+        ],
+      ],
       extra: {
         ...config.expo?.extra,
         eas: {

@@ -150,10 +150,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
         const state = store.getState();
         const currentGameState = state.game;
 
-        // Re-enable turn validation to prevent race conditions
-        if (currentGameState.currentPlayerTurn !== moveData.playerColor) {
-          throw new Error("Not your turn");
-        }
+        // Let server handle turn validation to avoid client-server sync issues
+        // Client-side turn validation can cause issues when game state is out of sync
+        // The server will properly validate turns and return appropriate errors
 
         // Basic move validation (for immediate feedback)
         const isValidMove = this.validateMove(currentGameState, moveData);
@@ -504,18 +503,22 @@ class OnlineGameServiceImpl implements OnlineGameService {
     }
   ): boolean {
     try {
-      // Check if it's the player's turn
-      if (gameState.currentPlayerTurn !== moveData.playerColor) {
-        return false;
-      }
-
+      // Simplified validation - let server handle authoritative validation
+      // Only do basic checks to prevent obviously invalid moves
+      
       // Check if the piece belongs to the player
       const piece = gameState.boardState[moveData.from.row][moveData.from.col];
       if (!piece || piece[0] !== moveData.playerColor) {
         return false;
       }
 
-      // Check if the move is valid using game logic
+      // Basic bounds checking
+      if (moveData.to.row < 0 || moveData.to.row >= 14 || 
+          moveData.to.col < 0 || moveData.to.col >= 14) {
+        return false;
+      }
+
+      // Basic move validation (simplified)
       const validMoves = getValidMoves(
         piece,
         moveData.from,
@@ -529,23 +532,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
         (move) => move.row === moveData.to.row && move.col === moveData.to.col
       );
 
-      if (!isValidMove) {
-        return false;
-      }
-
-      // Check if the move would put the player in check
-      const tempBoard = gameState.boardState.map((row) => [...row]);
-      tempBoard[moveData.to.row][moveData.to.col] = piece;
-      tempBoard[moveData.from.row][moveData.from.col] = null;
-
-      const isInCheck = isKingInCheck(
-        moveData.playerColor,
-        tempBoard,
-        gameState.eliminatedPlayers,
-        gameState.hasMoved
-      );
-
-      return !isInCheck;
+      return isValidMove;
     } catch (error) {
       console.error("Error validating move:", error);
       return false;

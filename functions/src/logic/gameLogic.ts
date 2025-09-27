@@ -72,25 +72,25 @@ const getPseudoLegalMovesWithoutCastling = (
   }
 
   switch (pieceType) {
-    case "P": // Pawn
-      return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "N": // Knight
-      return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "R": // Rook
-      return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "B": // Bishop
-      return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "Q": // Queen
-      return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "K": // King (without castling)
-      return getKingMovesWithoutCastling(
-        pieceCode,
-        position,
-        boardState,
-        eliminatedPlayers
-      );
-    default:
-      return [];
+  case "P": // Pawn
+    return getPawnMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "N": // Knight
+    return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "R": // Rook
+    return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "B": // Bishop
+    return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "Q": // Queen
+    return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "K": // King (without castling)
+    return getKingMovesWithoutCastling(
+      pieceCode,
+      position,
+      boardState,
+      eliminatedPlayers
+    );
+  default:
+    return [];
   }
 };
 
@@ -118,34 +118,34 @@ const getPseudoLegalMoves = (
   }
 
   switch (pieceType) {
-    case "P": // Pawn
-      return getPawnMoves(
-        pieceCode,
-        position,
-        boardState,
-        eliminatedPlayers,
-        enPassantTargets
-      );
-    case "N": // Knight
-      return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "R": // Rook
-      return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "B": // Bishop
-      return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "Q": // Queen
-      return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
-    case "K": // King
-      return getKingMoves(
-        pieceCode,
-        position,
-        boardState,
-        eliminatedPlayers,
-        hasMoved,
-        isKingInCheck,
-        isSquareUnderAttack
-      );
-    default:
-      return [];
+  case "P": // Pawn
+    return getPawnMoves(
+      pieceCode,
+      position,
+      boardState,
+      eliminatedPlayers,
+      enPassantTargets
+    );
+  case "N": // Knight
+    return getKnightMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "R": // Rook
+    return getRookMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "B": // Bishop
+    return getBishopMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "Q": // Queen
+    return getQueenMoves(pieceCode, position, boardState, eliminatedPlayers);
+  case "K": // King
+    return getKingMoves(
+      pieceCode,
+      position,
+      boardState,
+      eliminatedPlayers,
+      hasMoved,
+      isKingInCheck,
+      isSquareUnderAttack
+    );
+  default:
+    return [];
   }
 };
 
@@ -263,7 +263,7 @@ export const isKingInCheck = (
   return false; // King is not in check
 };
 
-// Check if a player has any legal moves available
+// Check if a player has any legal moves available (optimized)
 export const hasAnyLegalMoves = (
   playerColor: string,
   boardState: (string | null)[][],
@@ -275,26 +275,36 @@ export const hasAnyLegalMoves = (
     createdByTurn: string;
   }[]
 ): boolean => {
-  // Iterate through every square of the board
-  for (let row = 0; row < 14; row++) {
-    for (let col = 0; col < 14; col++) {
-      const piece = boardState[row] ? boardState[row][col] : null;
+  // Early exit if player is eliminated
+  if (eliminatedPlayers.includes(playerColor)) {
+    return false;
+  }
 
-      // If this square contains a piece belonging to the player
-      if (piece && piece[0] === playerColor) {
-        // Get valid moves for this piece (including en passant opportunities)
-        const validMoves = getValidMoves(
-          piece,
-          { row, col },
-          boardState,
-          eliminatedPlayers,
-          hasMoved,
-          enPassantTargets
-        );
+  // Optimized: Check pieces in order of likelihood to have moves
+  // Start with pieces that are more likely to have moves (pawns, knights, queens)
+  const piecePriority = ["P", "N", "Q", "R", "B", "K"];
 
-        // If there are any legal moves, return true immediately
-        if (validMoves.length > 0) {
-          return true;
+  for (const pieceType of piecePriority) {
+    for (let row = 0; row < 14; row++) {
+      for (let col = 0; col < 14; col++) {
+        const piece = boardState[row] ? boardState[row][col] : null;
+
+        // If this square contains a piece belonging to the player of the current type
+        if (piece && piece[0] === playerColor && piece[1] === pieceType) {
+          // Get valid moves for this piece (including en passant opportunities)
+          const validMoves = getValidMoves(
+            piece,
+            { row, col },
+            boardState,
+            eliminatedPlayers,
+            hasMoved,
+            enPassantTargets
+          );
+
+          // If there are any legal moves, return true immediately
+          if (validMoves.length > 0) {
+            return true;
+          }
         }
       }
     }

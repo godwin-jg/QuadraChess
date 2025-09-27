@@ -71,8 +71,12 @@ class OnlineGameServiceImpl implements OnlineGameService {
           if (game) {
             // Keep connected status true when we receive game data
             this.isConnected = true;
+            console.log("OnlineGameService: Game data received, maintaining connection");
           } else {
-            this.isConnected = false; // Mark as disconnected if game is null
+            // Only mark as disconnected if we're sure the game doesn't exist
+            // Don't immediately disconnect on temporary null values
+            console.log("OnlineGameService: Received null game data, checking if game exists...");
+            // Keep isConnected true for now, let the resign method handle the actual connection check
           }
           this.handleGameUpdate(game);
         }
@@ -96,6 +100,8 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   async disconnect(): Promise<void> {
+    console.log("OnlineGameService: disconnect() called - currentGameId:", this.currentGameId);
+    console.trace("OnlineGameService: disconnect() call stack:");
     try {
       if (this.currentGameId) {
         await this.updatePlayerPresence(false);
@@ -205,22 +211,38 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   async resignGame(): Promise<void> {
-    if (!this.currentGameId || !this.isConnected) {
-      throw new Error("Not connected to a game");
+    // If currentGameId is null, try to get it from the Redux store
+    if (!this.currentGameId) {
+      console.warn("OnlineGameService: currentGameId is null, attempting to get from store");
+      const state = store.getState();
+      const gameId = state.game.gameId;
+      if (gameId) {
+        console.log("OnlineGameService: Found gameId in store:", gameId);
+        this.currentGameId = gameId;
+      } else {
+        throw new Error("No game ID available in service or store");
+      }
     }
 
-    if (!this.currentPlayer) {
-      throw new Error("No current player found");
+    // Store current player info before calling Cloud Function
+    // (Cloud Function removes player from game.players, so we need to store it first)
+    const currentPlayerInfo = this.currentPlayer;
+    if (!currentPlayerInfo) {
+      console.warn("OnlineGameService: No current player found, but proceeding with resign anyway");
+      // Don't throw error - let the Cloud Function handle the validation
     }
+
+    console.log("OnlineGameService: Attempting resign with gameId:", this.currentGameId, "player:", currentPlayerInfo);
 
     // Add retry logic for network failures
     let retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 2; // Reduced from 3 to 2 for faster failure
     let lastError: Error | null = null;
 
     while (retryCount < maxRetries) {
       try {
         // Call the Cloud Function to resign
+        console.log("OnlineGameService: Calling Cloud Function with player:", currentPlayerInfo);
         await realtimeDatabaseService.resignGame(this.currentGameId);
 
         // If we get here, the resign was sent successfully
@@ -277,7 +299,11 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   private handleGameUpdate(game: RealtimeGame | null): void {
+    console.log("OnlineGameService: handleGameUpdate called with game:", game ? "present" : "null");
     if (game) {
+      console.log("OnlineGameService: Game update received - eliminatedPlayers:", game.gameState?.eliminatedPlayers);
+      console.log("OnlineGameService: Game update received - currentPlayerTurn:", game.gameState?.currentPlayerTurn);
+      
       // Check if game data is complete
       if (!game.gameState) {
         console.warn(
@@ -397,6 +423,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
         };
 
         // Apply the complete game state from server (including history)
+        console.log("OnlineGameService: Dispatching setGameState with eliminatedPlayers:", gameState.eliminatedPlayers);
         store.dispatch(setGameState(gameState));
       } else {
         console.warn("Game state is missing boardState, using fallback");

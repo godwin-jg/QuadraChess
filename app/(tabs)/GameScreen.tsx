@@ -14,7 +14,7 @@ import {
   setGameState,
 } from "../../state/gameSlice";
 import Board from "../components/board/Board";
-import GameMenu from "../components/ui/GameMenu";
+import ResignButton from "../components/ui/ResignButton";
 import GameNotification from "../components/ui/GameNotification";
 import GameOverModal from "../components/ui/GameOverModal";
 import HistoryControls from "../components/ui/HistoryControls";
@@ -228,6 +228,7 @@ export default function GameScreen() {
   const scores = useSelector((state: RootState) => state.game.scores);
   const promotionState = useSelector((state: RootState) => state.game.promotionState);
   const justEliminated = useSelector((state: RootState) => state.game.justEliminated);
+  const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
 
@@ -297,6 +298,7 @@ export default function GameScreen() {
       score: scores.r,
       capturedPieces: capturedPieces.r,
       isCurrentTurn: currentPlayerTurn === "r",
+      isEliminated: eliminatedPlayers.includes("r"),
     },
     {
       name: getPlayerName("b"),
@@ -304,6 +306,7 @@ export default function GameScreen() {
       score: scores.b,
       capturedPieces: capturedPieces.b,
       isCurrentTurn: currentPlayerTurn === "b",
+      isEliminated: eliminatedPlayers.includes("b"),
     },
     {
       name: getPlayerName("y"),
@@ -311,6 +314,7 @@ export default function GameScreen() {
       score: scores.y,
       capturedPieces: capturedPieces.y,
       isCurrentTurn: currentPlayerTurn === "y",
+      isEliminated: eliminatedPlayers.includes("y"),
     },
     {
       name: getPlayerName("g"),
@@ -318,6 +322,7 @@ export default function GameScreen() {
       score: scores.g,
       capturedPieces: capturedPieces.g,
       isCurrentTurn: currentPlayerTurn === "g",
+      isEliminated: eliminatedPlayers.includes("g"),
     },
   ];
 
@@ -341,8 +346,8 @@ export default function GameScreen() {
         <HistoryControls />
       </View>
 
-      {/* Game Menu - Top Right */}
-      <GameMenu />
+      {/* Resign Button - Bottom Center */}
+      <ResignButton />
 
       {/* Chess Board - Centered */}
       <Board />
@@ -355,6 +360,7 @@ export default function GameScreen() {
           player={players[2]}
           capturedPieces={players[2].capturedPieces}
           isCurrentTurn={players[2].isCurrentTurn}
+          isEliminated={players[2].isEliminated}
         />
       </View>
 
@@ -364,6 +370,7 @@ export default function GameScreen() {
           player={players[3]}
           capturedPieces={players[3].capturedPieces}
           isCurrentTurn={players[3].isCurrentTurn}
+          isEliminated={players[3].isEliminated}
         />
       </View>
 
@@ -373,6 +380,7 @@ export default function GameScreen() {
           player={players[1]}
           capturedPieces={players[1].capturedPieces}
           isCurrentTurn={players[1].isCurrentTurn}
+          isEliminated={players[1].isEliminated}
         />
       </View>
 
@@ -382,6 +390,7 @@ export default function GameScreen() {
           player={players[0]}
           capturedPieces={players[0].capturedPieces}
           isCurrentTurn={players[0].isCurrentTurn}
+          isEliminated={players[0].isEliminated}
         />
       </View>
 

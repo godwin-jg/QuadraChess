@@ -14,6 +14,7 @@ interface PieceProps {
   isSelected?: boolean; // For selection effects
   isHighlighted?: boolean; // For move highlights
   animationDelay?: number; // For staggered animations
+  previewStyle?: string; // Override piece style for preview purposes
 }
 
 export default function Piece({
@@ -24,6 +25,7 @@ export default function Piece({
   isSelected = false,
   isHighlighted = false,
   animationDelay = 0,
+  previewStyle,
 }: PieceProps) {
   const getPieceSymbol = (piece: string) => {
     const pieceType = piece[1];
@@ -70,7 +72,12 @@ export default function Piece({
   const pieceType = getPieceType(piece);
   const pieceAsset = getPieceAsset(piece);
   const { settings } = useSettings();
-  const pieceStyle = getPieceStyle(settings, pieceColorCode);
+  
+  // Use preview style if provided, otherwise use settings
+  const currentStyle = previewStyle || settings.pieces.style;
+  const pieceStyle = previewStyle 
+    ? getPieceStyle({ ...settings, pieces: { ...settings.pieces, style: previewStyle } }, pieceColorCode)
+    : getPieceStyle(settings, pieceColorCode);
   const sizeMultiplier = getPieceSize(settings);
 
   // Enhanced visual effects
@@ -130,11 +137,8 @@ export default function Piece({
 
   // Render SVG piece with user-selected styling
   if (useSVG && pieceAsset) {
-    if (
-      settings.pieces.style === "wooden" &&
-      (pieceColorCode === "b" || pieceColorCode === "g")
-    ) {
-      // Wooden style for Blue and Green pieces
+    if (currentStyle === "wooden") {
+      // Wooden style for all pieces
       return (
         <View style={getContainerStyle()}>
           <Svg

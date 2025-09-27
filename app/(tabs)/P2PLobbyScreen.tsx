@@ -121,6 +121,10 @@ export default function P2PLobbyScreen() {
 
     setIsCreatingRoom(true);
     try {
+      // Reset local game state before creating new game
+      dispatch(resetGame());
+      console.log("P2PLobbyScreen: Reset game state before creating new game");
+      
       const result = await p2pService.createGame(playerName.trim());
       dispatch(setIsHost(true));
       dispatch(setCanStartGame(false));
@@ -166,6 +170,10 @@ export default function P2PLobbyScreen() {
 
     setIsJoiningRoom(true);
     try {
+      // Reset local game state before joining new game
+      dispatch(resetGame());
+      console.log("P2PLobbyScreen: Reset game state before joining new game");
+      
       const result = await p2pService.joinGame(game.id, playerName.trim());
       dispatch(setIsHost(false));
       dispatch(setPlayers([])); // Will be updated when we receive game state

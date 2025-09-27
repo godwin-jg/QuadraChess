@@ -11,7 +11,7 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { RootState } from "../../state/store";
-import { setPlayers, setIsHost, setCanStartGame } from "../../state";
+import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state";
 import realtimeDatabaseService, {
   RealtimeGame,
 } from "../../services/realtimeDatabaseService";
@@ -148,6 +148,10 @@ const OnlineLobbyScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
+      // Reset local game state before creating new game
+      dispatch(resetGame());
+      console.log("OnlineLobbyScreen: Reset game state before creating new game");
+      
       // SECURE: Use Cloud Function to create game with server-authoritative state
       console.log("Creating game via Cloud Function");
 
@@ -172,6 +176,10 @@ const OnlineLobbyScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
+      // Reset local game state before joining new game
+      dispatch(resetGame());
+      console.log("OnlineLobbyScreen: Reset game state before joining new game");
+      
       await realtimeDatabaseService.joinGame(gameId, playerName);
       setCurrentGameId(gameId);
     } catch (error) {

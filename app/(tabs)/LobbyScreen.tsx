@@ -220,6 +220,10 @@ export default function LobbyScreen() {
 
     setIsCreatingRoom(true);
     try {
+      // Reset local game state before creating new game
+      dispatch(resetGame());
+      console.log("LobbyScreen: Reset game state before creating new game");
+      
       // Check if we can host a game
       const hostingCheck = await gameHostService.canHostGame();
 
@@ -275,6 +279,10 @@ export default function LobbyScreen() {
 
     setIsJoiningRoom(true);
     try {
+      // Reset local game state before joining new game
+      dispatch(resetGame());
+      console.log("LobbyScreen: Reset game state before joining new game");
+      
       const result = await networkService.joinRoom(game.id, {
         name: playerName,
       });

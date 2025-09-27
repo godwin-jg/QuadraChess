@@ -6,6 +6,7 @@ interface ResignConfirmationModalProps {
   onConfirm: () => void;
   onCancel: () => void;
   playerName: string;
+  isResigning?: boolean;
 }
 
 export default function ResignConfirmationModal({
@@ -13,6 +14,7 @@ export default function ResignConfirmationModal({
   onConfirm,
   onCancel,
   playerName,
+  isResigning = false,
 }: ResignConfirmationModalProps) {
   return (
     <Modal
@@ -27,7 +29,7 @@ export default function ResignConfirmationModal({
             Resign Game
           </Text>
           <Text className="text-lg text-center mb-4 text-gray-300">
-            Are you sure you want to resign, {playerName}?
+            Are you sure you want to resign?
           </Text>
           <Text className="text-sm text-center mb-6 text-red-400">
             This will eliminate you from the game.
@@ -45,12 +47,15 @@ export default function ResignConfirmationModal({
             </TouchableOpacity>
 
             <TouchableOpacity
-              className="flex-1 bg-red-600 py-3 px-4 rounded-xl active:opacity-80"
+              className={`flex-1 py-3 px-4 rounded-xl ${
+                isResigning ? 'bg-gray-500' : 'bg-red-600 active:opacity-80'
+              }`}
               onPress={onConfirm}
-              activeOpacity={0.8}
+              activeOpacity={isResigning ? 1 : 0.8}
+              disabled={isResigning}
             >
               <Text className="text-white text-center font-semibold">
-                Resign
+                {isResigning ? 'Resigning...' : 'Resign'}
               </Text>
             </TouchableOpacity>
           </View>

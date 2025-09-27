@@ -226,8 +226,10 @@ class RealtimeDatabaseService {
     const gameRef = database().ref(`games/${gameId}`);
 
     const listener = gameRef.on("value", (snapshot) => {
+      console.log("RealtimeDatabaseService: Firebase snapshot received for game:", gameId);
       if (snapshot.exists()) {
         const gameData = { id: gameId, ...snapshot.val() } as RealtimeGame;
+        console.log("RealtimeDatabaseService: Game data exists - eliminatedPlayers:", gameData.gameState?.eliminatedPlayers);
 
         // Ensure all players have required fields
         const processedPlayers: { [playerId: string]: Player } = {};
@@ -331,9 +333,17 @@ class RealtimeDatabaseService {
       const functions = require("@react-native-firebase/functions").default;
       const resignGameFunction = functions().httpsCallable("resignGame");
 
-      const result = await resignGameFunction({
-        gameId: gameId,
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Cloud Function call timed out")), 8000); // 8 second timeout
       });
+
+      const result = await Promise.race([
+        resignGameFunction({
+          gameId: gameId,
+        }),
+        timeoutPromise
+      ]);
 
       console.log("Resign request processed:", result.data);
     } catch (error) {

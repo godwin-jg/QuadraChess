@@ -357,10 +357,17 @@ export const resignGame = onCall(async (request) => {
             return gameData; // Return current data to avoid transaction abort
           }
 
+          // Initialize eliminatedPlayers array if it doesn't exist
+          if (!gameData.gameState.eliminatedPlayers) {
+            gameData.gameState.eliminatedPlayers = [];
+            console.log(`Resign Cloud Function: Initialized eliminatedPlayers array for game ${gameId}`);
+          }
+
           // Add player to eliminated players
           if (!gameData.gameState.eliminatedPlayers.includes(player.color)) {
             gameData.gameState.eliminatedPlayers.push(player.color);
             gameData.gameState.justEliminated = player.color;
+            console.log(`Resign Cloud Function: Added ${player.color} to eliminatedPlayers:`, gameData.gameState.eliminatedPlayers);
           }
 
           // Remove the player from the game
@@ -435,6 +442,7 @@ export const resignGame = onCall(async (request) => {
           console.log(
             `Resign game transaction committed successfully for game ${gameId}`
           );
+          console.log("Resign Cloud Function: Updated eliminatedPlayers:", result.snapshot.val()?.gameState?.eliminatedPlayers);
         } else {
           retryCount++;
           console.warn(

@@ -10,14 +10,19 @@ interface PlayerInfoPodProps {
   };
   capturedPieces: string[];
   isCurrentTurn: boolean;
+  isEliminated?: boolean;
 }
 
 export default function PlayerInfoPod({
   player,
   capturedPieces,
   isCurrentTurn,
+  isEliminated = false,
 }: PlayerInfoPodProps) {
   const getPlayerAccentColor = (playerColor: string) => {
+    if (isEliminated) {
+      return "bg-gray-600"; // Darker grey for eliminated players
+    }
     if (!isCurrentTurn) {
       return "bg-gray-400"; // Greyed out for inactive players
     }
@@ -37,6 +42,9 @@ export default function PlayerInfoPod({
   };
 
   const getPlayerTextColor = (playerColor: string) => {
+    if (isEliminated) {
+      return "text-gray-400"; // Darker grey text for eliminated players
+    }
     if (!isCurrentTurn) {
       return "text-gray-500"; // Greyed out for inactive players
     }
@@ -77,7 +85,9 @@ export default function PlayerInfoPod({
         className={`
           relative w-20 h-20 rounded-full shadow-xl border-4 items-center justify-center
           ${
-            isCurrentTurn
+            isEliminated
+              ? `${getPlayerAccentColor(player.color)} border-gray-500 opacity-50`
+              : isCurrentTurn
               ? `${getPlayerAccentColor(player.color)} border-white ring-4 ring-amber-400 ring-opacity-80`
               : "bg-gray-400 border-gray-300 opacity-75"
           }
@@ -97,13 +107,24 @@ export default function PlayerInfoPod({
       </View>
 
       {/* Player Name */}
-      <Text
-        className={`text-sm font-bold mt-2 ${
-          isCurrentTurn ? getPlayerTextColor(player.color) : "text-gray-500"
-        }`}
-      >
-        {player.name}
-      </Text>
+      <View className="items-center">
+        <Text
+          className={`text-sm font-bold mt-2 ${
+            isEliminated 
+              ? "text-gray-400" 
+              : isCurrentTurn 
+              ? getPlayerTextColor(player.color) 
+              : "text-gray-500"
+          }`}
+        >
+          {player.name}
+        </Text>
+        {isEliminated && (
+          <Text className="text-xs text-red-400 font-semibold mt-1">
+            ELIMINATED
+          </Text>
+        )}
+      </View>
 
       {/* Score */}
       <View className="mt-2 relative">

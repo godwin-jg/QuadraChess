@@ -4,13 +4,11 @@ import { useState } from "react";
 import { Text, TouchableOpacity } from "react-native";
 import modeSwitchService from "../../services/modeSwitchService";
 import TestGallery from "../components/board/TestGallery";
-import ProfileSettings from "../components/settings/ProfileSettings";
 
 export default function HomeScreen() {
   const router = useRouter();
   const [isNavigating, setIsNavigating] = useState(false);
   const [showTestGallery, setShowTestGallery] = useState(false);
-  const [showProfileSettings, setShowProfileSettings] = useState(false);
 
   const handleModeSwitch = async (
     targetMode: "online" | "local" | "solo",
@@ -41,10 +39,6 @@ export default function HomeScreen() {
     return <TestGallery onBack={() => setShowTestGallery(false)} />;
   }
 
-  if (showProfileSettings) {
-    return <ProfileSettings onClose={() => setShowProfileSettings(false)} />;
-  }
-
   return (
     <View className="flex-1 bg-black">
       {/* Top Navigation Bar */}
@@ -55,7 +49,7 @@ export default function HomeScreen() {
         </Text>
         <TouchableOpacity
           className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
-          onPress={() => setShowProfileSettings(true)}
+          onPress={() => router.push("/settings")}
         >
           <Text className="text-xl">⚙️</Text>
         </TouchableOpacity>

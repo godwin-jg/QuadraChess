@@ -726,7 +726,7 @@ const gameSlice = createSlice({
     returnToLive: (state) => {
       state.viewingHistoryIndex = null;
     },
-    resignGame: (state) => {
+    resignGame: (state, action: PayloadAction<string | undefined>) => {
       // Don't allow resigning when viewing historical moves
       if (state.viewingHistoryIndex !== null) {
         return;
@@ -741,7 +741,8 @@ const gameSlice = createSlice({
         return;
       }
 
-      const currentPlayer = state.currentPlayerTurn;
+      // Use provided player color or default to current player turn
+      const currentPlayer = action.payload || state.currentPlayerTurn;
 
       // Add current player to eliminated players
       if (!state.eliminatedPlayers.includes(currentPlayer)) {

@@ -45,8 +45,18 @@ export interface PieceStyleConfig {
 
 export const PIECE_STYLES: PieceStyleConfig = {
   wooden: {
-    red: { fill: "#B91C1C", stroke: "#ffffff", strokeWidth: 0.6 },
-    purple: { fill: "#7C3AED", stroke: "#ffffff", strokeWidth: 0.6 },
+    red: {
+      fill: "url(#woodGradient)",
+      stroke: "#8B4513",
+      strokeWidth: 1,
+      bandColor: "#B91C1C",
+    },
+    purple: {
+      fill: "url(#woodGradient)",
+      stroke: "#8B4513",
+      strokeWidth: 1,
+      bandColor: "#7C3AED",
+    },
     blue: {
       fill: "url(#woodGradient)",
       stroke: "#8B4513",

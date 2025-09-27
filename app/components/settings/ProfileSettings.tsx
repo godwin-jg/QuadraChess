@@ -2,13 +2,24 @@ import React, { useState } from "react";
 import {
   Alert,
   ScrollView,
-  StyleSheet,
   Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useRouter } from "expo-router";
+import * as Haptics from 'expo-haptics';
+
+// Helper function to safely trigger haptic feedback
+const triggerHaptic = async (style: Haptics.ImpactFeedbackStyle) => {
+  try {
+    await Haptics.impactAsync(style);
+  } catch (error) {
+    // Silently fail if haptics are not available (e.g., on Android without proper linking)
+    console.log('Haptic feedback not available:', error);
+  }
+};
 import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "../board/BoardThemeConfig";
 import Piece from "../board/Piece";
@@ -18,6 +29,7 @@ interface ProfileSettingsProps {
 }
 
 export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
+  const router = useRouter();
   const {
     settings,
     isLoading,
@@ -88,96 +100,88 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={theme.key}
-        style={[
-          styles.horizontalOption,
-          isSelected && styles.horizontalOptionSelected,
-        ]}
-        onPress={() => updateBoard({ theme: theme.key })}
+        className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
+          isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
+        }`}
+        onPress={() => {
+          triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+          updateBoard({ theme: theme.key });
+        }}
       >
-        <View style={styles.themePreview}>
+        <View className="mr-3">
           <View
-            style={[
-              styles.miniBoard,
-              { backgroundColor: boardTheme.borderColor },
-            ]}
+            className="p-0.5 rounded"
+            style={{ backgroundColor: boardTheme.borderColor }}
           >
             {[0, 1, 2, 3].map((row) => (
-              <View key={row} style={styles.miniBoardRow}>
+              <View key={row} className="flex-row">
                 {[0, 1, 2, 3].map((col) => (
                   <View
                     key={col}
-                    style={[
-                      styles.miniSquare,
-                      {
-                        backgroundColor:
-                          (row + col) % 2 === 0
-                            ? boardTheme.lightSquare
-                            : boardTheme.darkSquare,
-                      },
-                    ]}
+                    className="w-2 h-2"
+                    style={{
+                      backgroundColor:
+                        (row + col) % 2 === 0
+                          ? boardTheme.lightSquare
+                          : boardTheme.darkSquare,
+                    }}
                   />
                 ))}
               </View>
             ))}
           </View>
         </View>
-        <View style={styles.horizontalInfo}>
+        <View className="flex-1 items-center">
           <Text
-            style={[
-              styles.horizontalName,
-              isSelected && styles.horizontalNameSelected,
-            ]}
+            className={`text-base font-semibold text-center ${
+              isSelected ? 'text-white' : 'text-gray-300'
+            }`}
           >
             {theme.name}
           </Text>
-          <Text style={styles.horizontalDescription}>{theme.description}</Text>
+          <Text className="text-xs text-gray-400 text-center mt-0.5">{theme.description}</Text>
         </View>
-        {isSelected && <Text style={styles.checkmark}>✓</Text>}
+        {isSelected && <Text className="text-lg text-emerald-500 font-bold">✓</Text>}
       </TouchableOpacity>
     );
   };
 
   const renderPieceStyleOption = (style: any) => {
     const isSelected = settings.pieces.style === style.key;
-    // Create temporary settings with this style to get accurate preview
-    const tempSettings = {
-      ...settings,
-      pieces: { ...settings.pieces, style: style.key },
-    };
 
     return (
       <TouchableOpacity
         key={style.key}
-        style={[
-          styles.horizontalOption,
-          isSelected && styles.horizontalOptionSelected,
-        ]}
-        onPress={() => updatePieces({ style: style.key })}
+        className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
+          isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
+        }`}
+        onPress={() => {
+          triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+          updatePieces({ style: style.key });
+        }}
       >
-        <View style={styles.stylePreview}>
-          <View style={styles.singlePieceContainer}>
-            <View style={styles.singlePieceSquare}>
+        <View className="mr-3">
+          <View className="w-12 h-12 justify-center items-center">
+            <View className="w-10 h-10 justify-center items-center bg-[#f0d9b5] rounded-md">
               <Piece
                 piece="rK"
                 size={32}
                 useSVG={true}
-                // Pass the temp settings to get accurate styling
-                settings={tempSettings}
+                previewStyle={style.key}
               />
             </View>
           </View>
         </View>
-        <View style={styles.horizontalInfo}>
+        <View className="flex-1 items-center">
           <Text
-            style={[
-              styles.horizontalName,
-              isSelected && styles.horizontalNameSelected,
-            ]}
+            className={`text-base font-semibold text-center ${
+              isSelected ? 'text-white' : 'text-gray-300'
+            }`}
           >
             {style.name}
           </Text>
         </View>
-        {isSelected && <Text style={styles.checkmark}>✓</Text>}
+        {isSelected && <Text className="text-lg text-emerald-500 font-bold">✓</Text>}
       </TouchableOpacity>
     );
   };
@@ -188,40 +192,38 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={size.key}
-        style={[
-          styles.horizontalOption,
-          isSelected && styles.horizontalOptionSelected,
-        ]}
+        className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
+          isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
+        }`}
         onPress={() => updatePieces({ size: size.key })}
       >
         <Text
-          style={[
-            styles.horizontalName,
-            isSelected && styles.horizontalNameSelected,
-          ]}
+          className={`text-base font-semibold text-center flex-1 ${
+            isSelected ? 'text-white' : 'text-gray-300'
+          }`}
         >
           {size.name}
         </Text>
-        {isSelected && <Text style={styles.checkmark}>✓</Text>}
+        {isSelected && <Text className="text-lg text-emerald-500 font-bold">✓</Text>}
       </TouchableOpacity>
     );
   };
 
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading settings...</Text>
+      <View className="flex-1 justify-center items-center bg-black">
+        <Text className="text-base text-white">Loading settings...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View className="flex-1 bg-black">
+      {/* Sticky Header */}
+      <View className="flex-row justify-between items-center px-5 py-4 bg-black border-b border-gray-800">
         <TouchableOpacity
-          style={styles.backButton}
+          className="w-10 h-10 rounded-full bg-gray-700 justify-center items-center border border-gray-600 shadow-lg"
           onPress={() => {
-            console.log("Back button pressed");
             if (hasUnsavedChanges) {
               Alert.alert(
                 "Unsaved Changes",
@@ -234,7 +236,11 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                     onPress: () => {
                       // FIX: Actually discard the changes first
                       discardChanges();
-                      if (onClose) onClose();
+                      if (onClose) {
+                        onClose();
+                      } else {
+                        router.back();
+                      }
                     },
                   },
                   {
@@ -242,7 +248,11 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                     onPress: async () => {
                       try {
                         await saveSettings();
-                        if (onClose) onClose();
+                        if (onClose) {
+                          onClose();
+                        } else {
+                          router.back();
+                        }
                       } catch (error) {
                         Alert.alert(
                           "Error",
@@ -256,25 +266,29 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
             } else {
               if (onClose) {
                 onClose();
+              } else {
+                // Navigate back to home screen
+                router.back();
               }
             }
           }}
           activeOpacity={0.7}
         >
-          <Text style={styles.backButtonText}>←</Text>
+          <Text className="text-xl text-white font-semibold">←</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>⚙️ Profile Settings</Text>
-        <View style={styles.headerSpacer} />
+        <Text className="text-2xl font-bold text-white">⚙️ Profile Settings</Text>
+        <View className="w-10" />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      {/* Scrollable Content */}
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>👤 Profile</Text>
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Player Name</Text>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">👤 Profile</Text>
+          <View className="mb-2">
+            <Text className="text-base font-semibold text-gray-300 mb-3">Player Name</Text>
             <TextInput
-              style={styles.textInput}
+              className="border-b-2 border-white px-0 py-4 text-xl text-white bg-transparent font-medium"
               value={settings.profile.name}
               onChangeText={(text) => updateProfile({ name: text })}
               placeholder="Enter your name"
@@ -284,9 +298,9 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Board Theme Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🎨 Board Theme</Text>
-          <View style={styles.horizontalContainer}>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">🎨 Board Theme</Text>
+          <View className="flex-row flex-wrap gap-3">
             {[
               {
                 key: "brown",
@@ -308,9 +322,9 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Piece Style Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>♟️ Piece Style</Text>
-          <View style={styles.horizontalContainer}>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">♟️ Piece Style</Text>
+          <View className="flex-row flex-wrap gap-3">
             {[
               { key: "solid", name: "Solid" },
               { key: "white-bordered", name: "White" },
@@ -322,48 +336,73 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Piece Size Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📏 Size</Text>
-          <View style={styles.horizontalContainer}>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">📏 Size</Text>
+          {/* Segmented Control */}
+          <View className="flex-row bg-gray-800 rounded-lg p-1 mt-4">
             {[
-              { key: "small", name: "Small" },
-              { key: "medium", name: "Medium" },
-              { key: "large", name: "Large" },
-            ].map(renderSizeOption)}
+              { key: "small", name: "S" },
+              { key: "medium", name: "M" },
+              { key: "large", name: "L" },
+            ].map((size, index) => (
+              <TouchableOpacity
+                key={size.key}
+                onPress={() => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                  updatePieces({ size: size.key });
+                }}
+                className={`flex-1 items-center py-2 rounded-md ${
+                  settings.pieces.size === size.key ? 'bg-blue-600' : 'bg-transparent'
+                }`}
+              >
+                <Text className={`font-bold ${
+                  settings.pieces.size === size.key ? 'text-white' : 'text-gray-400'
+                }`}>
+                  {size.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
         {/* Game Settings Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🎮 Game Settings</Text>
-          <View style={styles.switchGroup}>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Sound Effects</Text>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">🎮 Game Settings</Text>
+          <View>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Sound Effects</Text>
               <Switch
                 value={settings.game.soundEnabled}
-                onValueChange={(value) => updateGame({ soundEnabled: value })}
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateGame({ soundEnabled: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.soundEnabled ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Animations</Text>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Animations</Text>
               <Switch
                 value={settings.game.animationsEnabled}
-                onValueChange={(value) =>
-                  updateGame({ animationsEnabled: value })
-                }
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateGame({ animationsEnabled: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={
                   settings.game.animationsEnabled ? "#FFFFFF" : "#9CA3AF"
                 }
               />
             </View>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Move Hints</Text>
+            <View className="flex-row justify-between items-center py-4">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Move Hints</Text>
               <Switch
                 value={settings.game.showMoveHints}
-                onValueChange={(value) => updateGame({ showMoveHints: value })}
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateGame({ showMoveHints: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.showMoveHints ? "#FFFFFF" : "#9CA3AF"}
               />
@@ -372,42 +411,45 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Accessibility Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>♿ Accessibility</Text>
-          <View style={styles.switchGroup}>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>High Contrast</Text>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">♿ Accessibility</Text>
+          <View>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">High Contrast</Text>
               <Switch
                 value={settings.accessibility.highContrast}
-                onValueChange={(value) =>
-                  updateAccessibility({ highContrast: value })
-                }
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateAccessibility({ highContrast: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={
                   settings.accessibility.highContrast ? "#FFFFFF" : "#9CA3AF"
                 }
               />
             </View>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Large Text</Text>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Large Text</Text>
               <Switch
                 value={settings.accessibility.largeText}
-                onValueChange={(value) =>
-                  updateAccessibility({ largeText: value })
-                }
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateAccessibility({ largeText: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={
                   settings.accessibility.largeText ? "#FFFFFF" : "#9CA3AF"
                 }
               />
             </View>
-            <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Reduced Motion</Text>
+            <View className="flex-row justify-between items-center py-4">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Reduced Motion</Text>
               <Switch
                 value={settings.accessibility.reducedMotion}
-                onValueChange={(value) =>
-                  updateAccessibility({ reducedMotion: value })
-                }
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateAccessibility({ reducedMotion: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={
                   settings.accessibility.reducedMotion ? "#FFFFFF" : "#9CA3AF"
@@ -418,21 +460,24 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Developer Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">
             🛠️ Developer (will be removed in release)
           </Text>
-          <View style={styles.switchGroup}>
-            <View style={styles.switchRow}>
-              <View style={styles.switchLabelContainer}>
-                <Text style={styles.switchLabel}>Solo Mode</Text>
-                <Text style={styles.switchDescription}>
+          <View>
+            <View className="flex-row justify-between items-center py-4">
+              <View className="flex-1">
+                <Text className="text-lg font-semibold text-gray-300">Solo Mode</Text>
+                <Text className="text-sm text-gray-400 mt-0.5">
                   Disable turn validation for analysis
                 </Text>
               </View>
               <Switch
                 value={settings.developer.soloMode}
-                onValueChange={(value) => updateDeveloper({ soloMode: value })}
+                onValueChange={(value) => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                  updateDeveloper({ soloMode: value });
+                }}
                 trackColor={{ false: "#E5E7EB", true: "#EF4444" }}
                 thumbColor={settings.developer.soloMode ? "#FFFFFF" : "#9CA3AF"}
               />
@@ -440,397 +485,57 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
           </View>
         </View>
 
-        {/* Save/Discard Section */}
-        {hasUnsavedChanges && (
-          <View style={styles.section}>
-            <Text style={styles.unsavedChangesText}>
-              ⚠️ You have unsaved changes
-            </Text>
-            <View style={styles.saveDiscardContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.saveButton,
-                  isSaving && styles.saveButtonDisabled,
-                ]}
-                onPress={handleSaveSettings}
-                disabled={isSaving}
-              >
-                <Text style={styles.saveButtonText}>
-                  {isSaving ? "💾 Saving..." : "💾 Save Changes"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.discardButton}
-                onPress={handleDiscardChanges}
-              >
-                <Text style={styles.discardButtonText}>🗑️ Discard</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
 
         {/* Reset Section */}
-        <View style={styles.section}>
+        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
           <TouchableOpacity
-            style={styles.resetButton}
+            className="py-2"
             onPress={() => setShowResetConfirm(true)}
           >
-            <Text style={styles.resetButtonText}>🔄 Reset to Defaults</Text>
+            <Text className="text-base font-medium text-red-500 text-center">
+              Reset all settings to default
+            </Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.bottomSpacer} />
+        {/* Add padding to prevent content from hiding behind the footer */}
+        <View className="h-24" />
       </ScrollView>
+
+      {/* Sticky Footer */}
+      {hasUnsavedChanges && (
+        <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/90 border-t border-gray-700">
+          <Text className="text-sm text-amber-500 text-center mb-3 font-medium">
+            ⚠️ You have unsaved changes
+          </Text>
+          <View className="flex-row gap-3">
+            <TouchableOpacity
+              className={`flex-1 bg-emerald-600 rounded-lg py-3 px-5 items-center ${
+                isSaving ? 'bg-gray-700 border border-gray-600 opacity-60' : ''
+              }`}
+              onPress={() => {
+                triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                handleSaveSettings();
+              }}
+              disabled={isSaving}
+            >
+              <Text className="text-base font-semibold text-white">
+                {isSaving ? "💾 Saving..." : "💾 Save Changes"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="flex-1 bg-red-900 rounded-lg py-3 px-5 items-center"
+              onPress={() => {
+                triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                handleDiscardChanges();
+              }}
+            >
+              <Text className="text-base font-semibold text-white">🗑️ Discard</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000000",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#000000",
-  },
-  loadingText: {
-    fontSize: 16,
-    color: "#FFFFFF",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: "#000000",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#FFFFFF",
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#374151",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#4B5563",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  backButtonText: {
-    fontSize: 20,
-    color: "#FFFFFF",
-    fontWeight: "600",
-  },
-  headerSpacer: {
-    width: 40, // Same width as back button to center the title
-  },
-  content: {
-    flex: 1,
-  },
-  section: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 4,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#FFFFFF",
-    marginBottom: 16,
-    letterSpacing: 0.5,
-  },
-  inputGroup: {
-    marginBottom: 8,
-  },
-  inputLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#D1D5DB",
-    marginBottom: 12,
-  },
-  textInput: {
-    borderBottomWidth: 2,
-    borderBottomColor: "#FFFFFF",
-    paddingHorizontal: 0,
-    paddingVertical: 16,
-    fontSize: 20,
-    color: "#FFFFFF",
-    backgroundColor: "transparent",
-    fontWeight: "500",
-  },
-  optionsContainer: {
-    gap: 0,
-  },
-  horizontalContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-  horizontalOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    backgroundColor: "#1A1A1A",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "transparent",
-    minWidth: 120,
-    flex: 1,
-  },
-  horizontalOptionSelected: {
-    backgroundColor: "#2A2A2A",
-    borderColor: "#FFFFFF",
-  },
-  horizontalInfo: {
-    flex: 1,
-    alignItems: "center",
-  },
-  horizontalName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#D1D5DB",
-    textAlign: "center",
-  },
-  horizontalNameSelected: {
-    color: "#FFFFFF",
-  },
-  horizontalDescription: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    textAlign: "center",
-    marginTop: 2,
-  },
-  themeOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#333333",
-  },
-  themeOptionSelected: {
-    backgroundColor: "transparent",
-    borderBottomColor: "#FFFFFF",
-  },
-  themePreview: {
-    marginRight: 12,
-  },
-  miniBoard: {
-    padding: 2,
-    borderRadius: 4,
-  },
-  miniBoardRow: {
-    flexDirection: "row",
-  },
-  miniSquare: {
-    width: 8,
-    height: 8,
-  },
-  themeInfo: {
-    flex: 1,
-  },
-  themeName: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#D1D5DB",
-    marginBottom: 2,
-  },
-  themeNameSelected: {
-    color: "#FFFFFF",
-  },
-  themeDescription: {
-    fontSize: 14,
-    color: "#9CA3AF",
-  },
-  styleOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#333333",
-  },
-  styleOptionSelected: {
-    backgroundColor: "transparent",
-    borderBottomColor: "#FFFFFF",
-  },
-  stylePreview: {
-    marginRight: 12,
-  },
-  singlePieceContainer: {
-    width: 48,
-    height: 48,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  singlePieceSquare: {
-    width: 40,
-    height: 40,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#f0d9b5",
-    borderRadius: 6,
-  },
-  pieceGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    width: 60,
-  },
-  pieceContainer: {
-    margin: 1,
-  },
-  pieceSquare: {
-    width: 28,
-    height: 28,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 4,
-  },
-  styleInfo: {
-    flex: 1,
-  },
-  styleName: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#D1D5DB",
-    marginBottom: 2,
-  },
-  styleNameSelected: {
-    color: "#FFFFFF",
-  },
-  styleDescription: {
-    fontSize: 14,
-    color: "#9CA3AF",
-  },
-  sizeContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 0,
-  },
-  sizeOption: {
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#333333",
-    flex: 1,
-  },
-  sizeOptionSelected: {
-    backgroundColor: "transparent",
-    borderBottomColor: "#FFFFFF",
-  },
-  sizePreview: {
-    marginBottom: 8,
-    padding: 8,
-    backgroundColor: "#F0D9B5",
-    borderRadius: 8,
-  },
-  sizeName: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#D1D5DB",
-  },
-  sizeNameSelected: {
-    color: "#FFFFFF",
-  },
-  switchGroup: {
-    gap: 0,
-  },
-  switchRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#333333",
-  },
-  switchLabel: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#D1D5DB",
-    flex: 1,
-  },
-  switchLabelContainer: {
-    flex: 1,
-  },
-  switchDescription: {
-    fontSize: 14,
-    color: "#9CA3AF",
-    marginTop: 2,
-  },
-  unsavedChangesText: {
-    fontSize: 16,
-    color: "#F59E0B",
-    textAlign: "center",
-    marginBottom: 16,
-    fontWeight: "500",
-  },
-  saveDiscardContainer: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: "#059669",
-    borderRadius: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    alignItems: "center",
-  },
-  saveButtonDisabled: {
-    backgroundColor: "#374151",
-    borderColor: "#6B7280",
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  discardButton: {
-    flex: 1,
-    backgroundColor: "#7F1D1D",
-    borderRadius: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    alignItems: "center",
-  },
-  discardButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  resetButton: {
-    backgroundColor: "#7F1D1D",
-    borderRadius: 8,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    alignItems: "center",
-  },
-  resetButtonText: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#FFFFFF",
-  },
-  checkmark: {
-    fontSize: 18,
-    color: "#10B981",
-    fontWeight: "bold",
-  },
-  bottomSpacer: {
-    height: 40,
-  },
-});

@@ -249,9 +249,19 @@ export default function GameScreen() {
     }
   }, [isOnlineMode, isP2PMode, dispatch]);
 
-  // Get the entire live game state, including the history array and index
-  const liveGame = useSelector((state: RootState) => state.game);
-  const { history, viewingHistoryIndex } = liveGame;
+  // Get granular pieces of state - only re-render when specific data changes
+  const history = useSelector((state: RootState) => state.game.history);
+  const viewingHistoryIndex = useSelector((state: RootState) => state.game.viewingHistoryIndex);
+  const boardState = useSelector((state: RootState) => state.game.boardState);
+  const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
+  const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
+  const winner = useSelector((state: RootState) => state.game.winner);
+  const capturedPieces = useSelector((state: RootState) => state.game.capturedPieces);
+  const scores = useSelector((state: RootState) => state.game.scores);
+  const promotionState = useSelector((state: RootState) => state.game.promotionState);
+  const justEliminated = useSelector((state: RootState) => state.game.justEliminated);
+  const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
+  const validMoves = useSelector((state: RootState) => state.game.validMoves);
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {
@@ -259,17 +269,24 @@ export default function GameScreen() {
     if (viewingHistoryIndex !== null && viewingHistoryIndex < history.length && history[viewingHistoryIndex]) {
       return history[viewingHistoryIndex]; // ...show the historical state.
     }
-    return liveGame; // ...otherwise, show the live game state.
-  }, [liveGame, history, viewingHistoryIndex]);
+    // ...otherwise, show the live game state composed from individual selectors
+    return {
+      boardState,
+      currentPlayerTurn,
+      gameStatus,
+      winner,
+      capturedPieces,
+      scores,
+      promotionState,
+      justEliminated,
+      selectedPiece,
+      validMoves,
+      history,
+      viewingHistoryIndex
+    };
+  }, [history, viewingHistoryIndex, boardState, currentPlayerTurn, gameStatus, winner, capturedPieces, scores, promotionState, justEliminated, selectedPiece, validMoves]);
 
-  // Extract individual properties from displayedGameState for easier use
-  const currentPlayerTurn = displayedGameState.currentPlayerTurn;
-  const gameStatus = displayedGameState.gameStatus;
-  const winner = displayedGameState.winner;
-  const capturedPieces = displayedGameState.capturedPieces;
-  const scores = displayedGameState.scores;
-  const promotionState = displayedGameState.promotionState;
-  const justEliminated = displayedGameState.justEliminated;
+  // Use the individual selectors directly - no need to extract from displayedGameState
 
   // Safety check for incomplete game state
   const isGameStateReady =

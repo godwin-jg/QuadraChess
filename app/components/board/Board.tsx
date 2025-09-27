@@ -31,9 +31,16 @@ export default function Board() {
   // Use solo mode from settings if enabled, otherwise use the route mode
   const effectiveMode = settings.developer.soloMode ? "solo" : mode;
 
-  // Get the entire live game state, including the history array and index
-  const liveGame = useSelector((state: RootState) => state.game);
-  const { history, viewingHistoryIndex } = liveGame;
+  // Get granular pieces of state - only re-render when specific data changes
+  const history = useSelector((state: RootState) => state.game.history);
+  const viewingHistoryIndex = useSelector((state: RootState) => state.game.viewingHistoryIndex);
+  const boardState = useSelector((state: RootState) => state.game.boardState);
+  const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
+  const validMoves = useSelector((state: RootState) => state.game.validMoves);
+  const checkStatus = useSelector((state: RootState) => state.game.checkStatus);
+  const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
+  const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
+  const players = useSelector((state: RootState) => state.game.players);
 
   // Create displayed game state (either live or historical)
   const displayedGameState = useMemo(() => {
@@ -41,17 +48,19 @@ export default function Board() {
     if (viewingHistoryIndex !== null && viewingHistoryIndex < history.length && history[viewingHistoryIndex]) {
       return history[viewingHistoryIndex]; // ...show the historical state.
     }
-    return liveGame; // ...otherwise, show the live game state.
-  }, [liveGame, history, viewingHistoryIndex]);
-
-  // Extract properties from displayed state
-  const boardState = displayedGameState.boardState;
-  const selectedPiece = displayedGameState.selectedPiece;
-  const validMoves = displayedGameState.validMoves;
-  const checkStatus = displayedGameState.checkStatus;
-  const eliminatedPlayers = displayedGameState.eliminatedPlayers;
-  const currentPlayerTurn = displayedGameState.currentPlayerTurn;
-  const players = displayedGameState.players;
+    // ...otherwise, show the live game state composed from individual selectors
+    return {
+      boardState,
+      selectedPiece,
+      validMoves,
+      checkStatus,
+      eliminatedPlayers,
+      currentPlayerTurn,
+      players,
+      history,
+      viewingHistoryIndex
+    };
+  }, [history, viewingHistoryIndex, boardState, selectedPiece, validMoves, checkStatus, eliminatedPlayers, currentPlayerTurn, players]);
 
   // Get dispatch function
   const dispatch = useDispatch();

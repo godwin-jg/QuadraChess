@@ -23,6 +23,7 @@ const triggerHaptic = async (style: Haptics.ImpactFeedbackStyle) => {
 import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "../board/BoardThemeConfig";
 import Piece from "../board/Piece";
+import { generateRandomName } from "../../utils/nameGenerator";
 
 interface ProfileSettingsProps {
   onClose?: () => void;
@@ -287,13 +288,26 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
           <Text className="text-xl font-bold text-white mb-4 tracking-wide">👤 Profile</Text>
           <View className="mb-2">
             <Text className="text-base font-semibold text-gray-300 mb-3">Player Name</Text>
-            <TextInput
-              className="border-b-2 border-white px-0 py-4 text-xl text-white bg-transparent font-medium"
-              value={settings.profile.name}
-              onChangeText={(text) => updateProfile({ name: text })}
-              placeholder="Enter your name"
-              placeholderTextColor="#6B7280"
-            />
+            <View className="flex-row items-center">
+              <TextInput
+                className="flex-1 px-0 py-4 text-xl text-white bg-transparent font-medium"
+                value={settings.profile.name}
+                onChangeText={(text) => updateProfile({ name: text })}
+                placeholder="Enter your name or roll a dice"
+                placeholderTextColor="#6B7280"
+              />
+              <TouchableOpacity
+                className="ml-3 px-4 py-2 bg-blue-600 rounded-lg"
+                onPress={() => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                  const randomName = generateRandomName();
+                  updateProfile({ name: randomName });
+                }}
+                activeOpacity={0.7}
+              >
+                <Text className="text-white font-semibold text-sm">🎲</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -506,7 +520,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
       {hasUnsavedChanges && (
         <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/90 border-t border-gray-700">
           <Text className="text-sm text-amber-500 text-center mb-3 font-medium">
-            ⚠️ You have unsaved changes
+            You have unsaved changes
           </Text>
           <View className="flex-row gap-3">
             <TouchableOpacity
@@ -520,7 +534,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               disabled={isSaving}
             >
               <Text className="text-base font-semibold text-white">
-                {isSaving ? "💾 Saving..." : "💾 Save Changes"}
+                {isSaving ? "Saving..." : "Save Changes"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -530,7 +544,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 handleDiscardChanges();
               }}
             >
-              <Text className="text-base font-semibold text-white">🗑️ Discard</Text>
+              <Text className="text-base font-semibold text-white">Discard</Text>
             </TouchableOpacity>
           </View>
         </View>

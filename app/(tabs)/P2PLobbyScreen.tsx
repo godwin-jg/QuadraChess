@@ -13,7 +13,7 @@ import { useDispatch, useSelector } from "react-redux";
 import p2pService, { P2PMessage } from "../../services/p2pService";
 import { RootState, resetGame } from "../../state";
 import { setCanStartGame, setIsHost, setPlayers } from "../../state/gameSlice";
-import { generateRandomName } from "../utils/nameGenerator";
+import { useSettings } from "../../context/SettingsContext";
 
 interface AvailableGame {
   id: string;
@@ -26,7 +26,7 @@ interface AvailableGame {
 export default function P2PLobbyScreen() {
   const dispatch = useDispatch();
   const router = useRouter();
-  const [playerName, setPlayerName] = useState("");
+  const { settings, updateProfile } = useSettings();
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
@@ -56,10 +56,6 @@ export default function P2PLobbyScreen() {
 
         // Set up message handlers
         setupMessageHandlers();
-
-        // Generate random name
-        const name = generateRandomName();
-        setPlayerName(name);
 
         console.log("P2P Service initialized successfully");
       } catch (error) {
@@ -109,7 +105,7 @@ export default function P2PLobbyScreen() {
 
   // Create room
   const createRoom = async () => {
-    if (!playerName.trim()) {
+    if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
@@ -125,14 +121,14 @@ export default function P2PLobbyScreen() {
       dispatch(resetGame());
       console.log("P2PLobbyScreen: Reset game state before creating new game");
       
-      const result = await p2pService.createGame(playerName.trim());
+      const result = await p2pService.createGame(settings.profile.name.trim());
       dispatch(setIsHost(true));
       dispatch(setCanStartGame(false));
       dispatch(
         setPlayers([
           {
             id: result.playerId,
-            name: playerName,
+            name: settings.profile.name,
             color: "r",
             isHost: true,
             isConnected: true,
@@ -158,7 +154,7 @@ export default function P2PLobbyScreen() {
 
   // Join game
   const joinGame = async (game: AvailableGame) => {
-    if (!playerName.trim()) {
+    if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
@@ -174,7 +170,7 @@ export default function P2PLobbyScreen() {
       dispatch(resetGame());
       console.log("P2PLobbyScreen: Reset game state before joining new game");
       
-      const result = await p2pService.joinGame(game.id, playerName.trim());
+      const result = await p2pService.joinGame(game.id, settings.profile.name.trim());
       dispatch(setIsHost(false));
       dispatch(setPlayers([])); // Will be updated when we receive game state
       isInGameRef.current = true;
@@ -207,13 +203,13 @@ export default function P2PLobbyScreen() {
 
   // Name editing functions
   const startEditingName = () => {
-    setTempName(playerName);
+    setTempName(settings.profile.name);
     setIsEditingName(true);
   };
 
   const saveName = () => {
     if (tempName.trim()) {
-      setPlayerName(tempName.trim());
+      updateProfile({ name: tempName.trim() });
     }
     setIsEditingName(false);
   };
@@ -252,7 +248,7 @@ export default function P2PLobbyScreen() {
               🔗 P2P Chess
             </Text>
             <Text className="text-gray-300 text-base mb-6">
-              Playing as: {playerName}
+              Playing as: {settings.profile.name}
             </Text>
             <Text className="text-blue-400 text-sm mb-2">
               Peer ID: {p2pService.getPeerId().substring(0, 8)}...
@@ -359,7 +355,7 @@ export default function P2PLobbyScreen() {
           ) : (
             <TouchableOpacity onPress={startEditingName}>
               <Text className="text-white text-2xl font-bold">
-                {playerName}
+                {settings.profile.name}
               </Text>
             </TouchableOpacity>
           )}

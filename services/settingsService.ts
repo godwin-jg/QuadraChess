@@ -1,3 +1,6 @@
+// Import the name generator
+import { generateRandomName } from "../app/utils/nameGenerator";
+
 // Try to import AsyncStorage, fallback to in-memory storage
 let AsyncStorage: {
   getItem: (key: string) => Promise<string | null>;
@@ -57,7 +60,7 @@ export interface UserSettings {
 
 const DEFAULT_SETTINGS: UserSettings = {
   profile: {
-    name: "Player",
+    name: generateRandomName(),
   },
   board: {
     theme: "brown",

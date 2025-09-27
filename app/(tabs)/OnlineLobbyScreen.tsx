@@ -16,11 +16,12 @@ import realtimeDatabaseService, {
   RealtimeGame,
 } from "../../services/realtimeDatabaseService";
 import onlineGameService from "../../services/onlineGameService";
-import { generateRandomName } from "../utils/nameGenerator";
+import { useSettings } from "../../context/SettingsContext";
 
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
   const router = useRouter();
+  const { settings, updateProfile } = useSettings();
 
   const gameState = useSelector((state: RootState) => state.game);
 
@@ -33,7 +34,6 @@ const OnlineLobbyScreen: React.FC = () => {
     [gameState.players, gameState.isHost, gameState.canStartGame]
   );
 
-  const [playerName, setPlayerName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const [availableGames, setAvailableGames] = useState<RealtimeGame[]>([]);
@@ -41,14 +41,12 @@ const OnlineLobbyScreen: React.FC = () => {
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Initialize Firebase auth and generate player name
+  // Initialize Firebase auth
   useEffect(() => {
     const initializeAuth = async () => {
       try {
         // Use Realtime Database
         await realtimeDatabaseService.signInAnonymously();
-        const name = generateRandomName();
-        setPlayerName(name);
         setIsConnected(true);
         console.log("Realtime Database initialization successful");
       } catch (error) {
@@ -129,19 +127,19 @@ const OnlineLobbyScreen: React.FC = () => {
 
   // Name editing functions
   const startEditingName = () => {
-    setTempName(playerName);
+    setTempName(settings.profile.name);
     setIsEditingName(true);
   };
 
   const saveName = () => {
     if (tempName.trim()) {
-      setPlayerName(tempName.trim());
+      updateProfile({ name: tempName.trim() });
     }
     setIsEditingName(false);
   };
 
   const createGame = async () => {
-    if (!playerName.trim()) {
+    if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
@@ -156,7 +154,7 @@ const OnlineLobbyScreen: React.FC = () => {
       console.log("Creating game via Cloud Function");
 
       const gameId = await realtimeDatabaseService.createGame(
-        playerName.trim()
+        settings.profile.name.trim()
       );
       setCurrentGameId(gameId);
       console.log("Game created successfully via Cloud Function:", gameId);
@@ -169,7 +167,7 @@ const OnlineLobbyScreen: React.FC = () => {
   };
 
   const joinGame = async (gameId: string) => {
-    if (!playerName.trim()) {
+    if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
@@ -180,7 +178,7 @@ const OnlineLobbyScreen: React.FC = () => {
       dispatch(resetGame());
       console.log("OnlineLobbyScreen: Reset game state before joining new game");
       
-      await realtimeDatabaseService.joinGame(gameId, playerName);
+      await realtimeDatabaseService.joinGame(gameId, settings.profile.name);
       setCurrentGameId(gameId);
     } catch (error) {
       console.error("Error joining game:", error);
@@ -272,7 +270,7 @@ const OnlineLobbyScreen: React.FC = () => {
           ) : (
             <TouchableOpacity onPress={startEditingName}>
               <Text className="text-white text-2xl font-bold">
-                {playerName}
+                {settings.profile.name}
               </Text>
             </TouchableOpacity>
           )}
@@ -370,7 +368,7 @@ const OnlineLobbyScreen: React.FC = () => {
           />
         ) : (
           <TouchableOpacity onPress={startEditingName}>
-            <Text className="text-white text-2xl font-bold">{playerName}</Text>
+            <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
           </TouchableOpacity>
         )}
       </View>

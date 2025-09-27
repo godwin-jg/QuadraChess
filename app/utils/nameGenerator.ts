@@ -68,9 +68,9 @@ const nouns = [
 export const generateRandomName = (): string => {
   const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
   const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const number = Math.floor(Math.random() * 999) + 1;
+  // const number = Math.floor(Math.random() * 999) + 1;
 
-  return `${adjective}${noun}${number}`;
+  return `${adjective}${noun}`;
 };
 
 // Default export for Expo Router compatibility

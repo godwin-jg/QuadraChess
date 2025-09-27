@@ -17,33 +17,8 @@ import networkConfigService, {
 import { RootState, resetGame } from "../../state";
 import { setCanStartGame, setIsHost, setPlayers } from "../../state/gameSlice";
 import networkService, { Player } from "../services/networkService";
+import { useSettings } from "../../context/SettingsContext";
 
-// Generate random player names
-const generateRandomName = (): string => {
-  const adjectives = [
-    "Swift",
-    "Bold",
-    "Clever",
-    "Sharp",
-    "Quick",
-    "Wise",
-    "Brave",
-    "Smart",
-  ];
-  const nouns = [
-    "Player",
-    "Chess",
-    "King",
-    "Queen",
-    "Rook",
-    "Knight",
-    "Bishop",
-    "Pawn",
-  ];
-  const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  return `${adj}${noun}`;
-};
 
 interface AvailableGame {
   id: string;
@@ -57,7 +32,7 @@ interface AvailableGame {
 export default function LobbyScreen() {
   const dispatch = useDispatch();
   const router = useRouter();
-  const [playerName, setPlayerName] = useState(generateRandomName());
+  const { settings, updateProfile } = useSettings();
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
@@ -213,7 +188,7 @@ export default function LobbyScreen() {
 
   // Create room
   const createRoom = async () => {
-    if (!playerName.trim()) {
+    if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
@@ -247,7 +222,7 @@ export default function LobbyScreen() {
       }
 
       // Create the room
-      const result = await networkService.createRoom({ name: playerName });
+      const result = await networkService.createRoom({ name: settings.profile.name });
       dispatch(setIsHost(true));
       dispatch(setCanStartGame(false));
       dispatch(setPlayers(result.players || []));
@@ -272,7 +247,7 @@ export default function LobbyScreen() {
 
   // Join game
   const joinGame = async (game: AvailableGame) => {
-    if (!playerName.trim()) {
+    if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
@@ -284,7 +259,7 @@ export default function LobbyScreen() {
       console.log("LobbyScreen: Reset game state before joining new game");
       
       const result = await networkService.joinRoom(game.id, {
-        name: playerName,
+        name: settings.profile.name,
       });
       dispatch(setIsHost(false));
       dispatch(setPlayers(result.players));
@@ -317,13 +292,13 @@ export default function LobbyScreen() {
 
   // Name editing functions
   const startEditingName = () => {
-    setTempName(playerName);
+    setTempName(settings.profile.name);
     setIsEditingName(true);
   };
 
   const saveName = () => {
     if (tempName.trim()) {
-      setPlayerName(tempName.trim());
+      updateProfile({ name: tempName.trim() });
     }
     setIsEditingName(false);
   };
@@ -416,7 +391,7 @@ export default function LobbyScreen() {
               🌐 Multiplayer Chess
             </Text>
             <Text className="text-gray-300 text-base mb-6">
-              Playing as: {playerName}
+              Playing as: {settings.profile.name}
             </Text>
           </View>
 
@@ -515,7 +490,7 @@ export default function LobbyScreen() {
           ) : (
             <TouchableOpacity onPress={startEditingName}>
               <Text className="text-white text-2xl font-bold">
-                {playerName}
+                {settings.profile.name}
               </Text>
             </TouchableOpacity>
           )}

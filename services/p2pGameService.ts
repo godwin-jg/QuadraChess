@@ -44,6 +44,12 @@ class P2PGameServiceImpl implements P2PGameService {
       // Set up message handlers for our serverless P2P service
       this.setupServerlessMessageHandlers();
 
+      // Get current player info from P2P service
+      this.currentPlayer = p2pService.getCurrentPlayer();
+      if (this.currentPlayer) {
+        console.log("P2PGameService: Current player:", this.currentPlayer);
+      }
+
       // Set up presence tracking
       await this.updatePlayerPresence(true);
       this.setupPresenceTracking();
@@ -113,7 +119,12 @@ class P2PGameServiceImpl implements P2PGameService {
       throw new Error("Invalid move");
     }
 
-    // Send move through serverless P2P service
+    // ✅ Apply move locally first (optimistic UI)
+    console.log("P2PGameService: Applying move locally:", moveData);
+    store.dispatch(applyNetworkMove(moveData));
+
+    // ✅ Send move through P2P service
+    console.log("P2PGameService: Sending move through P2P service");
     p2pService.sendChessMove(moveData);
   }
 
@@ -186,18 +197,15 @@ class P2PGameServiceImpl implements P2PGameService {
   }
 
   private setupServerlessMessageHandlers(): void {
-    console.log("P2PGameService: Setting up serverless P2P message handlers");
+    console.log("P2PGameService: Setting up lightweight P2P message handlers");
     
-    // Set up handlers for our serverless P2P service using the new message system
-    this.gameUnsubscribe = p2pService.onMessage("game-state-update", (gameState) => {
-      console.log("P2PGameService: Received game state update:", gameState);
-      this.gameUpdateCallbacks.forEach(callback => callback(gameState));
-    });
-
-    this.moveUnsubscribe = p2pService.onMessage("move-received", (move) => {
-      console.log("P2PGameService: Received move:", move);
-      this.moveUpdateCallbacks.forEach(callback => callback(move));
-    });
+    // ✅ Simple approach: Only listen for moves, no heavy state sync
+    // Each client maintains their own game state, only moves are synchronized
+    console.log("P2PGameService: Using move-only synchronization for efficiency");
+    
+    // Set up dummy unsubscribers since we don't need them anymore
+    this.gameUnsubscribe = () => {};
+    this.moveUnsubscribe = () => {};
   }
 
   private handleGameStateUpdate(message: P2PMessage): void {
@@ -264,66 +272,7 @@ class P2PGameServiceImpl implements P2PGameService {
     // Handle error appropriately
   }
 
-  private convertP2PToReduxGameState(p2pGameState: any): GameState {
-    // Convert P2P game state format to Redux game state format
-    return {
-      boardState:
-        p2pGameState.boardState || initialBoardState.map((row) => [...row]),
-      currentPlayerTurn: p2pGameState.currentPlayerTurn || "r",
-      gameStatus: p2pGameState.gameStatus || "active",
-      selectedPiece: null,
-      validMoves: [],
-      capturedPieces: p2pGameState.capturedPieces || {
-        r: [],
-        b: [],
-        y: [],
-        g: [],
-      },
-      checkStatus: p2pGameState.checkStatus || {
-        r: false,
-        b: false,
-        y: false,
-        g: false,
-      },
-      winner: p2pGameState.winner || null,
-      eliminatedPlayers: p2pGameState.eliminatedPlayers || [],
-      justEliminated: p2pGameState.justEliminated || null,
-      scores: p2pGameState.scores || { r: 0, b: 0, y: 0, g: 0 },
-      promotionState: p2pGameState.promotionState || {
-        isAwaiting: false,
-        position: null,
-        color: null,
-      },
-      hasMoved: p2pGameState.hasMoved || {
-        rK: false,
-        rR1: false,
-        rR2: false,
-        bK: false,
-        bR1: false,
-        bR2: false,
-        yK: false,
-        yR1: false,
-        yR2: false,
-        gK: false,
-        gR1: false,
-        gR2: false,
-      },
-      enPassantTargets: p2pGameState.enPassantTargets || [],
-      gameOverState: p2pGameState.gameOverState || {
-        isGameOver: false,
-        status: null,
-        eliminatedPlayer: null,
-      },
-      history: p2pGameState.history || [],
-      historyIndex: p2pGameState.historyIndex || 0,
-      viewingHistoryIndex: null,
-      players: Array.from(p2pGameState.players?.values() || []),
-      isHost: p2pGameState.hostId === p2pService.getPeerId(),
-      canStartGame:
-        Array.from(p2pGameState.players?.values() || []).length >= 2 &&
-        p2pGameState.gameStatus === "waiting",
-    };
-  }
+  // ✅ Removed heavy state conversion - no longer needed with move-only sync
 
   private validateMove(
     gameState: GameState,

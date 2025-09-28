@@ -7,6 +7,7 @@ export interface Player {
   isHost: boolean;
   isOnline?: boolean;
   lastSeen?: number;
+  connectionState?: string; // ✅ Add this to track the WebRTC connection
 }
 
 export interface RoomInfo {

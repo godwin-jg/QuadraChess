@@ -84,8 +84,8 @@ export default function GameScreen() {
             console.log("Mode switch cancelled by user");
           }
         );
-      } else if (currentMode !== "online") {
-        // Same mode but not online, safe to reset
+      } else if (currentMode !== "online" && currentMode !== "p2p") {
+        // Same mode but not online or P2P, safe to reset
         dispatch(resetGame());
       }
 

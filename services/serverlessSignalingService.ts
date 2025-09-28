@@ -9,6 +9,7 @@ class ServerlessSignalingService {
   private isRunning: boolean = false;
   private connections: Map<string, any> = new Map();
   private hostCandidates: Map<string, any[]> = new Map(); // Store ICE candidates for each player
+  private pendingCandidates: Map<string, any[]> = new Map(); // Store ICE candidates that arrived before connection was ready
   private server: BridgeServer | null = null;
 
   private constructor() {}
@@ -28,16 +29,23 @@ class ServerlessSignalingService {
     }
 
     try {
-      console.log('ServerlessSignaling: Starting HTTP server on port', this.port);
+      console.log('🚀 ServerlessSignaling: Starting HTTP server on port', this.port);
       
       // Create the bridge server
       this.server = new BridgeServer('webrtc_signaling', true);
+      console.log('ServerlessSignaling: BridgeServer instance created successfully');
       
       // Test endpoint to debug request format
       this.server.get('/test', async (req: any, res: any) => {
         console.log('ServerlessSignaling: Test endpoint hit');
         console.log('ServerlessSignaling: Request object:', req);
         return { message: 'Test endpoint working', request: req };
+      });
+      
+      // Health check endpoint
+      this.server.get('/health', async (req: any, res: any) => {
+        console.log('ServerlessSignaling: Health check requested');
+        return { status: 'ok', port: this.port, connections: this.connections.size };
       });
       
       // Handle WebRTC offer endpoint
@@ -69,10 +77,21 @@ class ServerlessSignalingService {
           console.log('ServerlessSignaling: Request body:', req.body);
           console.log('ServerlessSignaling: Request data:', req.data);
           console.log('ServerlessSignaling: Request post:', req.post);
+          console.log('ServerlessSignaling: Request postData:', req.postData);
           
-          // Try different ways to get the request data
-          const candidateData = req.body || req.data || req.post || req;
-          console.log('ServerlessSignaling: Parsed candidate data:', candidateData);
+          // Parse JSON from postData like the offer endpoint does
+          let candidateData;
+          if (req.postData) {
+            try {
+              candidateData = JSON.parse(req.postData);
+              console.log('ServerlessSignaling: Parsed candidate data from postData:', candidateData);
+            } catch (parseError) {
+              console.error('ServerlessSignaling: Failed to parse postData:', parseError);
+              candidateData = req.body || req.data || req.post || req;
+            }
+          } else {
+            candidateData = req.body || req.data || req.post || req;
+          }
           
           await this.handleIceCandidate(candidateData);
           return { success: true };
@@ -83,7 +102,7 @@ class ServerlessSignalingService {
       });
       
       // Handle ICE candidates retrieval endpoint
-      this.server.get('/api/webrtc/candidates/:playerId', async (req: any, res: any) => {
+      this.server.get('/api/webrtc/get-candidates/:playerId', async (req: any, res: any) => {
         try {
           const playerId = req.params.playerId;
           console.log('ServerlessSignaling: Retrieving ICE candidates for player', playerId);
@@ -102,10 +121,25 @@ class ServerlessSignalingService {
       });
       
       // Start listening on the port
-      this.server.listen(this.port);
+      console.log('ServerlessSignaling: About to start listening on port', this.port);
       
-      this.isRunning = true;
-      console.log('ServerlessSignaling: HTTP server started successfully on port', this.port);
+      // Add error handling for server startup
+      try {
+        this.server.listen(this.port);
+        console.log('ServerlessSignaling: Server.listen() called successfully');
+        
+        // Wait a moment to ensure server is actually listening
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        console.log('✅ ServerlessSignaling: Server startup completed');
+        
+        this.isRunning = true;
+        console.log('✅ ServerlessSignaling: HTTP server started successfully on port', this.port);
+        console.log('ServerlessSignaling: Server is ready to receive requests on http://0.0.0.0:' + this.port);
+      } catch (listenError) {
+        console.error('❌ ServerlessSignaling: Failed to start listening:', listenError);
+        throw new Error(`Failed to start HTTP server on port ${this.port}: ${listenError}`);
+      }
       
     } catch (error) {
       console.error('ServerlessSignaling: Failed to start server:', error);
@@ -150,7 +184,7 @@ class ServerlessSignalingService {
         throw new Error('No offer data received');
       }
       
-      const { offer, playerId, playerName, gameId } = offerData;
+      const { offer, candidates, playerId, playerName, gameId } = offerData;
       
       // Import WebRTC types
       const { RTCPeerConnection, RTCSessionDescription } = require('react-native-webrtc');
@@ -167,10 +201,49 @@ class ServerlessSignalingService {
       this.connections.set(playerId, connection);
       console.log('ServerlessSignaling: Stored connection for player', playerId, 'Total connections:', this.connections.size);
 
+      // ✅ Process any pending ICE candidates for this player
+      if (this.pendingCandidates && this.pendingCandidates.has(playerId)) {
+        const pendingCandidates = this.pendingCandidates.get(playerId) || [];
+        console.log('ServerlessSignaling: Processing', pendingCandidates.length, 'pending ICE candidates for', playerId);
+        for (const candidate of pendingCandidates) {
+          try {
+            const { RTCIceCandidate } = require('react-native-webrtc');
+            await connection.addIceCandidate(new RTCIceCandidate(candidate));
+            console.log('ServerlessSignaling: Added pending ICE candidate for', playerId);
+          } catch (error) {
+            console.warn('ServerlessSignaling: Failed to add pending ICE candidate:', error);
+          }
+        }
+        this.pendingCandidates.delete(playerId);
+      }
+
+      // ✅ Store connection in P2P service for broadcasting
+      p2pService.createConnectionForPlayer(playerId);
+
+      // ✅ Immediately add the player to the game
+      try {
+        p2pService.addPlayer(playerId, playerName);
+        console.log('ServerlessSignaling: Successfully added player to game');
+      } catch (error) {
+        console.error('ServerlessSignaling: Failed to add player to game:', error);
+        throw new Error(`Failed to add player: ${error}`);
+      }
+
+      // ✅ CRITICAL: Notify the host's own UI that the game state has been updated
+      const updatedGameState = p2pService.getGameState();
+      console.log("📢 ServerlessSignaling: About to notify host UI with game state:", updatedGameState);
+      if (updatedGameState) {
+        p2pService.notifyHandlers("game-state-update", updatedGameState);
+        console.log("📢 ServerlessSignaling: Notified host UI of new player:", playerName);
+      } else {
+        console.warn("📢 ServerlessSignaling: No game state available to notify host UI");
+      }
+
       // Set up data channel listener (host side)
       connection.ondatachannel = (event: any) => {
         const dataChannel = event.channel;
-        console.log('ServerlessSignaling: Received data channel from', playerName);
+        console.log('🎯 ServerlessSignaling: Received data channel from', playerName);
+        console.log('ServerlessSignaling: Data channel state:', dataChannel.readyState);
         
         // Set up data channel listeners for host side
         p2pService.setupHostDataChannelListeners(dataChannel, playerId, playerName);
@@ -192,15 +265,36 @@ class ServerlessSignalingService {
       // Set remote description (the offer from the client)
       await connection.setRemoteDescription(new RTCSessionDescription(offer));
 
+      // ✅ Process client's ICE candidates immediately
+      if (candidates && Array.isArray(candidates)) {
+        console.log('ServerlessSignaling: Processing', candidates.length, 'ICE candidates from client');
+        for (const candidate of candidates) {
+          try {
+            await connection.addIceCandidate(new RTCIceCandidate(candidate));
+            console.log('ServerlessSignaling: Added ICE candidate from client');
+          } catch (error) {
+            console.warn('ServerlessSignaling: Failed to add ICE candidate from client:', error);
+          }
+        }
+      }
+
       // Create answer
       const answer = await connection.createAnswer();
       await connection.setLocalDescription(answer);
 
       console.log('ServerlessSignaling: Created answer for', playerName);
 
-      // Return the answer to the client
+      // ✅ Wait a moment for ICE candidates to be generated
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // ✅ Gather host's ICE candidates
+      const hostCandidates = this.hostCandidates.get(playerId) || [];
+      console.log('ServerlessSignaling: Returning', hostCandidates.length, 'host candidates');
+
+      // Return the answer AND the host's candidates to the client
       return {
         answer: answer,
+        candidates: hostCandidates, // ✅ Send host candidates with answer
         success: true,
       };
 
@@ -215,6 +309,8 @@ class ServerlessSignalingService {
     try {
       console.log('ServerlessSignaling: Handling ICE candidate from', candidateData?.playerId || 'unknown');
       console.log('ServerlessSignaling: Full candidate data:', candidateData);
+      console.log('ServerlessSignaling: Current connections:', this.connections.size);
+      console.log('ServerlessSignaling: Available player IDs:', Array.from(this.connections.keys()));
       
       if (!candidateData) {
         throw new Error('No candidate data received');
@@ -231,6 +327,17 @@ class ServerlessSignalingService {
         console.log('ServerlessSignaling: Added ICE candidate for', playerId);
       } else {
         console.warn('ServerlessSignaling: No connection found for player', playerId);
+        console.warn('ServerlessSignaling: This might be a race condition - ICE candidate arrived before offer was processed');
+        
+        // Store the candidate for later processing
+        if (!this.pendingCandidates) {
+          this.pendingCandidates = new Map();
+        }
+        if (!this.pendingCandidates.has(playerId)) {
+          this.pendingCandidates.set(playerId, []);
+        }
+        this.pendingCandidates.get(playerId)!.push(candidate);
+        console.log('ServerlessSignaling: Stored pending ICE candidate for', playerId);
       }
       
     } catch (error) {
@@ -246,6 +353,11 @@ class ServerlessSignalingService {
   // Get server port
   public getPort(): number {
     return this.port;
+  }
+
+  // Get connection for a specific player
+  public getConnection(playerId: string): any {
+    return this.connections.get(playerId);
   }
 }
 

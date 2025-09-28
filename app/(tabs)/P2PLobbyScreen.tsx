@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,99 +11,73 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { RootState } from "../../state/store";
-import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state/gameSlice";
+import { 
+  resetGame, 
+  setCurrentGame, 
+  setDiscoveredGames, 
+  setIsDiscovering, 
+  setIsLoading, 
+  setIsConnected, 
+  setConnectionError, 
+  setIsEditingName, 
+  setTempName,
+  syncP2PGameState 
+} from "../../state/gameSlice";
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
 import networkDiscoveryService from "../../services/networkDiscoveryService";
 
 const P2PLobbyScreen: React.FC = () => {
+  console.log("🎮 P2PLobbyScreen: Component mounted/rendered");
+  
   const dispatch = useDispatch();
   const router = useRouter();
   const { settings, updateProfile } = useSettings();
 
-  const gameState = useSelector((state: RootState) => state.game);
+  // ✅ All state now comes from Redux
+  const {
+    players,
+    isHost,
+    canStartGame,
+    currentGame,
+    discoveredGames,
+    isDiscovering,
+    isLoading,
+    isConnected,
+    connectionError,
+    isEditingName,
+    tempName,
+  } = useSelector((state: RootState) => state.game);
 
-  const { players, isHost, canStartGame } = useMemo(
-    () => ({
-      players: gameState.players || [],
-      isHost: gameState.isHost || false,
-      canStartGame: gameState.canStartGame || false,
-    }),
-    [gameState.players, gameState.isHost, gameState.canStartGame]
-  );
+  // Debug logging
+  console.log("🎮 P2PLobbyScreen: Current Redux state:", {
+    players: players.length,
+    isHost,
+    canStartGame,
+    currentGame: currentGame ? "present" : "null",
+    isLoading,
+    isConnected,
+    connectionError
+  });
 
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState("");
-  const [currentGame, setCurrentGame] = useState<P2PGame | null>(null);
-  const [discoveredGames, setDiscoveredGames] = useState<any[]>([]);
-  const [isDiscovering, setIsDiscovering] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Initialize P2P service
+  // ✅ No more event listeners! All state comes from Redux
+  // The P2P service now directly updates Redux state
+  
+  // Handle navigation when game starts
   useEffect(() => {
-    const unsubscribeGameState = p2pService.on("game-state-update", (gameState) => {
-      console.log("P2PLobbyScreen: Received game-state-update:", gameState);
-      setCurrentGame(gameState);
-      dispatch(setPlayers(gameState.players || []));
-    });
-
-    const unsubscribeMove = p2pService.on("move", (move) => {
-      console.log("Move received from P2P service:", move);
-    });
-
-    const unsubscribePlayersUpdated = p2pService.on("players-updated", (players) => {
-      console.log("P2PLobbyScreen: Received players-updated:", players);
-      dispatch(setPlayers(players));
-    });
-
-    const unsubscribeHostStatusChanged = p2pService.on("host-status-changed", (status) => {
-      dispatch(setIsHost(status.isHost));
-      dispatch(setCanStartGame(status.canStartGame));
-    });
-
-    const unsubscribeMoveReceived = p2pService.on("move-received", (move) => {
-      console.log("Move received from P2P service:", move);
-    });
-
-    const unsubscribeDisconnected = p2pService.on("disconnected", (data) => {
-      console.log("P2P service disconnected:", data);
-      dispatch(resetGame());
-    });
-
-    const unsubscribeGameStarted = p2pService.on("game-started", (data) => {
-      console.log("Game started notification received:", data);
-      if (!isHost) {
-        console.log("Joining player navigating to game screen with gameId:", data.gameId);
-        if (!currentGame) {
-          console.log("No currentGame set, creating basic game state for navigation");
-          setCurrentGame({
-            id: data.gameId,
-            name: "P2P Game",
-            hostName: "Host",
-            hostId: "unknown",
-            hostIP: "unknown",
-            port: 3001,
-            joinCode: "0000",
-            playerCount: 2,
-            maxPlayers: 4,
-            status: "playing",
-            timestamp: data.timestamp || Date.now(),
-          });
-        }
-        router.push(`/(tabs)/GameScreen?gameId=${data.gameId}&mode=simple-p2p`);
-      }
-    });
-
-    return () => {
-      unsubscribeGameState();
-      unsubscribeMove();
-      unsubscribePlayersUpdated();
-      unsubscribeHostStatusChanged();
-      unsubscribeMoveReceived();
-      unsubscribeDisconnected();
-      unsubscribeGameStarted();
-    };
-  }, [dispatch, isHost]);
+    console.log("🎮 UI: Navigation effect triggered - currentGame:", currentGame, "isHost:", isHost);
+    if (currentGame && currentGame.status === 'playing' && !isHost) {
+      console.log("🎮 UI: Game status is 'playing', navigating to game screen...");
+      console.log("🎮 UI: Current game:", currentGame);
+      router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
+    } else {
+      console.log("🎮 UI: Not navigating - conditions not met:", {
+        hasCurrentGame: !!currentGame,
+        gameStatus: currentGame?.status,
+        isHost: isHost
+      });
+    }
+  }, [currentGame, isHost, router]);
 
   // Auto-discover games on mount
   useEffect(() => {
@@ -112,15 +86,15 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Name editing functions
   const startEditingName = () => {
-    setTempName(settings.profile.name);
-    setIsEditingName(true);
+    dispatch(setTempName(settings.profile.name));
+    dispatch(setIsEditingName(true));
   };
 
   const saveName = () => {
     if (tempName.trim()) {
       updateProfile({ name: tempName.trim() });
     }
-    setIsEditingName(false);
+    dispatch(setIsEditingName(false));
   };
 
   // Create a new P2P game
@@ -130,30 +104,36 @@ const P2PLobbyScreen: React.FC = () => {
       return;
     }
 
-    setIsLoading(true);
+    dispatch(setIsLoading(true));
+    dispatch(setConnectionError(null));
     try {
       dispatch(resetGame());
       
       const game = await p2pService.createGame(settings.profile.name.trim());
-      setCurrentGame(game);
+      // ✅ P2P service now updates Redux directly, no need to set local state
       
       console.log("P2P Game created:", game);
     } catch (error) {
       console.error("Error creating P2P game:", error);
-      Alert.alert("Error", "Failed to create game");
+      const errorMessage = error instanceof Error ? error.message : "Failed to create game";
+      dispatch(setConnectionError(errorMessage));
+      Alert.alert("Error", errorMessage);
     } finally {
-      setIsLoading(false);
+      dispatch(setIsLoading(false));
     }
   };
 
   // Join a discovered game
   const joinGame = async (gameId: string) => {
+    console.log(`🎮 P2PLobbyScreen: joinGame called with gameId: ${gameId}`);
+    
     if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
 
-    setIsLoading(true);
+    dispatch(setIsLoading(true));
+    dispatch(setConnectionError(null));
     try {
       dispatch(resetGame());
       
@@ -161,7 +141,7 @@ const P2PLobbyScreen: React.FC = () => {
       const gameToJoin = discoveredGames.find(game => game.id === gameId);
       if (gameToJoin) {
         console.log("Setting currentGame from discovered games:", gameToJoin);
-        setCurrentGame({
+        dispatch(setCurrentGame({
           id: gameToJoin.id,
           name: gameToJoin.name,
           hostName: gameToJoin.hostName,
@@ -172,8 +152,9 @@ const P2PLobbyScreen: React.FC = () => {
           playerCount: gameToJoin.playerCount,
           maxPlayers: gameToJoin.maxPlayers,
           status: "waiting",
+          createdAt: gameToJoin.createdAt || Date.now(),
           timestamp: Date.now(),
-        });
+        }));
       }
       
       await p2pService.joinDiscoveredGame(gameId, settings.profile.name.trim());
@@ -181,47 +162,60 @@ const P2PLobbyScreen: React.FC = () => {
       console.log("Joined P2P game:", gameId);
     } catch (error) {
       console.error("Error joining P2P game:", error);
-      Alert.alert("Error", "Failed to join game");
+      const errorMessage = error instanceof Error ? error.message : "Failed to join game";
+      dispatch(setConnectionError(errorMessage));
+      Alert.alert("Error", errorMessage);
       // Reset currentGame on error
-      setCurrentGame(null);
+      dispatch(setCurrentGame(null));
     } finally {
-      setIsLoading(false);
+      dispatch(setIsLoading(false));
     }
   };
 
   // Discover games on the network
   const discoverGames = async () => {
-    setIsDiscovering(true);
+    // ✅ P2P service now handles Redux updates directly
     try {
       const games = await p2pService.discoverGames();
-      setDiscoveredGames(games);
       console.log("Discovered games:", games);
     } catch (error) {
       console.error("Error discovering games:", error);
-      Alert.alert("Error", "Failed to discover games");
-    } finally {
-      setIsDiscovering(false);
+      const errorMessage = error instanceof Error ? error.message : "Failed to discover games";
+      Alert.alert("Error", errorMessage);
     }
   };
 
   // Start the game (host only)
-  const startGame = () => {
+  const startGame = async () => {
     if (!isHost || !currentGame) return;
     
-    const updatedGame = { ...currentGame, status: "playing" as const };
-    setCurrentGame(updatedGame);
-    
-    // Notify all connected players that the game has started
-    p2pService.sendGameStarted(currentGame.id);
-    
-    router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=simple-p2p`);
+    dispatch(setIsLoading(true));
+    try {
+      // Check if all players are connected before starting
+      const allPlayersConnected = players.every(p => p.isHost || p.connectionState === 'connected');
+      console.log(`🔗 P2PLobbyScreen: Starting game - all players connected: ${allPlayersConnected}`);
+      players.forEach((player: any) => {
+        console.log(`🔗 P2PLobbyScreen: Player ${player.name} (${player.isHost ? 'host' : 'client'}): connectionState=${player.connectionState}, isConnected=${player.isConnected}`);
+      });
+      
+      // This will update the host's state and trigger the sync to clients
+      p2pService.sendGameStarted(); 
+      
+      // The host navigates itself
+      router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
+    } catch (error) {
+      console.error("Error starting game:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to start game";
+      Alert.alert("Error", errorMessage);
+    } finally {
+      dispatch(setIsLoading(false));
+    }
   };
 
   // Leave the game
   const leaveGame = () => {
     p2pService.disconnect();
-    setCurrentGame(null);
-    dispatch(resetGame());
+    // ✅ P2P service now handles Redux updates directly
   };
 
   // Render discovered game item
@@ -251,6 +245,25 @@ const P2PLobbyScreen: React.FC = () => {
       </TouchableOpacity>
     );
   };
+
+  // Show connection error screen
+  if (connectionError) {
+    return (
+      <View className="flex-1 bg-black justify-center items-center p-6">
+        <Text className="text-red-400 text-xl font-bold mb-4">Connection Error</Text>
+        <Text className="text-white text-lg text-center mb-6">{connectionError}</Text>
+        <TouchableOpacity
+          className="w-full py-4 px-6 rounded-xl bg-white shadow-lg"
+          onPress={() => {
+            dispatch(setConnectionError(null));
+            dispatch(setIsConnected(true));
+          }}
+        >
+          <Text className="text-black text-xl font-bold text-center">Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // Show loading screen
   if (isLoading) {
@@ -291,51 +304,81 @@ const P2PLobbyScreen: React.FC = () => {
         </View>
 
         <View className="bg-white/10 p-6 rounded-xl mb-6">
-          <Text className="text-white text-xl font-bold mb-4">
-            {currentGame.name}
+          <Text className="text-white text-xl font-bold mb-4 text-center">
+            Waiting for Players
           </Text>
           
-          <Text className="text-gray-300 text-sm mb-4">
+          <Text className="text-gray-300 text-sm mb-4 text-center">
             Join Code: <Text className="text-white font-bold">{currentGame.joinCode}</Text>
           </Text>
 
-          <View className="mb-4">
+          <View className="space-y-3">
             <Text className="text-white text-lg font-semibold mb-2">Players ({players.length})</Text>
-            {players.map((player, index) => (
-              <View key={player.id} className="flex-row items-center justify-between mb-2">
-                <Text className="text-white text-lg">
-                  {player.name} {player.isHost && "(Host)"}
-                </Text>
+            {players && players.length > 0 ? (
+              players.map((player, index) => (
                 <View
-                  className={`w-3 h-3 rounded-full ${
-                    player.color === "r"
-                      ? "bg-red-500"
-                      : player.color === "b"
-                        ? "bg-blue-500"
-                        : player.color === "y"
-                          ? "bg-yellow-500"
-                          : player.color === "g"
-                            ? "bg-green-500"
-                            : "bg-gray-500"
-                  }`}
-                />
-              </View>
-            ))}
+                  key={player.id}
+                  className="flex-row items-center justify-between"
+                >
+                  <Text className="text-white text-lg">
+                    {player.name} {player.isHost && "(Host)"}
+                  </Text>
+                  <View className="flex-row items-center">
+                    <View
+                      className={`w-3 h-3 rounded-full mr-2 ${
+                        player.color === "r"
+                          ? "bg-red-500"
+                          : player.color === "b"
+                            ? "bg-blue-500"
+                            : player.color === "y"
+                              ? "bg-yellow-500"
+                              : player.color === "g"
+                                ? "bg-green-500"
+                                : "bg-gray-500"
+                      }`}
+                    />
+                    <Text className="text-gray-400 text-sm">
+                      {player.connectionState || 'connected'}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <Text className="text-gray-400 text-center">No players yet</Text>
+            )}
           </View>
 
           {isHost && (
-            <View className="mb-4">
+            <View className="items-center gap-4">
+              {players.length < 2 && (
+                <Text className="text-gray-400 text-sm mb-3">
+                  Need 2+ players to start
+                </Text>
+              )}
               <TouchableOpacity
-                className={`w-full py-4 px-6 rounded-xl ${
-                  players.length < 2 ? "bg-gray-600" : "bg-green-600"
-                } shadow-lg`}
+                className={`w-full py-3 px-6 rounded-xl shadow-lg ${
+                  players.length < 2 || players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected')
+                    ? "bg-gray-600" 
+                    : "bg-white"
+                }`}
                 onPress={startGame}
-                disabled={players.length < 2}
+                disabled={
+                  players.length < 2 || 
+                  players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected') ||
+                  isLoading
+                }
               >
-                <Text className={`text-xl font-bold text-center ${
-                  players.length < 2 ? "text-gray-300" : "text-white"
+                <Text className={`text-lg font-bold text-center ${
+                  players.length < 2 || players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected')
+                    ? "text-gray-300" 
+                    : "text-black"
                 }`}>
-                  {players.length < 2 ? "Waiting for players..." : "Start Game"}
+                  {isLoading ? "Starting..." : 
+                    players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected')
+                      ? "Connecting..."
+                      : players.length < 2
+                        ? "Waiting for players..."
+                        : "Start Game"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -343,10 +386,11 @@ const P2PLobbyScreen: React.FC = () => {
         </View>
 
         <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-red-600 shadow-lg"
+          className="w-full py-3 px-6 rounded-xl bg-red-600"
           onPress={leaveGame}
+          disabled={isLoading}
         >
-          <Text className="text-white text-xl font-bold text-center">
+          <Text className="text-white text-lg font-bold text-center">
             Leave Game
           </Text>
         </TouchableOpacity>
@@ -375,6 +419,14 @@ const P2PLobbyScreen: React.FC = () => {
             <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
           </TouchableOpacity>
         )}
+        
+        {/* Connection status indicator */}
+        <View className="flex-row items-center mt-2">
+          <View className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+          <Text className="text-gray-400 text-sm">
+            {isConnected ? 'Connected' : 'Disconnected'}
+          </Text>
+        </View>
       </View>
 
       <View className="space-y-4 mb-8">

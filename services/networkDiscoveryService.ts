@@ -162,11 +162,16 @@ class NetworkDiscoveryService {
       // Filter out old games (older than 5 minutes)
       const now = Date.now();
       const gameAge = now - timestamp;
-      const maxAge = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const maxAge = 10 * 60 * 1000; // 10 minutes in milliseconds (increased from 5 minutes)
       
       if (gameAge > maxAge) {
-        console.log('NetworkDiscovery: Ignoring old game:', service.name, 'age:', Math.round(gameAge / 1000), 'seconds');
+        console.log('NetworkDiscovery: Ignoring very old game:', service.name, 'age:', Math.round(gameAge / 1000), 'seconds');
         return null;
+      }
+      
+      // Log if game is getting old but still show it
+      if (gameAge > 5 * 60 * 1000) {
+        console.log('NetworkDiscovery: Game is getting old but still showing:', service.name, 'age:', Math.round(gameAge / 1000), 'seconds');
       }
 
       // Get the first IPv4 address
@@ -258,23 +263,35 @@ class NetworkDiscoveryService {
 
   // Get all discovered games
   public getDiscoveredGames(): DiscoveredGame[] {
+    console.log('NetworkDiscovery: getDiscoveredGames called, current games in map:', this.discoveredGames.size);
+    
     // Clean up old games before returning
     this.cleanupOldGames();
-    return Array.from(this.discoveredGames.values());
+    
+    const games = Array.from(this.discoveredGames.values());
+    console.log('NetworkDiscovery: Returning', games.length, 'games after cleanup');
+    
+    return games;
   }
 
-  // Clean up games older than 5 minutes
+  // Clean up games older than 10 minutes
   private cleanupOldGames(): void {
     const now = Date.now();
-    const maxAge = 5 * 60 * 1000; // 5 minutes in milliseconds
+    const maxAge = 10 * 60 * 1000; // 10 minutes in milliseconds
+    
+    console.log('NetworkDiscovery: Cleaning up old games, current count:', this.discoveredGames.size);
     
     for (const [gameId, game] of this.discoveredGames.entries()) {
       const gameAge = now - game.timestamp;
+      console.log('NetworkDiscovery: Checking game:', game.name, 'age:', Math.round(gameAge / 1000), 'seconds');
+      
       if (gameAge > maxAge) {
         console.log('NetworkDiscovery: Removing old game from discovered list:', game.name, 'age:', Math.round(gameAge / 1000), 'seconds');
         this.discoveredGames.delete(gameId);
       }
     }
+    
+    console.log('NetworkDiscovery: After cleanup, remaining games:', this.discoveredGames.size);
   }
 
   // Debug method to get all discovered services (not just games)

@@ -64,4 +64,13 @@ export interface GameState {
   canStartGame: boolean;
   // Game mode
   gameMode: "solo" | "local" | "online" | "p2p" | "single";
+  // P2P Lobby state
+  currentGame: any | null; // P2PGame | null
+  discoveredGames: any[];
+  isDiscovering: boolean;
+  isLoading: boolean;
+  isConnected: boolean;
+  connectionError: string | null;
+  isEditingName: boolean;
+  tempName: string;
 }

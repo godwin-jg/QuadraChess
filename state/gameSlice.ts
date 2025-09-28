@@ -84,6 +84,15 @@ export const baseInitialState: GameState = {
   canStartGame: false,
   // Game mode
   gameMode: "single",
+  // P2P Lobby state
+  currentGame: null as any, // P2PGame | null
+  discoveredGames: [],
+  isDiscovering: false,
+  isLoading: false,
+  isConnected: false,
+  connectionError: null as string | null,
+  isEditingName: false,
+  tempName: "",
 };
 
 // Create initial state with proper history initialization
@@ -209,6 +218,7 @@ const gameSlice = createSlice({
 
         // Enforce player turn - only current player can make moves
         // Skip turn validation ONLY in solo mode for testing purposes
+        // For P2P mode, let the P2P service handle move validation and sending
         console.log(
           "makeMove: gameMode:",
           state.gameMode,
@@ -220,10 +230,32 @@ const gameSlice = createSlice({
 
         if (
           state.gameMode !== "solo" &&
+          state.gameMode !== "p2p" &&
           pieceColor !== state.currentPlayerTurn
         ) {
           console.log("makeMove: Turn validation blocked - not player's turn");
           return; // Don't make the move
+        }
+
+        // For P2P mode, send move through P2P service instead of applying locally
+        if (state.gameMode === "p2p") {
+          console.log("makeMove: P2P mode - sending move through P2P service");
+          // Import the P2P service dynamically to avoid circular imports
+          const p2pGameService = require("../services/p2pGameService").default;
+          const moveData = {
+            from: { row: startRow, col: startCol },
+            to: { row: targetRow, col: targetCol },
+            pieceCode: pieceToMove,
+            playerColor: pieceColor,
+          };
+          
+          // Send move through P2P service (this will handle validation and synchronization)
+          p2pGameService.makeMove(moveData).catch((error: any) => {
+            console.error("P2P move failed:", error);
+          });
+          
+          // Don't apply the move locally - let the P2P service handle it
+          return;
         }
 
         // Track if King or Rook has moved
@@ -850,14 +882,14 @@ const gameSlice = createSlice({
       state.historyIndex = state.history.length - 1;
     },
     syncGameState: (state, action: PayloadAction<GameState>) => {
-      // Sync the entire game state from network
+      // Sync the entire game state from network (create new state object)
       const networkState = action.payload;
-      Object.assign(state, networkState);
+      return { ...state, ...networkState };
     },
     setGameState: (state, action: PayloadAction<GameState>) => {
       // Replace the entire game state (useful for syncing when game starts)
       const newState = action.payload;
-      Object.assign(state, newState);
+      return { ...state, ...newState };
     },
     sendMoveToServer: (
       state,
@@ -912,6 +944,63 @@ const gameSlice = createSlice({
       );
       state.gameMode = action.payload;
     },
+    // P2P Lobby actions
+    setCurrentGame: (state, action: PayloadAction<any>) => {
+      state.currentGame = action.payload;
+    },
+    setDiscoveredGames: (state, action: PayloadAction<any[]>) => {
+      state.discoveredGames = action.payload;
+    },
+    setIsDiscovering: (state, action: PayloadAction<boolean>) => {
+      state.isDiscovering = action.payload;
+    },
+    setIsLoading: (state, action: PayloadAction<boolean>) => {
+      state.isLoading = action.payload;
+    },
+    setIsConnected: (state, action: PayloadAction<boolean>) => {
+      state.isConnected = action.payload;
+    },
+    setConnectionError: (state, action: PayloadAction<string | null>) => {
+      state.connectionError = action.payload;
+    },
+    setIsEditingName: (state, action: PayloadAction<boolean>) => {
+      state.isEditingName = action.payload;
+    },
+    setTempName: (state, action: PayloadAction<string>) => {
+      state.tempName = action.payload;
+    },
+    // P2P Lobby state sync - only essential info
+    syncP2PGameState: (state, action: PayloadAction<any>) => {
+      const lobbyData = action.payload;
+      console.log("🎮 Redux: syncP2PGameState called with:", lobbyData);
+      
+      if (lobbyData) {
+        // Only update lobby-related state, not the entire game state
+        if (lobbyData.currentGame) {
+          console.log("🎮 Redux: Updating currentGame:", lobbyData.currentGame);
+          state.currentGame = lobbyData.currentGame;
+        }
+        if (lobbyData.players) {
+          console.log("🎮 Redux: Updating players:", lobbyData.players);
+          state.players = lobbyData.players;
+        }
+        if (typeof lobbyData.isHost === 'boolean') {
+          console.log("🎮 Redux: Updating isHost:", lobbyData.isHost);
+          state.isHost = lobbyData.isHost;
+        }
+        if (typeof lobbyData.canStartGame === 'boolean') {
+          console.log("🎮 Redux: Updating canStartGame:", lobbyData.canStartGame);
+          state.canStartGame = lobbyData.canStartGame;
+        }
+      } else {
+        // Clear lobby state
+        console.log("🎮 Redux: Clearing lobby state");
+        state.currentGame = null;
+        state.players = [];
+        state.isHost = false;
+        state.canStartGame = false;
+      }
+    },
   },
 });
 
@@ -935,6 +1024,16 @@ export const {
   setIsHost,
   setCanStartGame,
   setGameMode,
+  // P2P Lobby actions
+  setCurrentGame,
+  setDiscoveredGames,
+  setIsDiscovering,
+  setIsLoading,
+  setIsConnected,
+  setConnectionError,
+  setIsEditingName,
+  setTempName,
+  syncP2PGameState,
 } = gameSlice.actions;
 
 // Selectors for UI components to choose between live and historical state

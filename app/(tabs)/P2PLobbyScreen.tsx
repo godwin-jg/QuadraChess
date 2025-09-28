@@ -1,58 +1,114 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   TextInput,
+  FlatList,
   Alert,
-  Modal,
-  StyleSheet,
-  Dimensions,
-  Clipboard,
+  ActivityIndicator,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { useDispatch, useSelector } from "react-redux";
+import { useRouter } from "expo-router";
 import { RootState } from "../../state/store";
 import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state/gameSlice";
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
 import networkDiscoveryService from "../../services/networkDiscoveryService";
 
-const { width } = Dimensions.get("window");
-
-export default function P2PLobbyScreen() {
+const P2PLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
   const router = useRouter();
   const { settings, updateProfile } = useSettings();
 
   const gameState = useSelector((state: RootState) => state.game);
-  const { players, isHost, canStartGame } = gameState;
+
+  const { players, isHost, canStartGame } = useMemo(
+    () => ({
+      players: gameState.players || [],
+      isHost: gameState.isHost || false,
+      canStartGame: gameState.canStartGame || false,
+    }),
+    [gameState.players, gameState.isHost, gameState.canStartGame]
+  );
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
-  const [showJoinOptions, setShowJoinOptions] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
-  const [gameId, setGameId] = useState("");
   const [currentGame, setCurrentGame] = useState<P2PGame | null>(null);
   const [discoveredGames, setDiscoveredGames] = useState<any[]>([]);
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Initialize P2P service
   useEffect(() => {
     const unsubscribeGameState = p2pService.on("game-state-update", (gameState) => {
+      console.log("P2PLobbyScreen: Received game-state-update:", gameState);
       setCurrentGame(gameState);
       dispatch(setPlayers(gameState.players || []));
     });
 
     const unsubscribeMove = p2pService.on("move", (move) => {
-      console.log("Received move:", move);
+      console.log("Move received from P2P service:", move);
+    });
+
+    const unsubscribePlayersUpdated = p2pService.on("players-updated", (players) => {
+      console.log("P2PLobbyScreen: Received players-updated:", players);
+      dispatch(setPlayers(players));
+    });
+
+    const unsubscribeHostStatusChanged = p2pService.on("host-status-changed", (status) => {
+      dispatch(setIsHost(status.isHost));
+      dispatch(setCanStartGame(status.canStartGame));
+    });
+
+    const unsubscribeMoveReceived = p2pService.on("move-received", (move) => {
+      console.log("Move received from P2P service:", move);
+    });
+
+    const unsubscribeDisconnected = p2pService.on("disconnected", (data) => {
+      console.log("P2P service disconnected:", data);
+      dispatch(resetGame());
+    });
+
+    const unsubscribeGameStarted = p2pService.on("game-started", (data) => {
+      console.log("Game started notification received:", data);
+      if (!isHost) {
+        console.log("Joining player navigating to game screen with gameId:", data.gameId);
+        if (!currentGame) {
+          console.log("No currentGame set, creating basic game state for navigation");
+          setCurrentGame({
+            id: data.gameId,
+            name: "P2P Game",
+            hostName: "Host",
+            hostId: "unknown",
+            hostIP: "unknown",
+            port: 3001,
+            joinCode: "0000",
+            playerCount: 2,
+            maxPlayers: 4,
+            status: "playing",
+            timestamp: data.timestamp || Date.now(),
+          });
+        }
+        router.push(`/(tabs)/GameScreen?gameId=${data.gameId}&mode=simple-p2p`);
+      }
     });
 
     return () => {
       unsubscribeGameState();
       unsubscribeMove();
+      unsubscribePlayersUpdated();
+      unsubscribeHostStatusChanged();
+      unsubscribeMoveReceived();
+      unsubscribeDisconnected();
+      unsubscribeGameStarted();
     };
-  }, [dispatch]);
+  }, [dispatch, isHost]);
+
+  // Auto-discover games on mount
+  useEffect(() => {
+    discoverGames();
+  }, []);
 
   // Name editing functions
   const startEditingName = () => {
@@ -74,84 +130,62 @@ export default function P2PLobbyScreen() {
       return;
     }
 
+    setIsLoading(true);
     try {
       dispatch(resetGame());
       
       const game = await p2pService.createGame(settings.profile.name.trim());
       setCurrentGame(game);
       
-      dispatch(setIsHost(true));
-      dispatch(setCanStartGame(false));
-      
-      console.log("Simple P2P Game created:", game);
+      console.log("P2P Game created:", game);
     } catch (error) {
-      console.error("Error creating simple P2P game:", error);
+      console.error("Error creating P2P game:", error);
       Alert.alert("Error", "Failed to create game");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Join game with simple code
-  const joinGameWithCode = async () => {
+  // Join a discovered game
+  const joinGame = async (gameId: string) => {
     if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
     }
 
-    if (!joinCode.trim()) {
-      Alert.alert("Error", "Please enter a join code");
-      return;
-    }
-
+    setIsLoading(true);
     try {
       dispatch(resetGame());
       
-      await p2pService.joinGameWithCode(joinCode.trim(), settings.profile.name.trim());
+      // Find the game in discovered games to set currentGame as fallback
+      const gameToJoin = discoveredGames.find(game => game.id === gameId);
+      if (gameToJoin) {
+        console.log("Setting currentGame from discovered games:", gameToJoin);
+        setCurrentGame({
+          id: gameToJoin.id,
+          name: gameToJoin.name,
+          hostName: gameToJoin.hostName,
+          hostId: gameToJoin.hostId,
+          hostIP: gameToJoin.hostIP,
+          port: gameToJoin.port,
+          joinCode: gameToJoin.joinCode,
+          playerCount: gameToJoin.playerCount,
+          maxPlayers: gameToJoin.maxPlayers,
+          status: "waiting",
+          timestamp: Date.now(),
+        });
+      }
       
-      dispatch(setIsHost(false));
-      dispatch(setCanStartGame(false));
+      await p2pService.joinDiscoveredGame(gameId, settings.profile.name.trim());
       
-      Alert.alert("Success", `Joining game with code: ${joinCode}`);
-      setShowJoinOptions(false);
+      console.log("Joined P2P game:", gameId);
     } catch (error) {
-      console.error("Error joining game with code:", error);
+      console.error("Error joining P2P game:", error);
       Alert.alert("Error", "Failed to join game");
-    }
-  };
-
-  // Join game with game ID
-  const joinGameWithId = async () => {
-    if (!settings.profile.name.trim()) {
-      Alert.alert("Error", "Please enter a name");
-      return;
-    }
-
-    if (!gameId.trim()) {
-      Alert.alert("Error", "Please enter a game ID");
-      return;
-    }
-
-    try {
-      dispatch(resetGame());
-      
-      await p2pService.joinGameById(gameId.trim(), settings.profile.name.trim());
-      
-      dispatch(setIsHost(false));
-      dispatch(setCanStartGame(false));
-      
-      Alert.alert("Success", `Joining game with ID: ${gameId}`);
-      setShowJoinOptions(false);
-    } catch (error) {
-      console.error("Error joining game with ID:", error);
-      Alert.alert("Error", "Failed to join game");
-    }
-  };
-
-  // Copy join code to clipboard
-  const copyJoinCode = () => {
-    const code = p2pService.getJoinCode();
-    if (code) {
-      Clipboard.setString(code);
-      Alert.alert("Copied!", `Join code ${code} copied to clipboard`);
+      // Reset currentGame on error
+      setCurrentGame(null);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -163,21 +197,10 @@ export default function P2PLobbyScreen() {
       setDiscoveredGames(games);
       console.log("Discovered games:", games);
     } catch (error) {
-      console.error("Failed to discover games:", error);
-      Alert.alert("Error", "Failed to discover games on network");
+      console.error("Error discovering games:", error);
+      Alert.alert("Error", "Failed to discover games");
     } finally {
       setIsDiscovering(false);
-    }
-  };
-
-  // Join a discovered game
-  const joinDiscoveredGame = async (gameId: string) => {
-    try {
-      await p2pService.joinDiscoveredGame(gameId, settings.profile.name.trim());
-      Alert.alert("Success", "Joining discovered game!");
-    } catch (error) {
-      console.error("Failed to join discovered game:", error);
-      Alert.alert("Error", "Failed to join game");
     }
   };
 
@@ -188,6 +211,9 @@ export default function P2PLobbyScreen() {
     const updatedGame = { ...currentGame, status: "playing" as const };
     setCurrentGame(updatedGame);
     
+    // Notify all connected players that the game has started
+    p2pService.sendGameStarted(currentGame.id);
+    
     router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=simple-p2p`);
   };
 
@@ -195,183 +221,134 @@ export default function P2PLobbyScreen() {
   const leaveGame = () => {
     p2pService.disconnect();
     setCurrentGame(null);
-    dispatch(setPlayers([]));
-    dispatch(setIsHost(false));
-    dispatch(setCanStartGame(false));
+    dispatch(resetGame());
   };
 
-  // Render Join Options Modal
-  const renderJoinOptionsModal = () => (
-    <Modal visible={showJoinOptions} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Join Game</Text>
-          <Text style={styles.modalSubtitle}>
-            Choose how you want to join a game
-          </Text>
-          
-          {/* Join Code Option */}
-          <View style={styles.joinOption}>
-            <Text style={styles.optionTitle}>🎯 Join Code</Text>
-            <Text style={styles.optionDescription}>
-              Enter the 4-digit code shared by the host
+  // Render discovered game item
+  const renderGameItem = ({ item }: { item: any }) => {
+    return (
+      <TouchableOpacity
+        className="bg-white/10 p-4 rounded-xl mb-3 border border-white/20"
+        onPress={() => joinGame(item.id)}
+        disabled={isLoading}
+      >
+        <View className="flex-row justify-between items-center">
+          <View>
+            <Text className="text-white text-lg font-bold">
+              {item.hostName}'s Game
             </Text>
-            <TextInput
-              style={styles.codeInput}
-              placeholder="Enter join code (e.g., 1234)"
-              value={joinCode}
-              onChangeText={setJoinCode}
-              keyboardType="numeric"
-              maxLength={4}
-            />
-            <TouchableOpacity
-              style={styles.joinButton}
-              onPress={joinGameWithCode}
-            >
-              <Text style={styles.joinButtonText}>Join with Code</Text>
-            </TouchableOpacity>
+            <Text className="text-gray-300 text-sm">
+              {item.playerCount}/{item.maxPlayers} players
+            </Text>
+            <Text className="text-gray-400 text-xs">
+              Code: {item.joinCode}
+            </Text>
           </View>
+          <View className="items-end">
+            <Text className="text-green-400 text-sm">Available</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
-          {/* Discovered Games Option */}
-          <View style={styles.joinOption}>
-            <Text style={styles.optionTitle}>🌐 Discover Games</Text>
-            <Text style={styles.optionDescription}>
-              Automatically find games on your local network
-            </Text>
-            <TouchableOpacity
-              style={[styles.joinButton, isDiscovering && styles.disabledButton]}
-              onPress={discoverGames}
-              disabled={isDiscovering}
-            >
-              <Text style={styles.joinButtonText}>
-                {isDiscovering ? "Discovering..." : "Find Games"}
+  // Show loading screen
+  if (isLoading) {
+    return (
+      <View className="flex-1 bg-black justify-center items-center">
+        <ActivityIndicator size="large" color="#ffffff" />
+        <Text className="text-white text-lg mt-4">
+          {isHost ? "Creating game..." : "Joining game..."}
+        </Text>
+      </View>
+    );
+  }
+
+  // In-game waiting room
+  if (currentGame) {
+    return (
+      <View className="flex-1 bg-black p-6">
+        <View className="items-center mb-8">
+          <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
+          {isEditingName ? (
+            <TextInput
+              className="text-white text-2xl font-bold text-center border-b border-white/30 pb-1"
+              value={tempName}
+              onChangeText={setTempName}
+              onSubmitEditing={saveName}
+              onBlur={saveName}
+              autoFocus
+              placeholder="Enter name"
+              placeholderTextColor="#9CA3AF"
+            />
+          ) : (
+            <TouchableOpacity onPress={startEditingName}>
+              <Text className="text-white text-2xl font-bold">
+                {settings.profile.name}
               </Text>
             </TouchableOpacity>
-            
-            {/* Show discovered games */}
-            {discoveredGames.length > 0 && (
-              <View style={styles.discoveredGamesList}>
-                <Text style={styles.discoveredGamesTitle}>Available Games:</Text>
-                {discoveredGames.map((game) => (
-                  <TouchableOpacity
-                    key={game.id}
-                    style={styles.discoveredGameItem}
-                    onPress={() => joinDiscoveredGame(game.id)}
-                  >
-                    <Text style={styles.discoveredGameName}>{game.name}</Text>
-                    <Text style={styles.discoveredGameInfo}>
-                      {game.hostName} • {game.playerCount}/{game.maxPlayers} players
-                    </Text>
-                    {game.joinCode && (
-                      <Text style={styles.discoveredGameCode}>Code: {game.joinCode}</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Game ID Option */}
-          <View style={styles.joinOption}>
-            <Text style={styles.optionTitle}>🔗 Game ID</Text>
-            <Text style={styles.optionDescription}>
-              Enter the full game ID if you know it
-            </Text>
-            <TextInput
-              style={styles.idInput}
-              placeholder="Enter game ID"
-              value={gameId}
-              onChangeText={setGameId}
-            />
-            <TouchableOpacity
-              style={styles.joinButton}
-              onPress={joinGameWithId}
-            >
-              <Text style={styles.joinButtonText}>Join with ID</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => setShowJoinOptions(false)}
-          >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
+          )}
         </View>
-      </View>
-    </Modal>
-  );
 
-  if (currentGame) {
-    // In-game waiting room
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>P2P Game</Text>
-          <Text style={styles.headerSubtitle}>
-            {isHost ? "Hosting" : "Playing"} • {currentGame.playerCount}/4 players
+        <View className="bg-white/10 p-6 rounded-xl mb-6">
+          <Text className="text-white text-xl font-bold mb-4">
+            {currentGame.name}
           </Text>
-        </View>
+          
+          <Text className="text-gray-300 text-sm mb-4">
+            Join Code: <Text className="text-white font-bold">{currentGame.joinCode}</Text>
+          </Text>
 
-        {/* Join Code Display */}
-        {isHost && currentGame.joinCode && (
-          <View style={styles.joinCodeSection}>
-            <Text style={styles.joinCodeTitle}>Join Code</Text>
-            <View style={styles.joinCodeContainer}>
-              <Text style={styles.joinCodeText}>{currentGame.joinCode}</Text>
-              <TouchableOpacity style={styles.copyButton} onPress={copyJoinCode}>
-                <Text style={styles.copyButtonText}>Copy</Text>
+          <View className="mb-4">
+            <Text className="text-white text-lg font-semibold mb-2">Players ({players.length})</Text>
+            {players.map((player, index) => (
+              <View key={player.id} className="flex-row items-center justify-between mb-2">
+                <Text className="text-white text-lg">
+                  {player.name} {player.isHost && "(Host)"}
+                </Text>
+                <View
+                  className={`w-3 h-3 rounded-full ${
+                    player.color === "r"
+                      ? "bg-red-500"
+                      : player.color === "b"
+                        ? "bg-blue-500"
+                        : player.color === "y"
+                          ? "bg-yellow-500"
+                          : player.color === "g"
+                            ? "bg-green-500"
+                            : "bg-gray-500"
+                  }`}
+                />
+              </View>
+            ))}
+          </View>
+
+          {isHost && (
+            <View className="mb-4">
+              <TouchableOpacity
+                className={`w-full py-4 px-6 rounded-xl ${
+                  players.length < 2 ? "bg-gray-600" : "bg-green-600"
+                } shadow-lg`}
+                onPress={startGame}
+                disabled={players.length < 2}
+              >
+                <Text className={`text-xl font-bold text-center ${
+                  players.length < 2 ? "text-gray-300" : "text-white"
+                }`}>
+                  {players.length < 2 ? "Waiting for players..." : "Start Game"}
+                </Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.joinCodeDescription}>
-              Share this code with other players
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.playerList}>
-          <Text style={styles.playerListTitle}>Players</Text>
-          {players.map((player, index) => (
-            <View key={player.id} style={styles.playerItem}>
-              <Text style={styles.playerName}>
-                {player.name} {player.isHost && "(Host)"}
-              </Text>
-              <View style={[
-                styles.playerStatus,
-                { backgroundColor: player.isConnected ? "#4CAF50" : "#F44336" }
-              ]} />
-            </View>
-          ))}
+          )}
         </View>
 
-        {isHost && (
-          <View style={styles.hostControls}>
-            {players.length < 2 && (
-              <Text style={styles.waitingText}>
-                Waiting for players to join...
-              </Text>
-            )}
-            
-            <TouchableOpacity
-              style={[
-                styles.startButton,
-                players.length < 2 && styles.disabledButton
-              ]}
-              onPress={startGame}
-              disabled={players.length < 2}
-            >
-              <Text style={[
-                styles.startButtonText,
-                players.length < 2 && styles.disabledButtonText
-              ]}>
-                Start Game
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <TouchableOpacity style={styles.leaveButton} onPress={leaveGame}>
-          <Text style={styles.leaveButtonText}>Leave Game</Text>
+        <TouchableOpacity
+          className="w-full py-4 px-6 rounded-xl bg-red-600 shadow-lg"
+          onPress={leaveGame}
+        >
+          <Text className="text-white text-xl font-bold text-center">
+            Leave Game
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -379,19 +356,12 @@ export default function P2PLobbyScreen() {
 
   // Main menu
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>P2P Chess</Text>
-        <Text style={styles.headerSubtitle}>
-          Connect and play without servers
-        </Text>
-      </View>
-
-      <View style={styles.nameSection}>
-        <Text style={styles.nameLabel}>Playing as:</Text>
+    <View className="flex-1 bg-black p-6">
+      <View className="items-center mb-8">
+        <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
         {isEditingName ? (
           <TextInput
-            style={styles.nameInput}
+            className="text-white text-2xl font-bold text-center border-b border-white/30 pb-1"
             value={tempName}
             onChangeText={setTempName}
             onSubmitEditing={saveName}
@@ -402,338 +372,62 @@ export default function P2PLobbyScreen() {
           />
         ) : (
           <TouchableOpacity onPress={startEditingName}>
-            <Text style={styles.nameText}>{settings.profile.name}</Text>
+            <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      <View style={styles.buttonSection}>
-        <TouchableOpacity style={styles.createButton} onPress={createGame}>
-          <Text style={styles.createButtonText}>Create Game</Text>
-        </TouchableOpacity>
-
+      <View className="space-y-4 mb-8">
         <TouchableOpacity
-          style={styles.joinButton}
-          onPress={() => setShowJoinOptions(true)}
+          className="w-full py-4 px-6 rounded-xl bg-white shadow-lg"
+          onPress={createGame}
+          disabled={isLoading}
         >
-          <Text style={styles.joinButtonText}>Join Game</Text>
+          <Text className="text-black text-xl font-bold text-center">
+            {isLoading ? "Creating..." : "Create Game"}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.backButton}
+          className="w-full py-4 px-6 rounded-xl bg-white/20 border-2 border-white/30"
+          onPress={discoverGames}
+          disabled={isDiscovering}
+        >
+          <Text className="text-white text-xl font-bold text-center">
+            {isDiscovering ? "Discovering..." : "Refresh Games"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          className="w-full py-4 px-6 rounded-xl bg-white/20 border-2 border-white/30"
           onPress={() => router.back()}
         >
-          <Text style={styles.backButtonText}>Back to Home</Text>
+          <Text className="text-white text-xl font-bold text-center">
+            Back to Home
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {renderJoinOptionsModal()}
+      <View className="flex-1">
+        <Text className="text-white text-xl font-bold mb-4">
+          Available Games
+        </Text>
+
+        {discoveredGames.length === 0 ? (
+          <Text className="text-gray-400 text-center mt-8">
+            No games available. Create one to get started!
+          </Text>
+        ) : (
+          <FlatList
+            data={discoveredGames}
+            renderItem={renderGameItem}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+      </View>
     </View>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-    padding: 20,
-  },
-  header: {
-    alignItems: "center",
-    marginBottom: 30,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 8,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: "#9CA3AF",
-    textAlign: "center",
-  },
-  nameSection: {
-    alignItems: "center",
-    marginBottom: 40,
-  },
-  nameLabel: {
-    fontSize: 14,
-    color: "#9CA3AF",
-    marginBottom: 8,
-  },
-  nameInput: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#fff",
-    textAlign: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#374151",
-    paddingBottom: 4,
-    minWidth: 200,
-  },
-  nameText: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  buttonSection: {
-    gap: 16,
-  },
-  createButton: {
-    backgroundColor: "#fff",
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  createButtonText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#000",
-  },
-  joinButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  joinButtonText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  backButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 20,
-  },
-  backButtonText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  joinCodeSection: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 20,
-    alignItems: "center",
-  },
-  joinCodeTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 12,
-  },
-  joinCodeContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 8,
-  },
-  joinCodeText: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#fff",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    letterSpacing: 4,
-  },
-  copyButton: {
-    backgroundColor: "#4CAF50",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  copyButtonText: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  joinCodeDescription: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    textAlign: "center",
-  },
-  playerList: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  playerListTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 12,
-  },
-  playerItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  playerName: {
-    fontSize: 16,
-    color: "#fff",
-  },
-  playerStatus: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  hostControls: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  waitingText: {
-    fontSize: 14,
-    color: "#9CA3AF",
-    marginBottom: 16,
-    textAlign: "center",
-  },
-  startButton: {
-    backgroundColor: "#fff",
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    minWidth: 200,
-  },
-  startButtonText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#000",
-    textAlign: "center",
-  },
-  disabledButton: {
-    backgroundColor: "#6B7280",
-  },
-  disabledButtonText: {
-    color: "#9CA3AF",
-  },
-  discoveredGamesList: {
-    marginTop: 16,
-    width: "100%",
-  },
-  discoveredGamesTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#fff",
-    marginBottom: 8,
-  },
-  discoveredGameItem: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  discoveredGameName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#fff",
-    marginBottom: 4,
-  },
-  discoveredGameInfo: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    marginBottom: 2,
-  },
-  discoveredGameCode: {
-    fontSize: 12,
-    color: "#10B981",
-    fontWeight: "500",
-  },
-  leaveButton: {
-    backgroundColor: "#EF4444",
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  leaveButtonText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
-    backgroundColor: "#1F2937",
-    borderRadius: 16,
-    padding: 24,
-    width: width * 0.9,
-    maxWidth: 400,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#fff",
-    textAlign: "center",
-    marginBottom: 8,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: "#9CA3AF",
-    textAlign: "center",
-    marginBottom: 24,
-  },
-  joinOption: {
-    marginBottom: 24,
-  },
-  optionTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 4,
-  },
-  optionDescription: {
-    fontSize: 12,
-    color: "#9CA3AF",
-    marginBottom: 12,
-  },
-  codeInput: {
-    backgroundColor: "#fff",
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 18,
-    fontWeight: "bold",
-    textAlign: "center",
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  idInput: {
-    backgroundColor: "#fff",
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 14,
-    color: "#000",
-    marginBottom: 12,
-  },
-  cancelButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#fff",
-  },
-});
+export default P2PLobbyScreen;

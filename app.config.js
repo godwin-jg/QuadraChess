@@ -45,6 +45,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone for P2P connections",
           },
         ],
+        [
+          "expo-build-properties",
+          {
+            android: {
+              usesCleartextTraffic: true,
+            },
+          },
+        ],
       ],
       extra: {
         ...config.expo?.extra,

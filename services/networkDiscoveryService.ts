@@ -5,12 +5,14 @@ export interface DiscoveredGame {
   id: string;
   name: string;
   hostName: string;
+  hostId: string;
   hostIP: string;
   port: number;
   joinCode?: string;
   playerCount: number;
   maxPlayers: number;
   status: string;
+  timestamp: number;
 }
 
 export interface GameService {
@@ -60,13 +62,18 @@ class NetworkDiscoveryService {
 
     // Also listen for zeroconf events as backup
     this.zeroconf.on('found', (service: any) => {
-      console.log('NetworkDiscovery: Zeroconf found service:', service);
+      // Reduced logging - only log QuadChess games
+      if (service.name && service.name.includes("Game")) {
+        console.log('NetworkDiscovery: Zeroconf found QuadChess game:', service.name);
+      }
     });
 
     this.zeroconf.on('resolved', (service: any) => {
-      console.log('NetworkDiscovery: Zeroconf service resolved:', service);
-      console.log('NetworkDiscovery: Service fullName:', service.fullName);
-      console.log('NetworkDiscovery: Service txt:', service.txt);
+      // Only log QuadChess games to reduce noise
+      if (service.name && service.name.includes("Game")) {
+        console.log('NetworkDiscovery: Zeroconf service resolved:', service.name);
+        console.log('NetworkDiscovery: Service txt:', service.txt);
+      }
       
       // Check if this is a QuadChess game by looking at the TXT record
       const txt = service.txt || {};
@@ -99,11 +106,8 @@ class NetworkDiscoveryService {
   }
 
   private handleServiceFound(service: GameService): void {
-    console.log('NetworkDiscovery: Service found:', service.type, service.name);
-    
     // Only handle QuadChess games
     if (service.type !== '_quadchess._tcp.') {
-      console.log('NetworkDiscovery: Ignoring non-QuadChess service:', service.type);
       return;
     }
 
@@ -148,10 +152,22 @@ class NetworkDiscoveryService {
       const txt = service.txt;
       const gameId = txt.gameId || service.name;
       const hostName = txt.hostName || 'Unknown Host';
+      const hostId = txt.hostId || 'unknown';
       const joinCode = txt.joinCode;
       const playerCount = parseInt(txt.playerCount || '1');
       const maxPlayers = parseInt(txt.maxPlayers || '4');
       const status = txt.status || 'waiting';
+      const timestamp = parseInt(txt.timestamp || '0');
+
+      // Filter out old games (older than 5 minutes)
+      const now = Date.now();
+      const gameAge = now - timestamp;
+      const maxAge = 5 * 60 * 1000; // 5 minutes in milliseconds
+      
+      if (gameAge > maxAge) {
+        console.log('NetworkDiscovery: Ignoring old game:', service.name, 'age:', Math.round(gameAge / 1000), 'seconds');
+        return null;
+      }
 
       // Get the first IPv4 address
       const hostIP = service.addresses.find(addr => 
@@ -162,12 +178,14 @@ class NetworkDiscoveryService {
         id: gameId,
         name: service.name,
         hostName,
+        hostId,
         hostIP,
         port: service.port,
         joinCode,
         playerCount,
         maxPlayers,
         status,
+        timestamp,
       };
     } catch (error) {
       console.error('NetworkDiscovery: Error parsing game info:', error);
@@ -240,7 +258,23 @@ class NetworkDiscoveryService {
 
   // Get all discovered games
   public getDiscoveredGames(): DiscoveredGame[] {
+    // Clean up old games before returning
+    this.cleanupOldGames();
     return Array.from(this.discoveredGames.values());
+  }
+
+  // Clean up games older than 5 minutes
+  private cleanupOldGames(): void {
+    const now = Date.now();
+    const maxAge = 5 * 60 * 1000; // 5 minutes in milliseconds
+    
+    for (const [gameId, game] of this.discoveredGames.entries()) {
+      const gameAge = now - game.timestamp;
+      if (gameAge > maxAge) {
+        console.log('NetworkDiscovery: Removing old game from discovered list:', game.name, 'age:', Math.round(gameAge / 1000), 'seconds');
+        this.discoveredGames.delete(gameId);
+      }
+    }
   }
 
   // Debug method to get all discovered services (not just games)

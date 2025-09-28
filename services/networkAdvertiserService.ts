@@ -5,12 +5,14 @@ export interface GameAdvertisement {
   gameId: string;
   gameName: string;
   hostName: string;
+  hostId: string;
   hostIP: string;
   port: number;
   joinCode?: string;
   playerCount: number;
   maxPlayers: number;
   status: string;
+  timestamp: number; // Unix timestamp when the game was created
 }
 
 class NetworkAdvertiserService {
@@ -137,10 +139,12 @@ class NetworkAdvertiserService {
       const txtRecord = {
         gameId: gameInfo.gameId,
         hostName: gameInfo.hostName,
+        hostId: gameInfo.hostId,
         joinCode: gameInfo.joinCode || '',
         playerCount: gameInfo.playerCount.toString(),
         maxPlayers: gameInfo.maxPlayers.toString(),
         status: gameInfo.status,
+        timestamp: gameInfo.timestamp.toString(),
       };
       
       console.log('NetworkAdvertiser: TXT record:', txtRecord);

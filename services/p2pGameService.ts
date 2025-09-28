@@ -39,10 +39,10 @@ class P2PGameServiceImpl implements P2PGameService {
       this.currentGameId = gameId;
       this.isConnected = true;
 
-      console.log("P2PGameService: Connecting to game:", gameId);
+      console.log("P2PGameService: Connecting to serverless P2P game:", gameId);
 
-      // Set up message handlers
-      this.setupMessageHandlers();
+      // Set up message handlers for our serverless P2P service
+      this.setupServerlessMessageHandlers();
 
       // Set up presence tracking
       await this.updatePlayerPresence(true);
@@ -113,8 +113,8 @@ class P2PGameServiceImpl implements P2PGameService {
       throw new Error("Invalid move");
     }
 
-    // Send move through P2P service
-    p2pService.makeMove(moveData);
+    // Send move through serverless P2P service
+    p2pService.sendChessMove(moveData);
   }
 
   async resignGame(): Promise<void> {
@@ -122,8 +122,8 @@ class P2PGameServiceImpl implements P2PGameService {
       throw new Error("Not connected to a game");
     }
 
-    // Send resignation message
-    p2pService.makeMove({
+    // Send resignation message through serverless P2P service
+    p2pService.sendChessMove({
       from: { row: -1, col: -1 },
       to: { row: -1, col: -1 },
       pieceCode: "RESIGN",
@@ -182,6 +182,21 @@ class P2PGameServiceImpl implements P2PGameService {
           this.handleError(message);
           break;
       }
+    });
+  }
+
+  private setupServerlessMessageHandlers(): void {
+    console.log("P2PGameService: Setting up serverless P2P message handlers");
+    
+    // Set up handlers for our serverless P2P service using the new message system
+    this.gameUnsubscribe = p2pService.onMessage("game-state-update", (gameState) => {
+      console.log("P2PGameService: Received game state update:", gameState);
+      this.gameUpdateCallbacks.forEach(callback => callback(gameState));
+    });
+
+    this.moveUnsubscribe = p2pService.onMessage("move-received", (move) => {
+      console.log("P2PGameService: Received move:", move);
+      this.moveUpdateCallbacks.forEach(callback => callback(move));
     });
   }
 

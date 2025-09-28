@@ -49,13 +49,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="LobbyScreen"
-        options={{
-          title: "Local",
-          tabBarIcon: ({ color }) => <TabBarIcon name="users" color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="P2PLobbyScreen"
         options={{
           title: "P2P",

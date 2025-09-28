@@ -237,9 +237,17 @@ const gameSlice = createSlice({
           return; // Don't make the move
         }
 
-        // For P2P mode, send move through P2P service instead of applying locally
+        // For P2P mode, validate turn and send move through P2P service
         if (state.gameMode === "p2p") {
-          console.log("makeMove: P2P mode - sending move through P2P service");
+          console.log("makeMove: P2P mode - validating turn and sending move through P2P service");
+          
+          // ✅ CRITICAL: Validate turn in P2P mode
+          if (pieceColor !== state.currentPlayerTurn) {
+            console.log("makeMove: P2P turn validation blocked - not player's turn");
+            console.log("makeMove: Current turn:", state.currentPlayerTurn, "Piece color:", pieceColor);
+            return; // Don't make the move
+          }
+          
           // Import the P2P service dynamically to avoid circular imports
           const p2pGameService = require("../services/p2pGameService").default;
           const moveData = {
@@ -859,8 +867,19 @@ const gameSlice = createSlice({
       state.boardState[toRow][toCol] = pieceCode;
       state.boardState[fromRow][fromCol] = null;
 
-      // Note: Turn management is now handled by the server
-      // The server will send the updated gameState with the correct currentPlayerTurn
+      // ✅ CRITICAL: Handle turn management for P2P mode
+      if (state.gameMode === "p2p") {
+        console.log("applyNetworkMove: P2P mode detected, current turn:", state.currentPlayerTurn, "move by:", playerColor);
+        // Advance to next player in P2P mode
+        const turnOrder = ['r', 'b', 'y', 'g'];
+        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn);
+        const nextIndex = (currentIndex + 1) % turnOrder.length;
+        state.currentPlayerTurn = turnOrder[nextIndex];
+        console.log("applyNetworkMove: P2P turn advanced from", turnOrder[currentIndex], "to", turnOrder[nextIndex]);
+      } else {
+        console.log("applyNetworkMove: Not P2P mode, gameMode:", state.gameMode);
+      }
+      // Note: For online mode, turn management is handled by the server
 
       // Clear selection
       state.selectedPiece = null;
@@ -940,7 +959,9 @@ const gameSlice = createSlice({
         "setGameMode: Setting game mode from",
         state.gameMode,
         "to",
-        action.payload
+        action.payload,
+        "call stack:",
+        new Error().stack?.split('\n').slice(1, 4).join('\n')
       );
       state.gameMode = action.payload;
     },

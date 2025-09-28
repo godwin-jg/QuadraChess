@@ -6,7 +6,7 @@ import networkDiscoveryService from "./networkDiscoveryService";
 import networkAdvertiserService from "./networkAdvertiserService";
 import serverlessSignalingService from "./serverlessSignalingService";
 import { store } from "../state/store";
-import { syncP2PGameState, setIsConnected, setConnectionError, setIsLoading, setDiscoveredGames, setIsDiscovering, applyNetworkMove } from "../state/gameSlice";
+import { syncP2PGameState, setIsConnected, setConnectionError, setIsLoading, setDiscoveredGames, setIsDiscovering, applyNetworkMove, setGameState, setGameMode } from "../state/gameSlice";
 
 export interface P2PGame {
   id: string;
@@ -133,14 +133,20 @@ class P2PService {
     console.log('P2PService: Game state initialized:', this.gameState);
     console.log('P2PService: Players map size:', this.players.size);
 
-    // ✅ Update Redux state directly
+    // ✅ Update Redux state directly with proper game initialization
     console.log("🎮 P2PService: Updating Redux state with created game");
     console.log("🎮 P2PService: Game state being sent to Redux:", this.gameState);
-    store.dispatch(syncP2PGameState({
+    
+    // Initialize the full game state for Redux
+    store.dispatch(setGameState({
+      ...store.getState().game, // Keep existing state
       currentGame: this.gameState,
       players: Array.from(this.players.values()),
       isHost: true,
-      canStartGame: false // Can't start until more players join
+      canStartGame: false, // Can't start until more players join
+      gameMode: "p2p", // Set correct game mode
+      currentPlayerTurn: "r", // Red starts first (host)
+      gameStatus: "waiting" // Game is waiting for players
     }));
 
     // Truly serverless: Network advertising + HTTP signaling server
@@ -353,6 +359,12 @@ class P2PService {
 
     // Set up data channel listeners
     this.setupDataChannelListeners(dataChannel, hostId, playerName);
+    
+    // ✅ CRITICAL: Set gameMode to p2p for the client when connecting
+    console.log("🎮 P2PService: Setting gameMode to p2p for client connection");
+    console.log("🎮 P2PService: Current gameMode before setting:", store.getState().game.gameMode);
+    store.dispatch(setGameMode("p2p"));
+    console.log("🎮 P2PService: Current gameMode after setting:", store.getState().game.gameMode);
 
     // ✅ 2. Buffer ICE candidates instead of sending them immediately
     connection.onicecandidate = (event) => {
@@ -866,10 +878,10 @@ class P2PService {
       return;
     }
 
-    // Assign a color to the new player
-    const availableColors = ['r', 'b', 'y', 'g'];
+    // Assign colors in turn order: r, b, y, g
+    const turnOrder = ['r', 'b', 'y', 'g'];
     const usedColors = Array.from(this.players.values()).map(p => p.color);
-    const availableColor = availableColors.find(color => !usedColors.includes(color)) || 'r';
+    const availableColor = turnOrder.find(color => !usedColors.includes(color)) || 'r';
 
     const newPlayer: P2PPlayer = {
       id: playerId,
@@ -1075,6 +1087,12 @@ class P2PService {
       canStartGame: playersArray.length >= 2 && lobbyState.status === 'waiting'
     }));
     
+    // ✅ CRITICAL: Set gameMode to p2p for the client
+    console.log("🎮 P2PService: Current gameMode before setting:", store.getState().game.gameMode);
+    store.dispatch(setGameMode("p2p"));
+    console.log("🎮 P2PService: Set gameMode to p2p for client");
+    console.log("🎮 P2PService: Current gameMode after setting:", store.getState().game.gameMode);
+    
     console.log("🎮 P2PService: Redux state updated, current state:", store.getState().game);
   }
 
@@ -1176,23 +1194,20 @@ class P2PService {
     
     // ✅ Apply move directly to Redux - no heavy state sync needed
     console.log("🎮 P2PService: Applying received move to Redux");
+    console.log("🎮 P2PService: Current Redux gameMode:", store.getState().game.gameMode);
+    console.log("🎮 P2PService: Current Redux currentPlayerTurn:", store.getState().game.currentPlayerTurn);
     store.dispatch(applyNetworkMove(move));
+    console.log("🎮 P2PService: After dispatch - currentPlayerTurn:", store.getState().game.currentPlayerTurn);
     
-    // Update current player turn in our local game state (create new object to avoid mutation)
-    if (this.gameState) {
-      this.gameState = { 
-        ...this.gameState, 
-        currentPlayerTurn: this.getNextPlayerTurn(move.playerColor) 
-      };
-      console.log("P2PService: Updated currentPlayerTurn to:", this.gameState.currentPlayerTurn);
-    }
+    // Note: Turn management is now handled by Redux applyNetworkMove reducer
   }
 
-  // Simple turn management
+  // Turn management following the same logic as single player
   private getNextPlayerTurn(currentColor: string): string {
-    const colors = ['r', 'b', 'y', 'g'];
-    const currentIndex = colors.indexOf(currentColor);
-    return colors[(currentIndex + 1) % colors.length];
+    const turnOrder = ['r', 'b', 'y', 'g'];
+    const currentIndex = turnOrder.indexOf(currentColor);
+    const nextIndex = (currentIndex + 1) % turnOrder.length;
+    return turnOrder[nextIndex];
   }
 
   // Notify message handlers

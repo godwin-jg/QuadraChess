@@ -40,6 +40,12 @@ class P2PGameServiceImpl implements P2PGameService {
       this.isConnected = true;
 
       console.log("P2PGameService: Connecting to serverless P2P game:", gameId);
+      
+      // ✅ CRITICAL: Set gameMode to p2p when connecting to P2P game
+      const { store } = require("../state/store");
+      const { setGameMode } = require("../state/gameSlice");
+      console.log("🎮 P2PGameService: Setting gameMode to p2p");
+      store.dispatch(setGameMode("p2p"));
 
       // Set up message handlers for our serverless P2P service
       this.setupServerlessMessageHandlers();

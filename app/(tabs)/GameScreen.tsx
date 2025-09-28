@@ -7,7 +7,7 @@ import { useSettings } from "../../context/SettingsContext";
 import modeSwitchService from "../../services/modeSwitchService";
 import onlineGameService from "../../services/onlineGameService";
 import p2pGameService from "../../services/p2pGameService";
-import { RootState, completePromotion, resetGame } from "../../state";
+import { RootState, completePromotion, resetGame, store } from "../../state";
 import {
   applyNetworkMove,
   setGameMode,
@@ -60,7 +60,15 @@ export default function GameScreen() {
         "solo mode enabled:",
         settings.developer.soloMode
       );
-      dispatch(setGameMode(effectiveMode));
+      console.log("GameScreen: Current Redux gameMode before dispatch:", store.getState().game.gameMode);
+      
+      // ✅ Don't override P2P mode if it's already set
+      if (store.getState().game.gameMode === "p2p" && effectiveMode !== "p2p") {
+        console.log("GameScreen: Skipping gameMode change - already set to p2p");
+      } else {
+        dispatch(setGameMode(effectiveMode));
+        console.log("GameScreen: Current Redux gameMode after dispatch:", store.getState().game.gameMode);
+      }
 
       // Handle mode switching with proper disconnection
       const currentConnectedMode = onlineGameService.isConnected

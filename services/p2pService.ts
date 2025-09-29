@@ -42,6 +42,10 @@ class P2PService {
   private gameState: P2PGame | null = null;
   private players: Map<string, P2PPlayer> = new Map();
   private messageHandlers: Map<string, (message: any) => void> = new Map();
+  
+  // Real-time discovery listeners
+  private gameFoundUnsubscribe: (() => void) | null = null;
+  private gameLostUnsubscribe: (() => void) | null = null;
 
   // STUN servers for NAT traversal
   private stunServers: RTCIceServer[] = [
@@ -118,12 +122,19 @@ class P2PService {
     console.log("🚀 P2PService: createGame() method called with hostName:", hostName);
     
     // ✅ Call disconnect first to clean up any previous game session (without notifying UI)
+    console.log("P2PService: About to call disconnect(false), current gameId:", this.gameId);
     await this.disconnect(false);
+    console.log("P2PService: After disconnect(false), gameId:", this.gameId);
 
     console.log("P2PService: Creating a new serverless P2P game...");
 
     this.isHost = true;
     this.gameId = generateUUID();
+    console.log("P2PService: Generated gameId:", this.gameId);
+    
+    // Store gameId in a local variable to ensure it doesn't get lost
+    const currentGameId = this.gameId;
+    console.log("P2PService: Stored gameId in local variable:", currentGameId);
     const joinCode = this.generateJoinCode();
     
     const game: P2PGame = {
@@ -195,8 +206,20 @@ class P2PService {
       // Wait a moment for test service to be published
       await new Promise(resolve => setTimeout(resolve, 1000));
       
+      console.log("P2PService: After testAdvertise and timeout, gameId:", this.gameId);
+      console.log("P2PService: Local currentGameId:", currentGameId);
+      
+      // Ensure gameId is not null before advertising
+      console.log("P2PService: Checking gameId before advertising:", this.gameId);
+      if (!currentGameId) {
+        console.error("P2PService: currentGameId is null, cannot advertise game");
+        throw new Error("Game ID is null, cannot advertise game");
+      }
+
+      console.log("P2PService: Advertising game with gameId:", currentGameId);
+      
       await networkAdvertiserService.startAdvertising({
-        gameId: this.gameId,
+        gameId: currentGameId,
         gameName: `${hostName}'s Game`,
         hostName,
         hostId: this.peerId, // Add the host's unique ID
@@ -279,10 +302,30 @@ class P2PService {
       await networkDiscoveryService.startDiscovery();
       console.log("P2PService: Started network discovery");
       
-      // Wait longer for discovery to find games
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      // Set up real-time listener for game discovery
+      const unsubscribeGameFound = networkDiscoveryService.onGameFound((game) => {
+        console.log("P2PService: Real-time game found:", game.name);
+        // Update Redux with current discovered games
+        const currentGames = networkDiscoveryService.getDiscoveredGames();
+        store.dispatch(setDiscoveredGames(currentGames));
+      });
       
-      // Get discovered games
+      // Set up listener for when games are lost
+      const unsubscribeGameLost = networkDiscoveryService.onGameLost((gameId) => {
+        console.log("P2PService: Real-time game lost:", gameId);
+        // Update Redux with current discovered games
+        const currentGames = networkDiscoveryService.getDiscoveredGames();
+        store.dispatch(setDiscoveredGames(currentGames));
+      });
+      
+      // Store unsubscribe functions for cleanup
+      this.gameFoundUnsubscribe = unsubscribeGameFound;
+      this.gameLostUnsubscribe = unsubscribeGameLost;
+      
+      // Wait a bit for initial discovery
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Get initial discovered games
       const discoveredGames = networkDiscoveryService.getDiscoveredGames();
       
       console.log("P2PService: Found", discoveredGames.length, "games on local network");
@@ -298,6 +341,27 @@ class P2PService {
     } finally {
       store.dispatch(setIsDiscovering(false));
     }
+  }
+
+  // Stop discovering games and clean up listeners
+  public stopDiscovery(): void {
+    console.log("P2PService: Stopping game discovery");
+    
+    // Clean up real-time listeners
+    if (this.gameFoundUnsubscribe) {
+      this.gameFoundUnsubscribe();
+      this.gameFoundUnsubscribe = null;
+    }
+    
+    if (this.gameLostUnsubscribe) {
+      this.gameLostUnsubscribe();
+      this.gameLostUnsubscribe = null;
+    }
+    
+    // Stop network discovery
+    networkDiscoveryService.stopDiscovery();
+    
+    console.log("P2PService: Game discovery stopped");
   }
 
   // Join a discovered game directly (truly serverless)
@@ -710,11 +774,18 @@ class P2PService {
 
     dataChannel.onmessage = (event) => {
       try {
+        // ✅ CRITICAL FIX: Add validation for event data
+        if (!event || !event.data) {
+          console.error("P2PService: Received empty message from", peerId);
+          return;
+        }
+
         const message = JSON.parse(event.data);
-        console.log("P2PService: Received message from", peerId, ":", message.type);
+        console.log("P2PService: Received message from", peerId, ":", message?.type);
         this.handleMessage(peerId, message);
       } catch (error) {
         console.error("P2PService: Failed to parse message from", peerId, ":", error);
+        console.error("P2PService: Raw message data:", event?.data);
       }
     };
   }
@@ -780,8 +851,19 @@ class P2PService {
 
   // Handle incoming messages
   private handleMessage(fromPeerId: string, message: any): void {
-    console.log("P2PService: Received message from", fromPeerId, ":", message.type);
+    console.log("P2PService: Received message from", fromPeerId, ":", message?.type);
     console.log("P2PService: Full message:", message);
+
+    // ✅ CRITICAL FIX: Add error handling for malformed messages
+    if (!message || typeof message !== 'object') {
+      console.error("P2PService: Invalid message format:", message);
+      return;
+    }
+
+    if (!message.type) {
+      console.error("P2PService: Message missing type property:", message);
+      return;
+    }
 
     switch (message.type) {
       case "join-request":
@@ -1091,12 +1173,30 @@ class P2PService {
 
   // Handle player joined message (for non-host players)
   private handlePlayerJoined(message: any): void {
-    const { players, gameState } = message; // ✅ Destructure the gameState
+    console.log("P2PService: handlePlayerJoined called with message:", message);
+    
+    // ✅ CRITICAL FIX: Add proper error handling for missing properties
+    if (!message) {
+      console.error("P2PService: handlePlayerJoined received null/undefined message");
+      return;
+    }
+    
+    const { players, gameState } = message;
+    
+    // ✅ CRITICAL FIX: Check if players property exists
+    if (!players || !Array.isArray(players)) {
+      console.error("P2PService: handlePlayerJoined - players property missing or invalid:", players);
+      return;
+    }
     
     // Update local players map
     this.players.clear();
     players.forEach((player: any) => {
-      this.players.set(player.id, player);
+      if (player && player.id) {
+        this.players.set(player.id, player);
+      } else {
+        console.warn("P2PService: Invalid player data:", player);
+      }
     });
 
     // Update the client's internal game state
@@ -1675,7 +1775,10 @@ class P2PService {
       }
     }
 
-    // 2. Close all active WebRTC connections
+    // 2. Stop discovery and clean up listeners
+    this.stopDiscovery();
+
+    // 3. Close all active WebRTC connections
     console.log("P2PService: Closing", this.connections.size, "WebRTC connections...");
     this.connections.forEach((connection, peerId) => {
       try {
@@ -1686,11 +1789,18 @@ class P2PService {
       }
     });
 
-    // 3. Clear all internal state
+    // 4. Clear all internal state
     this.connections.clear();
     this.players.clear();
     this.gameState = null;
-    this.gameId = null;
+    // Only clear gameId if we're notifying UI (full disconnect)
+    console.log("P2PService: disconnect - notifyUI:", notifyUI, "current gameId:", this.gameId);
+    if (notifyUI) {
+      console.log("P2PService: Clearing gameId because notifyUI is true");
+      this.gameId = null;
+    } else {
+      console.log("P2PService: Keeping gameId because notifyUI is false");
+    }
     this.isHost = false;
 
     // 4. Update Redux state about disconnection only if requested

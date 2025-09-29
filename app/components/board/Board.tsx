@@ -171,11 +171,16 @@ export default function Board() {
             await onlineGameService.makeMove(moveData);
           } catch (error) {
             console.error("Failed to make online move:", error);
-            // FIX: Inform the user about the failed move
-            Alert.alert(
-              "Move Failed",
-              "Your move could not be sent to the server. Please check your connection and try again."
-            );
+            // Check if it's a "Not your turn" error
+            if (error instanceof Error && error.message === "Not your turn") {
+              Alert.alert("Not your turn", "Please wait for your turn to make a move.");
+            } else {
+              // FIX: Inform the user about the failed move
+              Alert.alert(
+                "Move Failed",
+                "Your move could not be sent to the server. Please check your connection and try again."
+              );
+            }
           }
         } else {
           console.log(
@@ -198,11 +203,16 @@ export default function Board() {
             await p2pGameService.makeMove(moveData);
           } catch (error) {
             console.error("Failed to make P2P move:", error);
-            // FIX: Inform the user about the failed move
-            Alert.alert(
-              "Move Failed",
-              "Your move could not be sent to the other player. Please check your connection and try again."
-            );
+            // Check if it's a "Not your turn" error
+            if (error instanceof Error && error.message === "Not your turn") {
+              Alert.alert("Not your turn", "Please wait for your turn to make a move.");
+            } else {
+              // FIX: Inform the user about the failed move
+              Alert.alert(
+                "Move Failed",
+                "Your move could not be sent to the other player. Please check your connection and try again."
+              );
+            }
           }
         } else {
           console.log(

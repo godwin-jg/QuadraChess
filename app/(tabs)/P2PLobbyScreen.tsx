@@ -15,13 +15,15 @@ import {
   resetGame, 
   setCurrentGame, 
   setDiscoveredGames, 
-  setIsDiscovering, 
   setIsLoading, 
   setIsConnected, 
   setConnectionError, 
   setIsEditingName, 
   setTempName,
-  syncP2PGameState 
+  syncP2PGameState,
+  setPlayers,
+  setIsHost,
+  setCanStartGame
 } from "../../state/gameSlice";
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
@@ -41,7 +43,6 @@ const P2PLobbyScreen: React.FC = () => {
     canStartGame,
     currentGame,
     discoveredGames,
-    isDiscovering,
     isLoading,
     isConnected,
     connectionError,
@@ -69,7 +70,11 @@ const P2PLobbyScreen: React.FC = () => {
     if (currentGame && currentGame.status === 'playing' && !isHost) {
       console.log("🎮 UI: Game status is 'playing', navigating to game screen...");
       console.log("🎮 UI: Current game:", currentGame);
-      router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
+      try {
+        router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
+      } catch (navError) {
+        console.error("🎮 UI: Navigation error:", navError);
+      }
     } else {
       console.log("🎮 UI: Not navigating - conditions not met:", {
         hasCurrentGame: !!currentGame,
@@ -81,7 +86,10 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Auto-discover games on mount
   useEffect(() => {
-    discoverGames();
+    // Start real-time discovery - P2P service handles updates automatically
+    p2pService.discoverGames().catch(error => {
+      console.error("Error starting discovery:", error);
+    });
   }, []);
 
   // Name editing functions
@@ -172,18 +180,6 @@ const P2PLobbyScreen: React.FC = () => {
     }
   };
 
-  // Discover games on the network
-  const discoverGames = async () => {
-    // ✅ P2P service now handles Redux updates directly
-    try {
-      const games = await p2pService.discoverGames();
-      console.log("Discovered games:", games);
-    } catch (error) {
-      console.error("Error discovering games:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to discover games";
-      Alert.alert("Error", errorMessage);
-    }
-  };
 
   // Start the game (host only)
   const startGame = async () => {
@@ -202,7 +198,11 @@ const P2PLobbyScreen: React.FC = () => {
       p2pService.sendGameStarted(); 
       
       // The host navigates itself
-      router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
+      try {
+        router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
+      } catch (navError) {
+        console.error("🎮 UI: Navigation error in startGame:", navError);
+      }
     } catch (error) {
       console.error("Error starting game:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to start game";
@@ -212,10 +212,70 @@ const P2PLobbyScreen: React.FC = () => {
     }
   };
 
-  // Leave the game
+  // Leave the game - manual state reset
   const leaveGame = () => {
-    p2pService.disconnect();
-    // ✅ P2P service now handles Redux updates directly
+    console.log("P2PLobbyScreen: Leaving game manually...");
+    
+    try {
+      // 1. Try to disconnect from P2P service (but don't rely on it for state)
+      try {
+        p2pService.disconnect(false); // Don't notify UI to avoid connection error
+        console.log("P2PLobbyScreen: P2P service disconnected");
+      } catch (p2pError) {
+        console.warn("P2PLobbyScreen: P2P disconnect failed, continuing with manual reset:", p2pError);
+      }
+      
+      // 2. Stop discovery if running
+      try {
+        p2pService.stopDiscovery();
+        console.log("P2PLobbyScreen: Discovery stopped");
+      } catch (discoveryError) {
+        console.warn("P2PLobbyScreen: Stop discovery failed:", discoveryError);
+      }
+      
+      // 3. Manually reset all Redux state
+      console.log("P2PLobbyScreen: Resetting Redux state manually...");
+      
+      // Clear connection error first to prevent "Connection lost" message
+      dispatch(setConnectionError(null));
+      
+      // Reset game state
+      dispatch(resetGame());
+      
+      // Clear P2P-specific state
+      dispatch(setCurrentGame(null));
+      dispatch(setPlayers([]));
+      dispatch(setIsHost(false));
+      dispatch(setCanStartGame(false));
+      dispatch(setIsConnected(false));
+      dispatch(setConnectionError(null));
+      dispatch(setIsLoading(false));
+      
+      // Clear editing state
+      dispatch(setIsEditingName(false));
+      dispatch(setTempName(""));
+       
+      // Clear P2P game state
+      dispatch(syncP2PGameState(null));
+      
+      console.log("P2PLobbyScreen: Manual state reset completed successfully");
+      
+    } catch (error) {
+      console.error("P2PLobbyScreen: Error during manual leave game:", error);
+      
+      // Even if there's an error, try to reset the critical state
+      try {
+        dispatch(setConnectionError(null)); // Clear connection error first
+        dispatch(resetGame());
+        dispatch(setCurrentGame(null));
+        dispatch(setPlayers([]));
+        dispatch(setIsHost(false));
+        dispatch(setIsConnected(false));
+        console.log("P2PLobbyScreen: Emergency state reset completed");
+      } catch (emergencyError) {
+        console.error("P2PLobbyScreen: Emergency state reset failed:", emergencyError);
+      }
+    }
   };
 
   // Render discovered game item
@@ -436,17 +496,13 @@ const P2PLobbyScreen: React.FC = () => {
 
         <TouchableOpacity
           className="w-full py-4 px-6 rounded-xl bg-white/20 border-2 border-white/30"
-          onPress={discoverGames}
-          disabled={isDiscovering}
-        >
-          <Text className="text-white text-xl font-bold text-center">
-            {isDiscovering ? "Discovering..." : "Refresh Games"}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-white/20 border-2 border-white/30"
-          onPress={() => router.back()}
+          onPress={() => {
+            try {
+              router.back();
+            } catch (navError) {
+              console.error("🎮 UI: Navigation error in back button:", navError);
+            }
+          }}
         >
           <Text className="text-white text-xl font-bold text-center">
             Back to Home
@@ -465,7 +521,14 @@ const P2PLobbyScreen: React.FC = () => {
           </Text>
         ) : (
           <FlatList
-            data={discoveredGames}
+            data={discoveredGames
+              .slice()
+              .sort((a, b) => {
+                // Sort by timestamp (newest first), with createdAt as fallback
+                const timestampA = a.timestamp || a.createdAt || 0;
+                const timestampB = b.timestamp || b.createdAt || 0;
+                return timestampB - timestampA;
+              })}
             renderItem={renderGameItem}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}

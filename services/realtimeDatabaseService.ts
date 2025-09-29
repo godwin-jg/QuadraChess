@@ -502,24 +502,26 @@ class RealtimeDatabaseService {
     const listener = gamesRef.on("value", (snapshot) => {
       const games: RealtimeGame[] = [];
       if (snapshot && snapshot.exists()) {
-        snapshot.forEach((childSnapshot) => {
-          const gameData = childSnapshot.val();
-          
-          // Only include games with valid players
-          const players = gameData.players || {};
-          const validPlayers = Object.values(players).filter((player: any) => 
-            player && player.id && player.name && player.color
-          );
-          
-          if (validPlayers.length > 0) {
-            games.push({
-              id: childSnapshot.key!,
-              ...gameData,
-            });
-          }
-          
-          return true;
-        });
+        // ✅ CRITICAL FIX: Replace problematic forEach with Object.entries for better reliability
+        const gamesData = snapshot.val();
+        if (gamesData && typeof gamesData === 'object') {
+          Object.entries(gamesData).forEach(([gameId, gameData]: [string, any]) => {
+            if (gameData && typeof gameData === 'object') {
+              // Only include games with valid players
+              const players = gameData.players || {};
+              const validPlayers = Object.values(players).filter((player: any) => 
+                player && player.id && player.name && player.color
+              );
+              
+              if (validPlayers.length > 0) {
+                games.push({
+                  id: gameId,
+                  ...gameData,
+                });
+              }
+            }
+          });
+        }
       }
       onUpdate(games);
     });

@@ -85,6 +85,17 @@ class NetworkAdvertiserService {
 
   // Start advertising a game on the network
   public async startAdvertising(gameInfo: GameAdvertisement): Promise<void> {
+    // Validate required fields
+    if (!gameInfo.gameId) {
+      console.error('NetworkAdvertiser: gameId is required but was null/undefined');
+      throw new Error('Game ID is required for advertising');
+    }
+    
+    if (!gameInfo.gameName) {
+      console.error('NetworkAdvertiser: gameName is required but was null/undefined');
+      throw new Error('Game name is required for advertising');
+    }
+
     if (this.isAdvertising) {
       console.log('NetworkAdvertiser: Already advertising a game, stopping previous one first');
       await this.stopAdvertising();
@@ -256,13 +267,13 @@ class NetworkAdvertiserService {
       console.log('NetworkAdvertiser: Domain: local.');
       
       const txtRecord = {
-        gameId: gameInfo.gameId,
-        hostName: gameInfo.hostName,
-        hostId: gameInfo.hostId,
+        gameId: gameInfo.gameId || 'unknown',
+        hostName: gameInfo.hostName || 'Unknown Host',
+        hostId: gameInfo.hostId || 'unknown',
         joinCode: gameInfo.joinCode || '',
         playerCount: gameInfo.playerCount.toString(),
         maxPlayers: gameInfo.maxPlayers.toString(),
-        status: gameInfo.status,
+        status: gameInfo.status || 'waiting',
         timestamp: gameInfo.timestamp.toString(),
         interfaceType: iface.type, // Add interface type for debugging
         interfaceName: iface.name,  // Add interface name for debugging

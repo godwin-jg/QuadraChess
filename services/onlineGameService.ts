@@ -153,9 +153,10 @@ class OnlineGameServiceImpl implements OnlineGameService {
         const state = store.getState();
         const currentGameState = state.game;
 
-        // Let server handle turn validation to avoid client-server sync issues
-        // Client-side turn validation can cause issues when game state is out of sync
-        // The server will properly validate turns and return appropriate errors
+        // ✅ CRITICAL: Add turn validation for better UX
+        if (currentGameState.currentPlayerTurn !== moveData.playerColor) {
+          throw new Error("Not your turn");
+        }
 
         // Basic move validation (for immediate feedback)
         const isValidMove = this.validateMove(currentGameState, moveData);

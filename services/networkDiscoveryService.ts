@@ -222,7 +222,7 @@ class NetworkDiscoveryService {
       // Filter out old games (older than 5 minutes)
       const now = Date.now();
       const gameAge = now - timestamp;
-      const maxAge = 10 * 60 * 1000; // 10 minutes in milliseconds (increased from 5 minutes)
+      const maxAge = 5 * 60 * 1000; // 10 minutes in milliseconds (increased from 5 minutes)
       
       if (gameAge > maxAge) {
         console.log('NetworkDiscovery: Ignoring very old game:', service.name, 'age:', Math.round(gameAge / 1000), 'seconds');
@@ -377,7 +377,7 @@ class NetworkDiscoveryService {
   // Clean up games older than 10 minutes
   private cleanupOldGames(): void {
     const now = Date.now();
-    const maxAge = 10 * 60 * 1000; // 10 minutes in milliseconds
+    const maxAge = 7 * 60 * 1000; // 10 minutes in milliseconds
     
     console.log('NetworkDiscovery: Cleaning up old games, current count:', this.discoveredGames.size);
     

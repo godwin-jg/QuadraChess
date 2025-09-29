@@ -863,22 +863,17 @@ const gameSlice = createSlice({
         return; // Don't apply the move if trying to capture a king
       }
 
+      // ✅ CRITICAL: Track piece captures for P2P mode
+      if (capturedPiece && state.gameMode === "p2p") {
+        console.log(`applyNetworkMove: P2P capture - ${playerColor} captured ${capturedPiece}`);
+        const capturedColor = capturedPiece[0] as keyof typeof state.capturedPieces;
+        state.capturedPieces[capturedColor].push(capturedPiece);
+      }
+
       // Move the piece
       state.boardState[toRow][toCol] = pieceCode;
       state.boardState[fromRow][fromCol] = null;
 
-      // ✅ CRITICAL: Handle turn management for P2P mode
-      if (state.gameMode === "p2p") {
-        console.log("applyNetworkMove: P2P mode detected, current turn:", state.currentPlayerTurn, "move by:", playerColor);
-        // Advance to next player in P2P mode
-        const turnOrder = ['r', 'b', 'y', 'g'];
-        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn);
-        const nextIndex = (currentIndex + 1) % turnOrder.length;
-        state.currentPlayerTurn = turnOrder[nextIndex];
-        console.log("applyNetworkMove: P2P turn advanced from", turnOrder[currentIndex], "to", turnOrder[nextIndex]);
-      } else {
-        console.log("applyNetworkMove: Not P2P mode, gameMode:", state.gameMode);
-      }
       // Note: For online mode, turn management is handled by the server
 
       // Clear selection
@@ -891,6 +886,119 @@ const gameSlice = createSlice({
         state.eliminatedPlayers,
         state.hasMoved
       );
+
+      // ✅ CRITICAL: Add complete game logic for P2P mode (same as single player)
+      if (state.gameMode === "p2p") {
+        console.log("applyNetworkMove: P2P mode - checking for checkmate/stalemate");
+        
+        // Check for checkmate/stalemate after the move
+        const turnOrder = ['r', 'b', 'y', 'g'];
+        const otherPlayers = turnOrder.filter(
+          (player) =>
+            player !== playerColor &&
+            !state.eliminatedPlayers.includes(player)
+        );
+
+        // Check each opponent for checkmate/stalemate
+        for (const opponent of otherPlayers) {
+          const opponentHasMoves = hasAnyLegalMoves(
+            opponent,
+            state.boardState,
+            state.eliminatedPlayers,
+            state.hasMoved,
+            state.enPassantTargets
+          );
+
+          if (!opponentHasMoves) {
+            // This opponent has no legal moves
+            const isInCheck = isKingInCheck(
+              opponent,
+              state.boardState,
+              state.eliminatedPlayers,
+              state.hasMoved
+            );
+
+            if (isInCheck) {
+              // Checkmate - eliminate the player
+              console.log(`applyNetworkMove: P2P checkmate - eliminating ${opponent}`);
+              state.gameStatus = "checkmate";
+              state.eliminatedPlayers.push(opponent);
+              state.justEliminated = opponent;
+              state.scores[
+                playerColor as keyof typeof state.scores
+              ] += 10;
+
+              // Set game over state for checkmate
+              state.gameOverState = {
+                isGameOver: true,
+                status: "checkmate",
+                eliminatedPlayer: opponent,
+              };
+            } else {
+              // Stalemate - eliminate the player
+              console.log(`applyNetworkMove: P2P stalemate - eliminating ${opponent}`);
+              state.gameStatus = "stalemate";
+              state.eliminatedPlayers.push(opponent);
+              state.justEliminated = opponent;
+
+              // Set game over state for stalemate
+              state.gameOverState = {
+                isGameOver: true,
+                status: "stalemate",
+                eliminatedPlayer: opponent,
+              };
+            }
+            break; // Exit the loop after eliminating one player
+          }
+        }
+
+        // Check if the entire game is over (only one player left)
+        if (state.eliminatedPlayers.length === 3) {
+          // Find the one player who is NOT in the eliminatedPlayers array
+          const winner = turnOrder.find(
+            (color) => !state.eliminatedPlayers.includes(color)
+          );
+
+          if (winner) {
+            console.log(`applyNetworkMove: P2P game over - winner: ${winner}`);
+            state.winner = winner;
+            state.gameStatus = "finished";
+            state.gameOverState = {
+              isGameOver: true,
+              status: "finished",
+              eliminatedPlayer: null,
+            };
+          }
+        }
+      }
+
+      // ✅ CRITICAL: Handle turn advancement for P2P mode (after elimination check)
+      if (state.gameMode === "p2p") {
+        console.log("applyNetworkMove: P2P mode - advancing turn after elimination check");
+        
+        // Only advance turn if game is not over
+        if (state.gameStatus !== "finished") {
+          const turnOrder = ['r', 'b', 'y', 'g'];
+          // ✅ CRITICAL FIX: Use playerColor (player who made the move) to determine next turn
+          // This is correct because we want to advance from the player who just moved
+          const currentIndex = turnOrder.indexOf(playerColor);
+          const nextIndex = (currentIndex + 1) % turnOrder.length;
+          const nextPlayerInSequence = turnOrder[nextIndex];
+
+          // Find the next active player (skip eliminated players)
+          let nextActivePlayer = nextPlayerInSequence;
+          while (state.eliminatedPlayers.includes(nextActivePlayer)) {
+            const activeIndex = turnOrder.indexOf(nextActivePlayer);
+            const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
+            nextActivePlayer = turnOrder[nextActiveIndex];
+          }
+
+          state.currentPlayerTurn = nextActivePlayer;
+          console.log(`applyNetworkMove: P2P turn advanced from ${playerColor} to ${nextActivePlayer}`);
+        } else {
+          console.log("applyNetworkMove: P2P game over, no turn advancement needed");
+        }
+      }
 
       // Save to history
       if (state.historyIndex < state.history.length - 1) {

@@ -1,0 +1,31 @@
+{
+  "rules": {
+    "games": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["status"],
+      "$gameId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "move-requests": {
+      "$gameId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "moves": {
+      "$gameId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "move-batches": {
+      "$gameId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
+  }
+}

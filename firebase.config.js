@@ -6,6 +6,7 @@ export const firebaseConfig = {
   storageBucket: "dchess-97670.firebasestorage.app",
   messagingSenderId: "877818154021",
   appId: "1:877818154021:android:5e151a924610132beac3cc",
+  databaseURL: "https://dchess-97670-default-rtdb.firebaseio.com",
 };
 
 

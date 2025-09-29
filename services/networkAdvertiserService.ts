@@ -30,7 +30,8 @@ class NetworkAdvertiserService {
       console.log('NetworkAdvertiser: Initializing Zeroconf...');
       this.zeroconf = new Zeroconf();
       this.networkInterfaceService = NetworkInterfaceService.getInstance();
-      this.setupNetworkMonitoring();
+      // Network monitoring will be set up when needed
+      // this.setupNetworkMonitoring();
       console.log('NetworkAdvertiser: Zeroconf initialized successfully');
     } catch (error) {
       console.error('NetworkAdvertiser: Failed to initialize Zeroconf:', error);
@@ -74,12 +75,23 @@ class NetworkAdvertiserService {
     return NetworkAdvertiserService.instance;
   }
 
+  // Initialize network monitoring when needed (lazy initialization)
+  public async initializeIfNeeded(): Promise<void> {
+    if (!this.networkChangeListener) {
+      await this.networkInterfaceService.initializeIfNeeded();
+      this.setupNetworkMonitoring();
+    }
+  }
+
   // Start advertising a game on the network
   public async startAdvertising(gameInfo: GameAdvertisement): Promise<void> {
     if (this.isAdvertising) {
       console.log('NetworkAdvertiser: Already advertising a game, stopping previous one first');
       await this.stopAdvertising();
     }
+
+    // Initialize network monitoring if not already done
+    await this.initializeIfNeeded();
 
     try {
       this.currentAdvertisement = gameInfo;

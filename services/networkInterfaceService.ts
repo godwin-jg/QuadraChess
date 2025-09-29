@@ -25,7 +25,8 @@ class NetworkInterfaceService {
   private listeners: ((info: NetworkInfo) => void)[] = [];
 
   private constructor() {
-    this.initializeNetworkMonitoring();
+    // Network monitoring will be initialized when needed
+    // this.initializeNetworkMonitoring();
   }
 
   public static getInstance(): NetworkInterfaceService {
@@ -33,6 +34,13 @@ class NetworkInterfaceService {
       NetworkInterfaceService.instance = new NetworkInterfaceService();
     }
     return NetworkInterfaceService.instance;
+  }
+
+  // Initialize network monitoring when needed (lazy initialization)
+  public async initializeIfNeeded(): Promise<void> {
+    if (!this.networkInfo) {
+      await this.initializeNetworkMonitoring();
+    }
   }
 
   private async initializeNetworkMonitoring(): Promise<void> {

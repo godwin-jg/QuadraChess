@@ -41,9 +41,10 @@ class NetworkDiscoveryService {
 
   private constructor() {
     this.zeroconf = new Zeroconf();
-      this.networkInterfaceService = NetworkInterfaceService.getInstance();
-    this.setupEventListeners();
-    this.setupNetworkMonitoring();
+    this.networkInterfaceService = NetworkInterfaceService.getInstance();
+    // Event listeners and network monitoring will be set up when needed
+    // this.setupEventListeners();
+    // this.setupNetworkMonitoring();
   }
 
   public static getInstance(): NetworkDiscoveryService {
@@ -51,6 +52,15 @@ class NetworkDiscoveryService {
       NetworkDiscoveryService.instance = new NetworkDiscoveryService();
     }
     return NetworkDiscoveryService.instance;
+  }
+
+  // Initialize network monitoring when needed (lazy initialization)
+  public async initializeIfNeeded(): Promise<void> {
+    if (!this.serviceFoundListener) {
+      await this.networkInterfaceService.initializeIfNeeded();
+      this.setupEventListeners();
+      this.setupNetworkMonitoring();
+    }
   }
 
   private setupEventListeners(): void {
@@ -263,6 +273,9 @@ class NetworkDiscoveryService {
       console.log('NetworkDiscovery: Already searching for games');
       return;
     }
+
+    // Initialize network monitoring if not already done
+    await this.initializeIfNeeded();
 
     try {
       console.log('NetworkDiscovery: Starting multi-interface discovery for _quadchess._tcp. services');

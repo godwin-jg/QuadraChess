@@ -40,6 +40,7 @@ const OnlineLobbyScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Initialize Firebase auth
   useEffect(() => {
@@ -49,6 +50,14 @@ const OnlineLobbyScreen: React.FC = () => {
         await realtimeDatabaseService.signInAnonymously();
         setIsConnected(true);
         console.log("Realtime Database initialization successful");
+        
+        // Test the connection
+        const connectionTest = await realtimeDatabaseService.testConnection();
+        if (connectionTest) {
+          console.log("✅ Firebase connection test passed");
+        } else {
+          console.warn("⚠️ Firebase connection test failed");
+        }
       } catch (error) {
         console.error("Failed to initialize Firebase auth:", error);
         Alert.alert("Connection Error", "Failed to connect to online services");
@@ -61,7 +70,7 @@ const OnlineLobbyScreen: React.FC = () => {
   // Subscribe to available games
   useEffect(() => {
     if (!isConnected) return;
-
+    
     const unsubscribe = realtimeDatabaseService.subscribeToAvailableGames(
       (games) => {
         setAvailableGames(games);
@@ -69,7 +78,7 @@ const OnlineLobbyScreen: React.FC = () => {
     );
 
     return unsubscribe;
-  }, [isConnected]);
+  }, [isConnected, refreshKey]);
 
   // Connect to onlineGameService when currentGameId changes
   useEffect(() => {
@@ -148,19 +157,15 @@ const OnlineLobbyScreen: React.FC = () => {
     try {
       // Reset local game state before creating new game
       dispatch(resetGame());
-      console.log("OnlineLobbyScreen: Reset game state before creating new game");
       
-      // SECURE: Use Cloud Function to create game with server-authoritative state
-      console.log("Creating game via Cloud Function");
-
       const gameId = await realtimeDatabaseService.createGame(
         settings.profile.name.trim()
       );
       setCurrentGameId(gameId);
-      console.log("Game created successfully via Cloud Function:", gameId);
     } catch (error) {
       console.error("Error creating game:", error);
-      Alert.alert("Error", "Failed to create game");
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      Alert.alert("Error", `Failed to create game: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -176,7 +181,6 @@ const OnlineLobbyScreen: React.FC = () => {
     try {
       // Reset local game state before joining new game
       dispatch(resetGame());
-      console.log("OnlineLobbyScreen: Reset game state before joining new game");
       
       await realtimeDatabaseService.joinGame(gameId, settings.profile.name);
       setCurrentGameId(gameId);
@@ -213,8 +217,47 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
+  const refreshGames = async () => {
+    // Refresh the subscription (real-time query will automatically update)
+    setRefreshKey(prev => prev + 1);
+  };
+
+  const cleanupCorruptedGames = async () => {
+    try {
+      const deletedCount = await realtimeDatabaseService.cleanupCorruptedGames();
+      
+      if (deletedCount > 0) {
+        Alert.alert("Cleanup Complete", `Deleted ${deletedCount} corrupted games`);
+        // Refresh the games list after cleanup
+        setRefreshKey(prev => prev + 1);
+      } else {
+        Alert.alert("Cleanup Complete", "No corrupted games found");
+      }
+    } catch (error) {
+      console.error("Error cleaning up games:", error);
+      Alert.alert("Error", "Failed to clean up corrupted games");
+    }
+  };
+
+  const forceReauth = async () => {
+    try {
+      await realtimeDatabaseService.signInAnonymously();
+      Alert.alert("Re-authentication Complete", "Successfully re-authenticated with Firebase");
+      // Refresh everything after re-auth
+      setRefreshKey(prev => prev + 1);
+    } catch (error) {
+      console.error("Error re-authenticating:", error);
+      Alert.alert("Error", "Failed to re-authenticate");
+    }
+  };
+
+
   const renderGameItem = ({ item }: { item: RealtimeGame }) => {
-    const playerCount = Object.keys(item.players).length;
+    // Only count valid players (with proper data)
+    const validPlayers = Object.values(item.players || {}).filter(player => 
+      player && player.id && player.name && player.color
+    );
+    const playerCount = validPlayers.length;
 
     return (
       <TouchableOpacity
@@ -395,9 +438,31 @@ const OnlineLobbyScreen: React.FC = () => {
       </View>
 
       <View className="flex-1">
-        <Text className="text-white text-xl font-bold mb-4">
-          Available Games
-        </Text>
+        <View className="flex-row justify-between items-center mb-4">
+          <Text className="text-white text-xl font-bold">
+            Available Games
+          </Text>
+          <View className="flex-row gap-2">
+            <TouchableOpacity
+              className="bg-blue-600 px-3 py-2 rounded-lg"
+              onPress={refreshGames}
+            >
+              <Text className="text-white text-sm font-bold">Refresh</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="bg-green-600 px-3 py-2 rounded-lg"
+              onPress={forceReauth}
+            >
+              <Text className="text-white text-sm font-bold">Re-auth</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className="bg-red-600 px-3 py-2 rounded-lg"
+              onPress={cleanupCorruptedGames}
+            >
+              <Text className="text-white text-sm font-bold">Cleanup</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {availableGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8">

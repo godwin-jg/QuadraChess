@@ -48,7 +48,24 @@ class P2PService {
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
+    { urls: "stun:stun.ekiga.net" },
+    { urls: "stun:stun.ideasip.com" },
+    { urls: "stun:stun.schlund.de" },
+    { urls: "stun:stun.stunprotocol.org:3478" },
+    { urls: "stun:stun.voiparound.com" },
+    { urls: "stun:stun.voipbuster.com" },
+    { urls: "stun:stun.voipstunt.com" },
+    { urls: "stun:stun.counterpath.com" },
+    { urls: "stun:stun.1und1.de" },
+    { urls: "stun:stun.gmx.net" },
+    { urls: "stun:stun.internetcalls.com" },
+    { urls: "stun:stun.sipgate.net" },
+    { urls: "stun:stun.voipgate.com" },
+    { urls: "stun:stun.voipraider.com" },
+    { urls: "stun:stun.voipwise.com" },
   ];
 
   private constructor() {
@@ -128,6 +145,7 @@ class P2PService {
       color: "r", // ✅ Host always gets red (first color)
       isHost: true,
       isConnected: true,
+      joinedAt: Date.now(),
     });
 
     console.log('P2PService: Game state initialized:', this.gameState);
@@ -158,8 +176,17 @@ class P2PService {
 
       // Verify server is actually running
       const serverPort = serverlessSignalingService.getPort();
-      const serverIP = networkAdvertiserService.getLocalIPAddress();
+      const serverIP = await networkAdvertiserService.getLocalIPAddress();
       console.log(`P2PService: Server should be running on http://${serverIP}:${serverPort}`);
+      
+      // ✅ Check if we're in a hotspot scenario and provide guidance
+      const hotspotInfo = await networkAdvertiserService.isHotspotScenario();
+      
+      if (hotspotInfo.isHotspot) {
+        console.log(`🔥 HOTSPOT MODE: WiFi(${hotspotInfo.wifiIP}) + Hotspot(${hotspotInfo.hotspotIP}) -> Advertising: ${serverIP}`);
+      } else {
+        console.log(`📡 NORMAL MODE: Advertising on ${serverIP}`);
+      }
 
       // Advertise on local network using zeroconf
       console.log("P2PService: Testing zeroconf functionality...");
@@ -215,6 +242,19 @@ class P2PService {
       
       if (targetGame) {
         console.log("P2PService: Found game via network discovery:", targetGame);
+        
+        // ✅ Validate that we're on the same network as the host
+        const networkValidation = await this.validateNetworkConnectivity(targetGame.hostIP);
+        if (!networkValidation.isReachable) {
+          // Check if this might be a hotspot scenario
+          const hotspotInfo = await networkAdvertiserService.isHotspotScenario();
+          if (hotspotInfo.isHotspot) {
+            throw new Error(`Game found but host at ${targetGame.hostIP} is not reachable. This might be a hotspot scenario - ensure the host device is sharing its hotspot and you're connected to it.`);
+          } else {
+            throw new Error(`Game found but host at ${targetGame.hostIP} is not reachable. Please ensure both devices are on the same network (WiFi or hotspot).`);
+          }
+        }
+        
         this.isHost = false;
         this.gameId = targetGame.id;
         await this.connectToPeerDirect(targetGame.hostIP, targetGame.hostId, playerName);
@@ -291,8 +331,14 @@ class P2PService {
       console.log("P2PService: Connected directly to host via WebRTC");
       
       // Wait for game state to be received from host
-      await this.waitForGameState();
-      console.log("P2PService: Received game state from host");
+      try {
+        await this.waitForGameState();
+        console.log("P2PService: Received game state from host");
+      } catch (error) {
+        console.log("P2PService: WebRTC connection failed, trying HTTP relay fallback...");
+        // Fallback to HTTP-based game state exchange
+        await this.fallbackToHttpRelay(targetGame.hostIP, playerName);
+      }
     } catch (error) {
       console.error("P2PService: Failed to connect directly to host:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to join game";
@@ -324,7 +370,10 @@ class P2PService {
     
     const connection = new RTCPeerConnection({
       iceServers: this.stunServers,
-      iceCandidatePoolSize: 10,
+      iceCandidatePoolSize: 20,
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
     });
 
     // Use the permanent hostId as the key, not the temporary IP
@@ -333,6 +382,9 @@ class P2PService {
     // ✅ Add a state change listener
     connection.onconnectionstatechange = () => {
       console.log(`🔗 P2PService: Connection state changed to: ${connection.connectionState} for host ${hostId}`);
+      console.log(`🔗 P2PService: ICE connection state: ${connection.iceConnectionState}`);
+      console.log(`🔗 P2PService: ICE gathering state: ${connection.iceGatheringState}`);
+      console.log(`🔗 P2PService: Signaling state: ${connection.signalingState}`);
       // This logic is for the client's view of the host's connection
       const hostPlayer = this.players.get(hostId);
       if (hostPlayer) {
@@ -352,12 +404,14 @@ class P2PService {
     const localCandidates: RTCIceCandidate[] = [];
 
     // 1. Create the data channel BEFORE creating the offer (initiator side)
+    console.log("🔗 P2PService: Creating data channel for client connection");
     const dataChannel = connection.createDataChannel("game-data", { 
-      ordered: true,
-      reliable: true 
+      ordered: true
     });
+    console.log("🔗 P2PService: Data channel created, state:", dataChannel.readyState);
 
     // Set up data channel listeners
+    console.log("🔗 P2PService: Setting up data channel listeners for client connection");
     this.setupDataChannelListeners(dataChannel, hostId, playerName);
     
     // ✅ CRITICAL: Set gameMode to p2p for the client when connecting
@@ -414,10 +468,15 @@ class P2PService {
     // First, test if the host server is reachable
     try {
       console.log(`🔍 P2PService: Testing host server connectivity to ${hostIP}:3001`);
+      const healthController = new AbortController();
+      const healthTimeoutId = setTimeout(() => healthController.abort(), 5000);
+      
       const healthResponse = await fetch(`http://${hostIP}:3001/health`, {
         method: 'GET',
-        timeout: 5000,
+        signal: healthController.signal,
       });
+      
+      clearTimeout(healthTimeoutId);
       if (healthResponse.ok) {
         const healthData = await healthResponse.json();
         console.log(`✅ P2PService: Host server is reachable:`, healthData);
@@ -426,7 +485,7 @@ class P2PService {
       }
     } catch (error) {
       console.error(`❌ P2PService: Host server is not reachable:`, error);
-      throw new Error(`Host server at ${hostIP}:3001 is not reachable`);
+      throw new Error(`Host server at ${hostIP}:3001 is not reachable. Please ensure both devices are on the same network (WiFi or hotspot).`);
     }
     
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -444,14 +503,19 @@ class P2PService {
         console.log("P2PService: Offer payload:", offerPayload);
         console.log("P2PService: Sending to URL:", `http://${hostIP}:3001/api/webrtc/offer`);
         
+        const offerController = new AbortController();
+        const offerTimeoutId = setTimeout(() => offerController.abort(), 10000);
+        
         const response = await fetch(`http://${hostIP}:3001/api/webrtc/offer`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(offerPayload),
-          timeout: 10000, // 10 second timeout
+          signal: offerController.signal,
         });
+        
+        clearTimeout(offerTimeoutId);
 
         console.log("P2PService: HTTP response status:", response.status);
         console.log("P2PService: HTTP response ok:", response.ok);
@@ -593,8 +657,15 @@ class P2PService {
 
   // Set up data channel listeners (used by both peers) - public for signaling service
   public setupDataChannelListeners(dataChannel: RTCDataChannel, peerId: string, playerName: string): void {
+    console.log("🔗 P2PService: Setting up data channel listeners for", playerName, "dataChannel state:", dataChannel.readyState);
+    
+    // Add state change listener
+    dataChannel.onstatechange = () => {
+      console.log(`🔗 P2PService: Data channel state changed to: ${dataChannel.readyState} for ${playerName}`);
+    };
+    
     dataChannel.onopen = () => {
-      console.log("✅ P2PService: Data channel is open! Let the game begin.");
+      console.log("✅ P2PService: Data channel is open! Let the game begin for", playerName);
       
       // Store the data channel for this peer
       const connection = this.connections.get(peerId);
@@ -604,15 +675,17 @@ class P2PService {
 
       // Send join request if we're joining (not hosting)
       if (!this.isHost) {
-        console.log("P2PService: Sending join request to", peerId, "with playerId", this.peerId);
+        console.log("📤 P2PService: Sending join request to", peerId, "with playerId", this.peerId, "playerName", playerName);
         // Add a small delay to ensure the connection is fully established
         setTimeout(() => {
-          this.sendMessage(peerId, {
+          const joinMessage = {
             type: "join-request",
             playerId: this.peerId,
             playerName,
             gameId: this.gameId,
-          });
+          };
+          console.log("📤 P2PService: Actually sending join request:", joinMessage);
+          this.sendMessage(peerId, joinMessage);
         }, 1000);
       }
 
@@ -672,7 +745,10 @@ class P2PService {
   private async connectToPeer(peerId: string, playerName: string): Promise<void> {
     const connection = new RTCPeerConnection({
       iceServers: this.stunServers,
-      iceCandidatePoolSize: 10,
+      iceCandidatePoolSize: 20,
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
     });
 
     this.connections.set(peerId, connection);
@@ -859,20 +935,35 @@ class P2PService {
 
     console.log("📢 HOST: Broadcasting lobby state sync to all clients.");
     console.log("📢 HOST: Players:", lobbyState.players.length);
+    console.log("📢 HOST: Lobby state:", lobbyState);
     
     // ✅ Update Redux state for host as well
+    console.log("📢 HOST: Updating Redux state with players:", lobbyState.players.length);
+    console.log("📢 HOST: canStartGame will be:", lobbyState.players.length >= 2 && lobbyState.status === 'waiting');
     store.dispatch(syncP2PGameState({
       currentGame: this.gameState,
       players: lobbyState.players,
       isHost: true,
       canStartGame: lobbyState.players.length >= 2 && lobbyState.status === 'waiting'
     }));
+    console.log("📢 HOST: Redux state updated successfully");
+    
+    // Test: Check if Redux state was actually updated
+    const currentState = store.getState().game;
+    console.log("📢 HOST: Current Redux state after update:", {
+      players: currentState.players.length,
+      canStartGame: currentState.canStartGame,
+      isHost: currentState.isHost
+    });
     
     this.broadcastMessage(message);
   }
 
   // ✅ Helper method for serverlessSignalingService to add a player
   public addPlayer(playerId: string, playerName: string): void {
+    console.log('📢 P2PService: addPlayer called for:', playerName, playerId);
+    console.log('📢 P2PService: isHost:', this.isHost, 'gameState exists:', !!this.gameState);
+    
     if (!this.isHost || !this.gameState) {
       console.error('P2PService: Cannot add player - not host or no game state');
       return;
@@ -902,6 +993,11 @@ class P2PService {
     // Don't call updatePlayerCount() as it tries to mutate the immutable gameState
 
     console.log(`P2PService: Added player ${playerName} with color ${availableColor}`);
+    
+    // Update Redux state and broadcast to clients
+    console.log('📢 P2PService: About to call syncLobbyStateToClients()');
+    this.syncLobbyStateToClients();
+    console.log('📢 P2PService: syncLobbyStateToClients() completed');
   }
 
   // ✅ Helper method for serverlessSignalingService to create connection
@@ -934,8 +1030,8 @@ class P2PService {
 
   // Handle join request (host only)
   private async handleJoinRequest(fromPeerId: string, message: any): Promise<void> {
-    console.log("P2PService: handleJoinRequest called with fromPeerId:", fromPeerId, "message:", message);
-    console.log("P2PService: isHost:", this.isHost, "gameState:", !!this.gameState);
+    console.log("📥 P2PService: handleJoinRequest called with fromPeerId:", fromPeerId, "message:", message);
+    console.log("📥 P2PService: isHost:", this.isHost, "gameState:", !!this.gameState);
     
     if (!this.isHost || !this.gameState) {
       console.log("P2PService: Not host or no game state, ignoring join request");
@@ -956,6 +1052,7 @@ class P2PService {
       color: availableColor, // ✅ Assign color
       isHost: false,
       isConnected: true,
+      joinedAt: Date.now(),
     });
 
     // ✅ Get the connection from the ServerlessSignalingService and set up connection state tracking
@@ -985,7 +1082,9 @@ class P2PService {
     this.updatePlayerCount();
 
     // ✅ Single source of truth: Only sync complete game state to everyone
+    console.log('📢 P2PService: About to call syncLobbyStateToClients()');
     this.syncLobbyStateToClients();
+    console.log('📢 P2PService: syncLobbyStateToClients() completed');
     
     console.log(`P2PService: Player ${playerName} joined. Syncing state.`);
   }
@@ -1179,6 +1278,54 @@ class P2PService {
   // Handle game state updates
   private handleGameStateUpdate(gameState: any): void {
     this.gameState = gameState;
+    
+    // ✅ CRITICAL: Update Redux state for client-side game state synchronization
+    if (!this.isHost) {
+      console.log("📥 P2PService: Client received game state, updating Redux:", gameState);
+      const { store } = require("../state/store");
+      const { syncP2PGameState, setPlayers } = require("../state/gameSlice");
+      
+      // Update Redux state with the received game state
+      // Use players from gameState if available, otherwise create from playerCount
+      let players = gameState.players || [];
+      if (players.length === 0 && gameState.playerCount > 0) {
+        // Create players array from game state info
+        players = [];
+        if (gameState.playerCount >= 1) {
+          players.push({
+            id: gameState.hostId,
+            name: gameState.hostName,
+            color: 'r',
+            isHost: true,
+            isConnected: true,
+            joinedAt: gameState.createdAt
+          });
+        }
+        if (gameState.playerCount >= 2) {
+          // Add this client as second player
+          players.push({
+            id: this.peerId,
+            name: 'Player', // We don't have the client's name in this context
+            color: 'b',
+            isHost: false,
+            isConnected: true,
+            joinedAt: Date.now()
+          });
+        }
+      }
+      
+      store.dispatch(setPlayers(players));
+      store.dispatch(syncP2PGameState({
+        currentGame: gameState,
+        players: players,
+        playerCount: gameState.playerCount,
+        canStartGame: gameState.playerCount >= 2,
+        isConnected: true,
+        connectionError: null
+      }));
+      console.log("📥 P2PService: Redux state updated for client with", players.length, "players");
+    }
+    
     this.notifyHandlers("game-state-update", gameState);
   }
 
@@ -1276,6 +1423,196 @@ class P2PService {
     return this.gameState?.joinCode;
   }
 
+  // Validate network connectivity to host
+  private async validateNetworkConnectivity(hostIP: string): Promise<{ isReachable: boolean; error?: string }> {
+    try {
+      // Test basic HTTP connectivity
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(`http://${hostIP}:3001/health`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        console.log(`✅ CONNECTIVITY: ${hostIP}:3001 reachable`);
+        return { isReachable: true };
+      } else {
+        console.warn(`⚠️ CONNECTIVITY: ${hostIP}:3001 status ${response.status}`);
+        return { isReachable: false, error: `Host responded with status ${response.status}` };
+      }
+    } catch (error) {
+      console.error(`❌ CONNECTIVITY: ${hostIP}:3001 unreachable`, error);
+      return { isReachable: false, error: `Host is not reachable: ${error}` };
+    }
+  }
+
+  // Fallback to HTTP relay when WebRTC fails
+  private async fallbackToHttpRelay(hostIP: string, playerName: string): Promise<void> {
+    console.log("🔄 P2PService: Starting HTTP relay fallback for", playerName);
+    
+    try {
+      // Poll the host's HTTP server for game state
+      const maxAttempts = 20; // 20 attempts over 10 seconds
+      const pollInterval = 500; // 500ms between attempts
+      
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const response = await fetch(`http://${hostIP}:3001/api/game-state`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (response.ok) {
+            const gameState = await response.json();
+            console.log("🔄 P2PService: Received game state via HTTP relay:", gameState);
+            
+            // Update Redux state with the received game state
+            const { store } = require("../state/store");
+            const { syncP2PGameState, setPlayers } = require("../state/gameSlice");
+            
+            // Create players array from the game state
+            // Since we don't have detailed player info from HTTP, create basic player objects
+            const players = [];
+            if (gameState.playerCount >= 1) {
+              // Add host player
+              players.push({
+                id: gameState.hostId,
+                name: gameState.hostName,
+                color: 'r',
+                isHost: true,
+                isConnected: true,
+                joinedAt: gameState.createdAt
+              });
+            }
+            if (gameState.playerCount >= 2) {
+              // Add client player (this device)
+              players.push({
+                id: this.peerId,
+                name: playerName,
+                color: 'b',
+                isHost: false,
+                isConnected: true,
+                joinedAt: Date.now()
+              });
+            }
+            
+            store.dispatch(setPlayers(players));
+            store.dispatch(syncP2PGameState({
+              currentGame: gameState,
+              players: players,
+              playerCount: gameState.playerCount,
+              canStartGame: gameState.playerCount >= 2
+            }));
+            
+            console.log("🔄 P2PService: HTTP relay fallback successful!");
+            
+            // Start ongoing polling for game state changes (game start, etc.)
+            this.startOngoingPolling(hostIP, playerName);
+            return;
+          }
+        } catch (fetchError) {
+          console.log(`🔄 P2PService: HTTP relay attempt ${attempt}/${maxAttempts} failed:`, fetchError);
+        }
+        
+        // Wait before next attempt
+        if (attempt < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+      }
+      
+      throw new Error("HTTP relay fallback failed - could not get game state from host");
+    } catch (error) {
+      console.error("🔄 P2PService: HTTP relay fallback failed:", error);
+      throw error;
+    }
+  }
+
+  // Start ongoing polling for game state changes (for clients using HTTP relay)
+  private startOngoingPolling(hostIP: string, playerName: string): void {
+    console.log("🔄 P2PService: Starting ongoing polling for game state changes");
+    
+    const pollInterval = 2000; // Poll every 2 seconds
+    let lastGameStatus = 'waiting';
+    
+    const poll = async () => {
+      try {
+        const response = await fetch(`http://${hostIP}:3001/api/game-state`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          const gameState = await response.json();
+          
+          // Check if game status changed
+          if (gameState.status !== lastGameStatus) {
+            console.log(`🔄 P2PService: Game status changed from '${lastGameStatus}' to '${gameState.status}'`);
+            lastGameStatus = gameState.status;
+            
+            // Update Redux state with new game state
+            const { store } = require("../state/store");
+            const { syncP2PGameState, setPlayers } = require("../state/gameSlice");
+            
+            // Create players array from the game state
+            const players = [];
+            if (gameState.playerCount >= 1) {
+              players.push({
+                id: gameState.hostId,
+                name: gameState.hostName,
+                color: 'r',
+                isHost: true,
+                isConnected: true,
+                joinedAt: gameState.createdAt
+              });
+            }
+            if (gameState.playerCount >= 2) {
+              players.push({
+                id: this.peerId,
+                name: playerName,
+                color: 'b',
+                isHost: false,
+                isConnected: true,
+                joinedAt: Date.now()
+              });
+            }
+            
+            store.dispatch(setPlayers(players));
+            store.dispatch(syncP2PGameState({
+              currentGame: gameState,
+              players: players,
+              playerCount: gameState.playerCount,
+              canStartGame: gameState.playerCount >= 2
+            }));
+            
+            console.log(`🔄 P2PService: Updated game state - status: ${gameState.status}`);
+            
+            // Stop polling if game started or ended
+            if (gameState.status === 'playing' || gameState.status === 'finished' || gameState.status === 'ended') {
+              console.log("🔄 P2PService: Game state changed to final state, stopping polling");
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        console.log("🔄 P2PService: Ongoing polling error:", error);
+      }
+      
+      // Continue polling
+      setTimeout(poll, pollInterval);
+    };
+    
+    // Start polling
+    setTimeout(poll, pollInterval);
+  }
+
   // Wait for game state to be received from host
   private async waitForGameState(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -1296,12 +1633,9 @@ class P2PService {
       // ✅ Listen for Redux state changes instead of P2P events
       const checkGameState = () => {
         const currentState = store.getState().game;
-        console.log("P2PService: Checking Redux state for game state:", currentState.currentGame);
-        console.log("P2PService: Checking Redux players:", currentState.players);
-        console.log("P2PService: Checking Redux isHost:", currentState.isHost);
         // Check both currentGame and players array (Redux structure has players as separate field)
         if (currentState.currentGame && currentState.players && currentState.players.length > 0) {
-          console.log("P2PService: Game state found in Redux with players, resolving...");
+          console.log("✅ GAME STATE RECEIVED: Players connected, resolving...");
           clearTimeout(timeout);
           resolve();
         }

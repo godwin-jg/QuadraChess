@@ -1,5 +1,6 @@
 import * as ServiceDiscovery from '@inthepocket/react-native-service-discovery';
 import Zeroconf from 'react-native-zeroconf';
+import { NetworkInterfaceService, NetworkInterface } from './networkInterfaceService';
 
 export interface DiscoveredGame {
   id: string;
@@ -34,10 +35,15 @@ class NetworkDiscoveryService {
   private serviceFoundListener: any = null;
   private serviceLostListener: any = null;
   private zeroconf: Zeroconf;
+  private networkInterfaceService: any;
+  private activeScans: Set<string> = new Set();
+  private networkChangeListener: (() => void) | null = null;
 
   private constructor() {
     this.zeroconf = new Zeroconf();
+      this.networkInterfaceService = NetworkInterfaceService.getInstance();
     this.setupEventListeners();
+    this.setupNetworkMonitoring();
   }
 
   public static getInstance(): NetworkDiscoveryService {
@@ -103,6 +109,50 @@ class NetworkDiscoveryService {
     this.zeroconf.on('stop', () => {
       console.log('NetworkDiscovery: Zeroconf scan stopped');
     });
+  }
+
+  private setupNetworkMonitoring(): void {
+    // Listen for network changes to restart discovery on new interfaces
+    this.networkChangeListener = this.networkInterfaceService.onNetworkChange((networkInfo: any) => {
+      console.log('NetworkDiscovery: Network changed, restarting discovery if active');
+      if (this.isSearching) {
+        this.restartDiscoveryOnNewInterfaces();
+      }
+    });
+  }
+
+  private async restartDiscoveryOnNewInterfaces(): Promise<void> {
+    try {
+      console.log('NetworkDiscovery: Restarting discovery on new network interfaces');
+      
+      // Stop current scans
+      await this.stopCurrentScans();
+      
+      // Wait a bit for cleanup
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Start new scans on all available interfaces
+      await this.startMultiInterfaceDiscovery();
+    } catch (error) {
+      console.error('NetworkDiscovery: Error restarting discovery:', error);
+    }
+  }
+
+  private async stopCurrentScans(): Promise<void> {
+    try {
+      // Stop ServiceDiscovery
+      await ServiceDiscovery.stopSearch('quadchess');
+      
+      // Stop zeroconf scans
+      this.zeroconf.stop();
+      
+      // Clear active scans
+      this.activeScans.clear();
+      
+      console.log('NetworkDiscovery: Stopped current scans');
+    } catch (error) {
+      console.error('NetworkDiscovery: Error stopping current scans:', error);
+    }
   }
 
   private handleServiceFound(service: GameService): void {
@@ -199,7 +249,7 @@ class NetworkDiscoveryService {
   }
 
   private findGameIdByName(serviceName: string): string | null {
-    for (const [gameId, game] of this.discoveredGames.entries()) {
+    for (const [gameId, game] of Array.from(this.discoveredGames.entries())) {
       if (game.name === serviceName) {
         return gameId;
       }
@@ -215,8 +265,29 @@ class NetworkDiscoveryService {
     }
 
     try {
-      console.log('NetworkDiscovery: Starting discovery for _quadchess._tcp. services');
+      console.log('NetworkDiscovery: Starting multi-interface discovery for _quadchess._tcp. services');
       
+      // Get available network interfaces including hotspots
+      const interfaces = await this.networkInterfaceService.getBestInterfaceForDiscovery();
+      console.log('NetworkDiscovery: Found', interfaces.length, 'network interfaces for discovery');
+      
+      // Log interface summary
+      const interfaceSummary = interfaces.map((iface: any) => `${iface.type}(${iface.address})`).join(', ');
+      console.log(`🔍 DISCOVERY: Scanning on ${interfaces.length} interfaces: ${interfaceSummary}`);
+
+      // Start multi-interface discovery
+      await this.startMultiInterfaceDiscovery();
+      
+      this.isSearching = true;
+      console.log('NetworkDiscovery: Started multi-interface discovery for QuadChess games');
+    } catch (error) {
+      console.error('NetworkDiscovery: Failed to start search:', error);
+      throw error;
+    }
+  }
+
+  private async startMultiInterfaceDiscovery(): Promise<void> {
+    try {
       // Start search with ServiceDiscovery first
       console.log('NetworkDiscovery: Starting ServiceDiscovery search...');
       await ServiceDiscovery.startSearch('quadchess');
@@ -225,15 +296,34 @@ class NetworkDiscoveryService {
       // Wait a bit for ServiceDiscovery to work
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Use only ONE zeroconf scan to avoid conflicts
-      console.log('NetworkDiscovery: Starting single Zeroconf scan for _quadchess._tcp...');
-      this.zeroconf.scan('_quadchess._tcp', 'tcp', 'local.');
-      console.log('NetworkDiscovery: Zeroconf scan started');
+      // Start zeroconf scans on all available interfaces
+      const interfaces = await this.networkInterfaceService.getBestInterfaceForDiscovery();
       
-      this.isSearching = true;
-      console.log('NetworkDiscovery: Started searching for QuadChess games (both libraries)');
+      for (const iface of interfaces) {
+        if (iface.isConnected && iface.family === 'IPv4') {
+          const scanKey = `${iface.name}-${iface.address}`;
+          
+          if (!this.activeScans.has(scanKey)) {
+            console.log(`NetworkDiscovery: Starting Zeroconf scan on ${iface.name} (${iface.address})`);
+            
+            try {
+              // Scan on the specific interface
+              this.zeroconf.scan('_quadchess._tcp', 'tcp', 'local.');
+              this.activeScans.add(scanKey);
+              
+              console.log(`NetworkDiscovery: Zeroconf scan started on ${iface.name}`);
+            } catch (scanError) {
+              console.error(`NetworkDiscovery: Failed to start scan on ${iface.name}:`, scanError);
+            }
+          } else {
+            console.log(`NetworkDiscovery: Scan already active on ${iface.name}`);
+          }
+        }
+      }
+      
+      console.log('NetworkDiscovery: Multi-interface discovery started on', this.activeScans.size, 'interfaces');
     } catch (error) {
-      console.error('NetworkDiscovery: Failed to start search:', error);
+      console.error('NetworkDiscovery: Failed to start multi-interface discovery:', error);
       throw error;
     }
   }
@@ -246,15 +336,12 @@ class NetworkDiscoveryService {
     }
 
     try {
-      // Stop search with ServiceDiscovery
-      await ServiceDiscovery.stopSearch('quadchess');
-      
-      // Stop search with zeroconf
-      this.zeroconf.stop();
+      // Stop all current scans
+      await this.stopCurrentScans();
       
       this.isSearching = false;
       this.discoveredGames.clear();
-      console.log('NetworkDiscovery: Stopped searching for games (both libraries)');
+      console.log('NetworkDiscovery: Stopped multi-interface discovery for games');
     } catch (error) {
       console.error('NetworkDiscovery: Failed to stop search:', error);
       throw error;
@@ -281,7 +368,7 @@ class NetworkDiscoveryService {
     
     console.log('NetworkDiscovery: Cleaning up old games, current count:', this.discoveredGames.size);
     
-    for (const [gameId, game] of this.discoveredGames.entries()) {
+    for (const [gameId, game] of Array.from(this.discoveredGames.entries())) {
       const gameAge = now - game.timestamp;
       console.log('NetworkDiscovery: Checking game:', game.name, 'age:', Math.round(gameAge / 1000), 'seconds');
       
@@ -348,8 +435,12 @@ class NetworkDiscoveryService {
     if (this.serviceLostListener) {
       this.serviceLostListener.remove();
     }
+    if (this.networkChangeListener) {
+      this.networkChangeListener();
+    }
     this.gameFoundListeners = [];
     this.gameLostListeners = [];
+    this.activeScans.clear();
   }
 }
 

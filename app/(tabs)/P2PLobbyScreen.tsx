@@ -357,28 +357,22 @@ const P2PLobbyScreen: React.FC = () => {
               )}
               <TouchableOpacity
                 className={`w-full py-3 px-6 rounded-xl shadow-lg ${
-                  players.length < 2 || players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected')
+                  !canStartGame || isLoading
                     ? "bg-gray-600" 
                     : "bg-white"
                 }`}
                 onPress={startGame}
-                disabled={
-                  players.length < 2 || 
-                  players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected') ||
-                  isLoading
-                }
+                disabled={!canStartGame || isLoading}
               >
                 <Text className={`text-lg font-bold text-center ${
-                  players.length < 2 || players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected')
+                  !canStartGame || isLoading
                     ? "text-gray-300" 
                     : "text-black"
                 }`}>
                   {isLoading ? "Starting..." : 
-                    players.some(p => !p.isHost && p.connectionState && p.connectionState !== 'connected')
-                      ? "Connecting..."
-                      : players.length < 2
-                        ? "Waiting for players..."
-                        : "Start Game"}
+                    !canStartGame
+                      ? "Waiting for players..."
+                      : "Start Game"}
                 </Text>
               </TouchableOpacity>
             </View>

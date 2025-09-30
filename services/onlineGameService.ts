@@ -47,6 +47,19 @@ class OnlineGameServiceImpl implements OnlineGameService {
   private gameUpdateCallbacks: ((game: RealtimeGame | null) => void)[] = [];
   private moveUpdateCallbacks: ((move: RealtimeMove) => void)[] = [];
 
+  // OPTIMIZATION: Move prediction and rollback system
+  private moveHistory: any[] = [];
+  private maxHistorySize = 10;
+
+  // OPTIMIZATION: Connection quality detection
+  private connectionQuality: 'excellent' | 'good' | 'poor' = 'good';
+  private latencyHistory: number[] = [];
+  private maxLatencySamples = 10;
+
+  // OPTIMIZATION: Cache board state processing to avoid repeated work
+  private lastBoardStateHash: string | null = null;
+  private cachedProcessedBoardState: (string | null)[][] | null = null;
+
   async connectToGame(gameId: string): Promise<void> {
     try {
       // Sign in anonymously if not already signed in
@@ -166,6 +179,10 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
         // OPTIMISTIC UI: Apply move immediately for instant feedback
         console.log("OnlineGameService: Applying optimistic move:", moveData);
+        
+        // Save state for potential rollback
+        this.saveMoveForRollback(moveData, currentGameState);
+        
         store.dispatch(applyNetworkMove(moveData));
 
         // Send move to server for validation
@@ -393,24 +410,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
             | "promotion",
           justEliminated: game.gameState.justEliminated || null,
           winner: game.gameState.winner || null,
-          boardState: game.gameState.boardState.map((row) => {
-            if (!row) return Array(14).fill(null);
-            // Handle both arrays and objects (Firebase sometimes converts arrays to objects)
-            if (Array.isArray(row)) {
-              return [...row];
-            } else if (typeof row === "object") {
-              // Convert object to array (Firebase object with numeric keys)
-              const arrayRow = Array(14).fill(null);
-              Object.keys(row).forEach((key) => {
-                const index = parseInt(key);
-                if (!isNaN(index) && index >= 0 && index < 14) {
-                  arrayRow[index] = row[key];
-                }
-              });
-              return arrayRow;
-            }
-            return Array(14).fill(null);
-          }),
+          boardState: this.processBoardStateOptimized(game.gameState.boardState),
           // Multiplayer state
           players: playersArray,
           isHost: isHost,
@@ -423,9 +423,21 @@ class OnlineGameServiceImpl implements OnlineGameService {
           viewingHistoryIndex: null,
         };
 
-        // Apply the complete game state from server (including history)
-        console.log("OnlineGameService: Dispatching setGameState with eliminatedPlayers:", gameState.eliminatedPlayers);
-        store.dispatch(setGameState(gameState));
+        // OPTIMIZATION: Use selective updates instead of full state replacement
+        // Only update if the game state has actually changed
+        const currentState = store.getState().game;
+        const hasSignificantChanges = 
+          JSON.stringify(currentState.boardState) !== JSON.stringify(gameState.boardState) ||
+          currentState.currentPlayerTurn !== gameState.currentPlayerTurn ||
+          currentState.gameStatus !== gameState.gameStatus ||
+          currentState.eliminatedPlayers?.length !== gameState.eliminatedPlayers?.length;
+
+        if (hasSignificantChanges) {
+          console.log("OnlineGameService: Dispatching setGameState with eliminatedPlayers:", gameState.eliminatedPlayers);
+          store.dispatch(setGameState(gameState));
+        } else {
+          console.log("OnlineGameService: Skipping state update - no significant changes detected");
+        }
       } else {
         console.warn("Game state is missing boardState, using fallback");
 
@@ -611,6 +623,102 @@ class OnlineGameServiceImpl implements OnlineGameService {
       console.error("Error validating move:", error);
       return false;
     }
+  }
+
+  // OPTIMIZATION: Move prediction and rollback methods
+  private saveMoveForRollback(moveData: any, gameState: any): void {
+    this.moveHistory.push({
+      move: moveData,
+      gameState: JSON.parse(JSON.stringify(gameState)), // Deep copy
+      timestamp: Date.now()
+    });
+
+    // Keep only recent moves
+    if (this.moveHistory.length > this.maxHistorySize) {
+      this.moveHistory.shift();
+    }
+  }
+
+  private rollbackMove(): void {
+    if (this.moveHistory.length > 0) {
+      const lastMove = this.moveHistory.pop();
+      console.log("Rolling back move due to server rejection:", lastMove.move);
+      
+      // Restore previous game state
+      store.dispatch(setGameState(lastMove.gameState));
+    }
+  }
+
+  // OPTIMIZATION: Connection quality detection methods
+  private measureLatency(): number {
+    const startTime = Date.now();
+    // Send ping to Firebase to measure latency
+    const pingRef = realtimeDatabaseService.getDatabase().ref('.info/serverTimeOffset');
+    pingRef.once('value', () => {
+      const latency = Date.now() - startTime;
+      this.updateConnectionQuality(latency);
+    });
+    return Date.now() - startTime;
+  }
+
+  private updateConnectionQuality(latency: number): void {
+    this.latencyHistory.push(latency);
+    if (this.latencyHistory.length > this.maxLatencySamples) {
+      this.latencyHistory.shift();
+    }
+
+    const avgLatency = this.latencyHistory.reduce((a, b) => a + b, 0) / this.latencyHistory.length;
+    
+    if (avgLatency < 100) {
+      this.connectionQuality = 'excellent';
+    } else if (avgLatency < 300) {
+      this.connectionQuality = 'good';
+    } else {
+      this.connectionQuality = 'poor';
+    }
+
+    console.log(`Connection quality: ${this.connectionQuality} (avg latency: ${avgLatency}ms)`);
+  }
+
+  public getConnectionQuality(): string {
+    return this.connectionQuality;
+  }
+
+  // OPTIMIZATION: Optimized board state processing with caching
+  private processBoardStateOptimized(boardState: any): (string | null)[][] {
+    // Create a simple hash of the board state
+    const boardHash = JSON.stringify(boardState);
+    
+    // Return cached version if unchanged
+    if (this.lastBoardStateHash === boardHash && this.cachedProcessedBoardState) {
+      return this.cachedProcessedBoardState;
+    }
+
+    // Process the board state
+    const processedBoardState = boardState.map((row: any) => {
+      if (!row) return Array(14).fill(null);
+      // Handle both arrays and objects (Firebase sometimes converts arrays to objects)
+      if (Array.isArray(row)) {
+        return [...row];
+      } else if (typeof row === "object") {
+        // Convert object to array (Firebase object with numeric keys)
+        const arrayRow = Array(14).fill(null);
+        Object.keys(row).forEach((key) => {
+          const index = parseInt(key);
+          if (!isNaN(index) && index >= 0 && index < 14) {
+            arrayRow[index] = row[key];
+          }
+        });
+        return arrayRow;
+      }
+      return Array(14).fill(null);
+    });
+
+    // Cache the result
+    this.lastBoardStateHash = boardHash;
+    this.cachedProcessedBoardState = processedBoardState;
+
+    return processedBoardState;
   }
 
   // History navigation removed from online multiplayer

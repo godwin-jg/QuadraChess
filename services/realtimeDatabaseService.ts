@@ -805,19 +805,22 @@ class RealtimeDatabaseService {
     }
   }
 
-  // OPTIMIZATION: Batch move processing methods
+  // OPTIMIZATION: Instant move processing for lowest latency
   private addToMoveBatch(gameId: string, moveRequest: any): void {
-    this.moveBatch.push({ gameId, moveRequest });
-    
-    // Clear existing timeout
-    if (this.batchTimeout) {
-      clearTimeout(this.batchTimeout);
+    // Process move immediately for instant feedback
+    this.processMoveImmediately(gameId, moveRequest);
+  }
+
+  private async processMoveImmediately(gameId: string, moveRequest: any): Promise<void> {
+    try {
+      // Send move directly without batching for instant response
+      const moveRequestRef = database().ref(`move-requests/${gameId}`).push();
+      await moveRequestRef.set(moveRequest);
+      console.log("Move sent immediately for instant response:", moveRequest);
+    } catch (error) {
+      console.error("Error sending immediate move:", error);
+      throw error;
     }
-    
-    // Set new timeout to process batch
-    this.batchTimeout = setTimeout(() => {
-      this.processMoveBatch();
-    }, this.BATCH_DELAY);
   }
 
   private async processMoveBatch(): Promise<void> {

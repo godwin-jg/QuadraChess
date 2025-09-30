@@ -85,7 +85,7 @@ export class GameStateManager {
     }
 
     // Assign color based on player count
-    const colors = ['r', 'b', 'g', 'y'];
+    const colors = ['r', 'b', 'y', 'g'];
     const color = colors[this.gameState.playerCount % colors.length];
 
     const player: P2PPlayer = {

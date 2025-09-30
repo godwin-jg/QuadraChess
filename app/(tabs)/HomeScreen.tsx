@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from "r
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useDispatch } from 'react-redux';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -19,6 +20,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
+import { resetGame, setBotPlayers } from '../../state/gameSlice';
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
@@ -156,6 +158,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
 
 export default function HomeScreen() {
   const router = useRouter();
+  const dispatch = useDispatch();
   const [isNavigating, setIsNavigating] = useState(false);
   const { height, width } = useWindowDimensions(); // Get screen dimensions
 
@@ -262,6 +265,12 @@ export default function HomeScreen() {
       };
     }, [])
   );
+
+  const handleStartSinglePlayer = () => {
+    dispatch(resetGame());
+    dispatch(setBotPlayers(['b', 'y', 'g'])); // Set Blue, Yellow, Green as bots
+    handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single"); 
+  };
 
   const handleModeSwitch = async (
     targetMode: "online" | "local" | "solo",
@@ -480,7 +489,7 @@ export default function HomeScreen() {
               title="SINGLE PLAYER"
               subtitle="Play against AI"
               gradientColors={['rgb(255, 255, 255)', 'rgb(245, 200, 200)']}
-              onPress={() => handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single")}
+              onPress={handleStartSinglePlayer}
             disabled={isNavigating}
             />
             <AnimatedButton

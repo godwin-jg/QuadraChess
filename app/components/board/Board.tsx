@@ -35,9 +35,17 @@ import Square from "./Square";
 
 interface BoardProps {
   onCapture?: (points: number, boardX: number, boardY: number, playerColor: string) => void;
+  playerData?: Array<{
+    name: string;
+    color: string;
+    score: number;
+    capturedPieces: string[];
+    isCurrentTurn: boolean;
+    isEliminated: boolean;
+  }>;
 }
 
-export default function Board({ onCapture }: BoardProps) {
+export default function Board({ onCapture, playerData }: BoardProps) {
   const { width } = useWindowDimensions();
   // Memoized board dimensions - only recalculates when screen width changes
   const boardSize = React.useMemo(() => Math.min(width * 0.98, 600), [width]);
@@ -176,6 +184,7 @@ export default function Board({ onCapture }: BoardProps) {
   // Check if we're viewing history (not at the live game state)
   const isViewingHistory = viewingHistoryIndex !== null && viewingHistoryIndex < history.length - 1;
 
+
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
     // If we're viewing history, don't allow any moves
@@ -305,7 +314,7 @@ export default function Board({ onCapture }: BoardProps) {
             "Board: Online service not connected, falling back to local move"
           );
           // Fallback to local move if online service is not connected
-          dispatch(makeMove({ row, col }));
+          dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
         }
       } else if (effectiveMode === "p2p") {
         console.log(
@@ -337,14 +346,14 @@ export default function Board({ onCapture }: BoardProps) {
             "Board: P2P service not connected, falling back to local move"
           );
           // Fallback to local move if P2P service is not connected
-          dispatch(makeMove({ row, col }));
+          dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
         }
       } else if (networkService.connected && networkService.roomId) {
         // Local multiplayer mode
         dispatch(sendMoveToServer({ row, col }));
       } else {
         // Single player mode
-        dispatch(makeMove({ row, col }));
+        dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
       }
     } else {
       // If clicking on empty square and a piece is selected, deselect it
@@ -450,19 +459,26 @@ export default function Board({ onCapture }: BoardProps) {
                 key={rowIndex}
                 style={{ flexDirection: "row", height: squareSize }}
               >
-                {Array.from({ length: 14 }, (_, colIndex) => (
-                  <View
-                    key={`${rowIndex}-${colIndex}`}
-                    style={{
-                      width: squareSize,
-                      height: squareSize,
-                      backgroundColor:
-                        (rowIndex + colIndex) % 2 === 0
-                          ? boardTheme.lightSquare
-                          : boardTheme.darkSquare,
-                    }}
-                  />
-                ))}
+                {Array.from({ length: 14 }, (_, colIndex) => {
+                  const isCornerSquare = (rowIndex < 3 && colIndex < 3) ||
+                    (rowIndex < 3 && colIndex > 10) ||
+                    (rowIndex > 10 && colIndex < 3) ||
+                    (rowIndex > 10 && colIndex > 10);
+                  
+                  return (
+                    <View
+                      key={`${rowIndex}-${colIndex}`}
+                      style={{
+                        width: squareSize,
+                        height: squareSize,
+                        backgroundColor: isCornerSquare ? "transparent" :
+                          (rowIndex + colIndex) % 2 === 0
+                            ? boardTheme.lightSquare
+                            : boardTheme.darkSquare,
+                      }}
+                    />
+                  );
+                })}
               </View>
             );
           }
@@ -501,6 +517,7 @@ export default function Board({ onCapture }: BoardProps) {
                       piece[0] === onlineGameService.currentPlayer.color
                     }
                     boardTheme={boardTheme}
+                    playerData={playerData}
                   />
                 );
               })}

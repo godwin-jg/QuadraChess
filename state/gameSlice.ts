@@ -14,6 +14,12 @@ import {
 } from "./gameHelpers";
 import { GameState, Position, turnOrder } from "./types";
 
+// Define the new payload type for our improved makeMove action
+interface MovePayload {
+  from: Position;
+  to: { row: number; col: number };
+}
+
 // Helper function to create a deep copy of the game state
 export const createStateSnapshot = (state: GameState): GameState => {
   return {
@@ -84,6 +90,8 @@ export const baseInitialState: GameState = {
   canStartGame: false,
   // Game mode
   gameMode: "single",
+  // Bot players tracking
+  botPlayers: [],
   // P2P Lobby state
   currentGame: null as any, // P2PGame | null
   discoveredGames: [],
@@ -113,6 +121,9 @@ const gameSlice = createSlice({
   reducers: {
     setSelectedPiece: (state, action: PayloadAction<Position | null>) => {
       state.selectedPiece = action.payload;
+    },
+    setBotPlayers: (state, action: PayloadAction<string[]>) => {
+      state.botPlayers = action.payload;
     },
     setValidMoves: (state, action: PayloadAction<MoveInfo[]>) => {
       state.validMoves = action.payload;
@@ -195,23 +206,26 @@ const gameSlice = createSlice({
         "moves"
       );
     },
-    makeMove: (state, action: PayloadAction<{ row: number; col: number }>) => {
+    makeMove: (state, action: PayloadAction<MovePayload>) => {
       // Don't allow moves when viewing historical moves
       if (state.viewingHistoryIndex !== null) {
         return;
       }
 
-      if (state.selectedPiece) {
+      const { from, to } = action.payload;
+      const { row: startRow, col: startCol } = from;
+      const { row: targetRow, col: targetCol } = to;
+
+      // Get the piece to move from the board state
+      const pieceToMove = state.boardState[startRow][startCol];
+      
+      if (pieceToMove) {
         // Check if en passant opportunities should expire
         // Remove targets that were created by the current player (full round has passed)
         state.enPassantTargets = state.enPassantTargets.filter(
           (target) => target.createdByTurn !== state.currentPlayerTurn
         );
 
-        const { row: targetRow, col: targetCol } = action.payload;
-        const { row: startRow, col: startCol } = state.selectedPiece;
-
-        const pieceToMove = state.boardState[startRow][startCol];
         const capturedPiece = state.boardState[targetRow][targetCol];
         const pieceColor = pieceToMove?.charAt(0);
         const pieceType = pieceToMove?.[1];
@@ -717,6 +731,9 @@ const gameSlice = createSlice({
       
       // Restore the game mode after reset
       state.gameMode = currentGameMode;
+      
+      // Clear bot players on reset
+      state.botPlayers = [];
       
       // Initialize history as empty - no initial snapshot
       state.history = [];
@@ -1387,6 +1404,7 @@ export const {
   setIsHost,
   setCanStartGame,
   setGameMode,
+  setBotPlayers,
   // P2P Lobby actions
   setCurrentGame,
   setDiscoveredGames,

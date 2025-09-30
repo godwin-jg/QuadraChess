@@ -124,14 +124,29 @@ export default function ResignButton() {
 
   return (
     <>
-      <View className="absolute bottom-28 left-1/2 transform -translate-x-1/2 z-20">
-        <TouchableOpacity
-          onPress={handleResignPress}
-          activeOpacity={0.7}
-        >
-          <Text className="text-2xl">🏳️</Text>
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity
+        onPress={handleResignPress}
+        activeOpacity={0.7}
+        style={{
+          backgroundColor: 'rgba(239, 68, 68, 0.8)',
+          paddingHorizontal: 16,
+          paddingVertical: 8,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: 'rgba(239, 68, 68, 0.3)',
+        }}
+      >
+        <Text style={{
+          color: '#FFFFFF',
+          fontSize: 14,
+          fontWeight: '600',
+          fontFamily: 'SpaceMono-Regular',
+          letterSpacing: 0.8,
+          textAlign: 'center',
+        }}>
+          Resign
+        </Text>
+      </TouchableOpacity>
 
       <ResignConfirmationModal
         visible={showResignModal}

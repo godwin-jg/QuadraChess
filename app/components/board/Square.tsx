@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, View } from "react-native";
 import { BoardTheme } from "./BoardThemeConfig";
 import Piece from "./Piece";
+import MiniPlayerCircle from "../ui/MiniPlayerCircle";
 
 interface SquareProps {
   piece: string | null;
@@ -19,6 +20,14 @@ interface SquareProps {
   onHover?: () => void;
   onHoverOut?: () => void;
   boardTheme?: BoardTheme;
+  playerData?: Array<{
+    name: string;
+    color: string;
+    score: number;
+    capturedPieces: string[];
+    isCurrentTurn: boolean;
+    isEliminated: boolean;
+  }>;
 }
 
 const Square = React.memo(function Square({
@@ -37,6 +46,7 @@ const Square = React.memo(function Square({
   onHover,
   onHoverOut,
   boardTheme,
+  playerData,
 }: SquareProps) {
   // Check if this is a corner square that should not be playable - memoized for performance
   const isCornerSquare = React.useMemo(() => 
@@ -46,8 +56,58 @@ const Square = React.memo(function Square({
     (row > 10 && col > 10), [row, col]
   );
 
-  // If it's a corner square, render a transparent spacer
+  // If it's a corner square, render a transparent spacer or player info
   if (isCornerSquare) {
+    // Check if this is the center square of a corner (where we'll place the player info)
+    const isCornerCenter = (row === 1 && col === 1) || // Top-left center
+      (row === 1 && col === 12) || // Top-right center
+      (row === 12 && col === 1) || // Bottom-left center
+      (row === 12 && col === 12); // Bottom-right center
+    
+    if (isCornerCenter && playerData) {
+      // Get player for this corner
+      let player = null;
+      if (row === 1 && col === 1) {
+        player = playerData.find(p => p.color === "y"); // Top-left = Yellow
+      } else if (row === 1 && col === 12) {
+        player = playerData.find(p => p.color === "g"); // Top-right = Green
+      } else if (row === 12 && col === 1) {
+        player = playerData.find(p => p.color === "b"); // Bottom-left = Blue
+      } else if (row === 12 && col === 12) {
+        player = playerData.find(p => p.color === "r"); // Bottom-right = Red
+      }
+      
+      if (player) {
+        // Determine corner position
+        const isTopCorner = row === 1;
+        const isBottomCorner = row === 12;
+        const isLeftCorner = col === 1;
+        const isRightCorner = col === 12;
+        
+        return (
+          <View
+            style={{
+              width: size,
+              height: size,
+              backgroundColor: "transparent",
+              justifyContent: "center",
+              alignItems: "center",
+              paddingBottom: isTopCorner ? 8 : 0, // Add padding bottom for top corners
+              paddingTop: isBottomCorner ? 8 : 0, // Add padding top for bottom corners
+              paddingRight: isLeftCorner ? 8 : 0, // Add padding right for left corners
+              paddingLeft: isRightCorner ? 8 : 0, // Add padding left for right corners
+            }}
+          >
+            <MiniPlayerCircle
+              player={player}
+              isCurrentTurn={player.isCurrentTurn}
+              isEliminated={player.isEliminated}
+            />
+          </View>
+        );
+      }
+    }
+    
     // Render a transparent view that occupies space but is invisible,
     // allowing the glow from behind to show through.
     return (

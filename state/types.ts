@@ -64,6 +64,8 @@ export interface GameState {
   canStartGame: boolean;
   // Game mode
   gameMode: "solo" | "local" | "online" | "p2p" | "single";
+  // Bot players tracking
+  botPlayers: string[]; // e.g., ['b', 'y', 'g']
   // P2P Lobby state
   currentGame: any | null; // P2PGame | null
   discoveredGames: any[];

@@ -48,15 +48,28 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   return (
     <View style={[styles.tabBarContainer, { bottom: bottom + 10 }]}>
       <View style={styles.tabBar}>
+        {/* ✅ Ultra transparent with sun reflection effect */}
         <LinearGradient
-          colors={['rgba(31, 41, 55, 0.7)', 'rgba(17, 24, 39, 0.6)']}
+          // Ultra transparent gradient with sun reflection
+          colors={[
+            'rgba(255, 255, 255, 0.1)', // Sun reflection highlight
+            'rgba(39, 39, 42, 0.15)',   // Very light gray
+            'rgba(24, 24, 27, 0.2)',    // Slightly darker gray
+            'rgba(15, 15, 15, 0.25)'    // Subtle dark base
+          ]} 
           style={StyleSheet.absoluteFill}
         />
 
         {/* The single, animated sliding pill */}
         <Animated.View style={[styles.activePill, pillStyle]}>
           <LinearGradient
-            colors={['#58AFFF', '#4A90E2', '#357ABD']}
+            colors={[
+              'rgba(255, 255, 255, 0.3)', // Top reflection highlight
+              'rgba(96, 165, 250, 0.6)',   // Light blue
+              'rgba(59, 130, 246, 0.7)',   // Medium blue
+              'rgba(29, 78, 216, 0.8)',    // Dark blue
+              'rgba(15, 23, 42, 0.9)'      // Deep shadow
+            ]}
             style={StyleSheet.absoluteFill}
           />
         </Animated.View>
@@ -152,10 +165,14 @@ const styles = StyleSheet.create({
     shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 5,
   },
   tabBar: {
-    flexDirection: 'row', height: 60,
-    backgroundColor: 'rgba(30, 30, 30, 0.5)', borderRadius: 99,
-    borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden', paddingHorizontal: 5, // Add padding for the pill
+    flexDirection: 'row', 
+    height: 60,
+    // backgroundColor is now handled by the LinearGradient below
+    borderRadius: 99,
+    borderWidth: 1.5, // Slightly thicker for a more defined edge
+    borderColor: 'rgba(255, 255, 255, 0.2)', // Brighter, more noticeable "glass" border
+    overflow: 'hidden', 
+    paddingHorizontal: 5,
     alignItems: 'center',
   },
   tabItem: {

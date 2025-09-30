@@ -1,5 +1,5 @@
 import { Text, View } from "@/components/Themed";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
@@ -14,21 +14,38 @@ import {
   setGameState,
   clearJustEliminated,
 } from "../../state/gameSlice";
+import { botService } from "../../services/botService";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
 import GameNotification from "../components/ui/GameNotification";
 import GameOverModal from "../components/ui/GameOverModal";
 import HistoryControls from "../components/ui/HistoryControls";
-import PlayerInfoPod from "../components/ui/PlayerInfoPod";
+import PlayerHUDPanel from "../components/ui/PlayerHUDPanel";
+import GameUtilityPanel from "../components/ui/GameUtilityPanel";
 import PromotionModal from "../components/ui/PromotionModal";
 import FloatingPointsText from "../components/ui/FloatingPointsText";
 import networkService from "../services/networkService";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
+import { TouchableOpacity, StyleSheet } from "react-native";
+import { FontAwesome } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { StatusBar } from "expo-status-bar";
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  withSpring, 
+  withTiming,
+  SlideInLeft,
+  SlideOutLeft,
+  SlideInRight,
+  SlideOutRight
+} from "react-native-reanimated";
 
 export default function GameScreen() {
   // Get dispatch function
   const dispatch = useDispatch();
+  const router = useRouter();
   const { gameId, mode } = useLocalSearchParams<{
     gameId?: string;
     mode?: string;
@@ -48,6 +65,23 @@ export default function GameScreen() {
     y: number;
     color: string;
   }>>([]);
+
+  // Game utility mode state - toggles between player info and utilities
+  const [isUtilityMode, setIsUtilityMode] = useState(false);
+  
+  // Animation values for the toggle button
+  const toggleScale = useSharedValue(1);
+  const toggleRotation = useSharedValue(0);
+  const toggleOpacity = useSharedValue(0.7);
+
+  // Animated styles for the toggle button
+  const toggleAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: withSpring(toggleScale.value, { damping: 15, stiffness: 200 }) },
+      { rotate: withTiming(`${toggleRotation.value}deg`, { duration: 300 }) }
+    ],
+    opacity: withSpring(toggleOpacity.value, { damping: 15, stiffness: 200 }),
+  }));
 
   // Master connection management - single useEffect to prevent race conditions
   useEffect(() => {
@@ -261,6 +295,7 @@ export default function GameScreen() {
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
+  const botPlayers = useSelector((state: RootState) => state.game.botPlayers);
 
   // Clear justEliminated flag after notification duration
   useEffect(() => {
@@ -274,6 +309,22 @@ export default function GameScreen() {
       return () => clearTimeout(timer);
     }
   }, [justEliminated, gameStatus, winner, dispatch]);
+
+  // ✅ Bot Controller - triggers bot moves when it's a bot's turn
+  useEffect(() => {
+    // Check if the current player is a bot and the game is active
+    if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active') {
+      
+      // Add a "thinking" delay to feel more natural
+      const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
+
+      const timer = setTimeout(() => {
+        botService.makeBotMove(currentPlayerTurn);
+      }, botThinkTime);
+
+      return () => clearTimeout(timer);
+    }
+  }, [currentPlayerTurn, botPlayers, gameStatus]);
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {
@@ -410,64 +461,96 @@ export default function GameScreen() {
   }
 
   return (
-    <View className="flex-1 bg-black justify-center items-center">
-      {/* Subtle blueprint grid background */}
+    <SafeAreaView className="flex-1 bg-black">
+      <StatusBar style="light" hidden={true} />
       <GridBackground />
+
+      {/* Top HUD Panel - Toggle between Player Info and Utilities */}
+      <View style={{ paddingTop: 8, height: 120, overflow: 'hidden' }}>
+        {isUtilityMode ? (
+          <Animated.View 
+            entering={SlideInRight.duration(300).springify()} 
+            exiting={SlideOutLeft.duration(200)}
+            style={{ position: 'absolute', width: '100%' }}
+          >
+            <GameUtilityPanel />
+          </Animated.View>
+        ) : (
+          <Animated.View 
+            entering={SlideInLeft.duration(300).springify()} 
+            exiting={SlideOutRight.duration(200)}
+            style={{ position: 'absolute', width: '100%' }}
+          >
+            <PlayerHUDPanel 
+              players={[players[2], players[3]]} // Yellow, Green
+              panelType="top"
+            />
+          </Animated.View>
+        )}
+      </View>
+
+      {/* Main Game Area with breathing space */}
+      <View className="flex-1 justify-center items-center" style={{ paddingVertical: 16 }}>
+        <Board onCapture={triggerFloatingPoints} playerData={players} />
+      </View>
+
+      {/* Bottom HUD Panel - Home Players (Red & Blue) */}
+      <View style={{ paddingBottom: 100, paddingTop: 8 }}> {/* 60px tab bar + 40px breathing room */}
+        <PlayerHUDPanel 
+          players={[players[0], players[1]]} // Red, Blue
+          panelType="bottom"
+        />
+      </View>
+
+      {/* --- Absolutely Positioned Overlays --- */}
       
-      {/* History Controls - Top Center with safe area */}
-      <View className="absolute z-10" style={{ top: insets.top + 100 }}>
-        <HistoryControls />
-      </View>
+      {/* Integrated Toggle Button - Top Right Corner */}
+      <Animated.View style={[toggleAnimatedStyle, { 
+        position: 'absolute', 
+        top: insets.top + 12, 
+        right: 12, 
+        zIndex: 20 
+      }]}>
+        <TouchableOpacity
+          onPress={() => {
+            // 🔊 Add haptic feedback for tactile response
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            
+            // Animate the toggle
+            toggleScale.value = withSpring(0.9, { damping: 15, stiffness: 200 }, () => {
+              toggleScale.value = withSpring(1, { damping: 15, stiffness: 200 });
+            });
+            toggleRotation.value = withTiming(toggleRotation.value + 180, { duration: 300 });
+            toggleOpacity.value = withSpring(isUtilityMode ? 0.7 : 1, { damping: 15, stiffness: 200 });
+            
+            // Toggle the mode
+            setIsUtilityMode(!isUtilityMode);
+          }}
+          style={{
+            backgroundColor: isUtilityMode ? 'rgba(59, 130, 246, 0.9)' : 'rgba(255, 255, 255, 0.15)',
+            width: 48,
+            height: 48,
+            borderRadius: 24,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 2,
+            borderColor: isUtilityMode ? 'rgba(59, 130, 246, 0.5)' : 'rgba(255, 255, 255, 0.3)',
+            shadowColor: isUtilityMode ? '#3B82F6' : '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: isUtilityMode ? 0.4 : 0.3,
+            shadowRadius: isUtilityMode ? 12 : 8,
+            elevation: isUtilityMode ? 12 : 8,
+          }}
+          activeOpacity={0.8}
+        >
+          <FontAwesome 
+            name="cog" 
+            size={18} 
+            color="#FFFFFF" 
+          />
+        </TouchableOpacity>
+      </Animated.View>
 
-      {/* Resign Button - Bottom Center with safe area */}
-      <View style={{ position: 'absolute', bottom: insets.bottom + 80 }}>
-        <ResignButton />
-      </View>
-
-      {/* Chess Board - Centered */}
-      <Board onCapture={triggerFloatingPoints} />
-
-      {/* Player Info Pods - Positioned in corners with safe areas */}
-
-      {/* Top Left - Yellow Player */}
-      <View className="absolute left-4" style={{ top: insets.top + 60 }}>
-        <PlayerInfoPod
-          player={players[2]}
-          capturedPieces={players[2].capturedPieces}
-          isCurrentTurn={players[2].isCurrentTurn}
-          isEliminated={players[2].isEliminated}
-        />
-      </View>
-
-      {/* Top Right - Green Player */}
-      <View className="absolute right-4" style={{ top: insets.top + 60 }}>
-        <PlayerInfoPod
-          player={players[3]}
-          capturedPieces={players[3].capturedPieces}
-          isCurrentTurn={players[3].isCurrentTurn}
-          isEliminated={players[3].isEliminated}
-        />
-      </View>
-
-      {/* Bottom Left - Blue Player */}
-      <View className="absolute left-4" style={{ bottom: insets.bottom + 80 }}>
-        <PlayerInfoPod
-          player={players[1]}
-          capturedPieces={players[1].capturedPieces}
-          isCurrentTurn={players[1].isCurrentTurn}
-          isEliminated={players[1].isEliminated}
-        />
-      </View>
-
-      {/* Bottom Right - Red Player */}
-      <View className="absolute right-4" style={{ bottom: insets.bottom + 80 }}>
-        <PlayerInfoPod
-          player={players[0]}
-          capturedPieces={players[0].capturedPieces}
-          isCurrentTurn={players[0].isCurrentTurn}
-          isEliminated={players[0].isEliminated}
-        />
-      </View>
 
       {/* Game Notification (for eliminations during ongoing game) */}
       <GameNotification
@@ -516,7 +599,7 @@ export default function GameScreen() {
           onComplete={() => removeFloatingPoint(point.id)}
         />
       ))}
-    </View>
+    </SafeAreaView>
   );
 }
 

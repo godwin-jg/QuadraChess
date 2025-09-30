@@ -21,6 +21,7 @@ import GameOverModal from "../components/ui/GameOverModal";
 import HistoryControls from "../components/ui/HistoryControls";
 import PlayerInfoPod from "../components/ui/PlayerInfoPod";
 import PromotionModal from "../components/ui/PromotionModal";
+import FloatingPointsText from "../components/ui/FloatingPointsText";
 import networkService from "../services/networkService";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
@@ -38,6 +39,15 @@ export default function GameScreen() {
   const [isP2PMode, setIsP2PMode] = useState(false);
   const [connectionStatus, setConnectionStatus] =
     useState<string>("Connecting...");
+  
+  // Floating points animation state
+  const [floatingPoints, setFloatingPoints] = useState<Array<{
+    id: string;
+    points: number;
+    x: number;
+    y: number;
+    color: string;
+  }>>([]);
 
   // Master connection management - single useEffect to prevent race conditions
   useEffect(() => {
@@ -304,6 +314,29 @@ export default function GameScreen() {
     }
   };
 
+  // Function to trigger floating points animation
+  const triggerFloatingPoints = (points: number, boardX: number, boardY: number, playerColor: string) => {
+    const id = `floating-${Date.now()}-${Math.random()}`;
+    // Add slight random offset to prevent overlapping animations
+    const offsetX = (Math.random() - 0.5) * 20;
+    const offsetY = (Math.random() - 0.5) * 10;
+    
+    const newFloatingPoint = {
+      id,
+      points,
+      x: boardX + offsetX,
+      y: boardY + offsetY,
+      color: playerColor,
+    };
+    
+    setFloatingPoints(prev => [...prev, newFloatingPoint]);
+  };
+
+  // Function to remove floating point after animation
+  const removeFloatingPoint = (id: string) => {
+    setFloatingPoints(prev => prev.filter(point => point.id !== id));
+  };
+
   // Determine notification message
   const getNotificationMessage = () => {
     if (gameStatus === "checkmate" && justEliminated) {
@@ -384,7 +417,7 @@ export default function GameScreen() {
       </View>
 
       {/* Chess Board - Centered */}
-      <Board />
+      <Board onCapture={triggerFloatingPoints} />
 
       {/* Player Info Pods - Positioned in corners with safe areas */}
 
@@ -463,6 +496,18 @@ export default function GameScreen() {
           dispatch(completePromotion({ pieceType }))
         }
       />
+
+      {/* Floating Points Effects Layer */}
+      {floatingPoints.map((point) => (
+        <FloatingPointsText
+          key={point.id}
+          points={point.points}
+          x={point.x}
+          y={point.y}
+          color={point.color}
+          onComplete={() => removeFloatingPoint(point.id)}
+        />
+      ))}
     </View>
   );
 }

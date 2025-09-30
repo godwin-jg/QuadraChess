@@ -33,7 +33,11 @@ import Square from "./Square";
 // y = yellow, r = red, b = blue, g = green
 // R = Rook, N = Knight, B = Bishop, Q = Queen, K = King, P = Pawn
 
-export default function Board() {
+interface BoardProps {
+  onCapture?: (points: number, boardX: number, boardY: number, playerColor: string) => void;
+}
+
+export default function Board({ onCapture }: BoardProps) {
   const { width } = useWindowDimensions();
   // Memoized board dimensions - only recalculates when screen width changes
   const boardSize = React.useMemo(() => Math.min(width * 0.98, 600), [width]);
@@ -212,6 +216,41 @@ export default function Board() {
     if (selectedPiece && isAValidMove) {
       const pieceToMove = displayBoardState[selectedPiece.row][selectedPiece.col];
       const pieceColor = pieceToMove?.charAt(0);
+      
+      // Check if this move captures a piece
+      const capturedPiece = displayBoardState[row][col];
+      if (capturedPiece && onCapture) {
+        // Calculate points for captured piece
+        const capturedPieceType = capturedPiece[1];
+        let points = 0;
+        switch (capturedPieceType) {
+          case "P": // Pawn
+            points = 1;
+            break;
+          case "N": // Knight
+            points = 3;
+            break;
+          case "B": // Bishop
+          case "R": // Rook
+            points = 5;
+            break;
+          case "Q": // Queen
+            points = 9;
+            break;
+          case "K": // King
+            points = 20; // Special bonus for king capture
+            break;
+          default:
+            points = 0;
+        }
+        
+        // Calculate screen coordinates for the capture square
+        const boardX = (col * squareSize) + (squareSize / 2);
+        const boardY = (row * squareSize) + (squareSize / 2);
+        
+        // Trigger floating points animation
+        onCapture(points, boardX, boardY, pieceColor!);
+      }
 
       const moveData = {
         from: { row: selectedPiece.row, col: selectedPiece.col },

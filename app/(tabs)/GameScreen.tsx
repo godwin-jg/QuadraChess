@@ -12,6 +12,7 @@ import {
   applyNetworkMove,
   setGameMode,
   setGameState,
+  clearJustEliminated,
 } from "../../state/gameSlice";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
@@ -217,7 +218,7 @@ export default function GameScreen() {
       }
     };
 
-    setupConnectionForMode(mode);
+    setupConnectionForMode(mode || "solo");
 
     // The single return function ensures the previous mode's
     // connections and listeners are ALWAYS torn down before the
@@ -242,6 +243,19 @@ export default function GameScreen() {
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
+
+  // Clear justEliminated flag after notification duration
+  useEffect(() => {
+    if (justEliminated && (gameStatus === "checkmate" || gameStatus === "stalemate") && !winner) {
+      console.log("🎮 GameScreen: Setting timer to clear justEliminated flag");
+      const timer = setTimeout(() => {
+        console.log("🎮 GameScreen: Clearing justEliminated flag");
+        dispatch(clearJustEliminated());
+      }, 3000); // Same duration as notification
+
+      return () => clearTimeout(timer);
+    }
+  }, [justEliminated, gameStatus, winner, dispatch]);
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {

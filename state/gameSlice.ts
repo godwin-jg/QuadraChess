@@ -868,6 +868,32 @@ const gameSlice = createSlice({
         console.log(`applyNetworkMove: P2P capture - ${playerColor} captured ${capturedPiece}`);
         const capturedColor = capturedPiece[0] as keyof typeof state.capturedPieces;
         state.capturedPieces[capturedColor].push(capturedPiece);
+        
+        // ✅ CRITICAL FIX: Add points for captured piece in P2P mode
+        const capturedPieceType = capturedPiece[1];
+        let points = 0;
+        switch (capturedPieceType) {
+          case "P": // Pawn
+            points = 1;
+            break;
+          case "N": // Knight
+            points = 3;
+            break;
+          case "B": // Bishop
+          case "R": // Rook
+            points = 5;
+            break;
+          case "Q": // Queen
+            points = 9;
+            break;
+          case "K": // King
+            points = 20; // Special bonus for king capture
+            break;
+          default:
+            points = 0;
+        }
+        state.scores[playerColor as keyof typeof state.scores] += points;
+        console.log(`applyNetworkMove: P2P scoring - ${playerColor} gets ${points} points for capturing ${capturedPiece}`);
       }
 
       // Move the piece
@@ -1130,6 +1156,12 @@ const gameSlice = createSlice({
         state.canStartGame = false;
       }
     },
+    
+    // Clear the justEliminated flag (used after notification is shown)
+    clearJustEliminated: (state) => {
+      console.log("🎮 Redux: Clearing justEliminated flag");
+      state.justEliminated = null;
+    },
   },
 });
 
@@ -1163,6 +1195,7 @@ export const {
   setIsEditingName,
   setTempName,
   syncP2PGameState,
+  clearJustEliminated,
 } = gameSlice.actions;
 
 // Selectors for UI components to choose between live and historical state

@@ -47,6 +47,7 @@ export interface UserSettings {
     soundEnabled: boolean;
     animationsEnabled: boolean;
     showMoveHints: boolean;
+    hapticsEnabled: boolean;
   };
   accessibility: {
     highContrast: boolean;
@@ -73,6 +74,7 @@ const DEFAULT_SETTINGS: UserSettings = {
     soundEnabled: true,
     animationsEnabled: true,
     showMoveHints: true,
+    hapticsEnabled: true,
   },
   accessibility: {
     highContrast: false,

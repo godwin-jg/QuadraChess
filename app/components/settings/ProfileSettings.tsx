@@ -9,17 +9,9 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { hapticsService } from '@/services/hapticsService';
+import { HapticsTestService } from '@/services/hapticsTestService';
 import * as Haptics from 'expo-haptics';
-
-// Helper function to safely trigger haptic feedback
-const triggerHaptic = async (style: Haptics.ImpactFeedbackStyle) => {
-  try {
-    await Haptics.impactAsync(style);
-  } catch (error) {
-    // Silently fail if haptics are not available (e.g., on Android without proper linking)
-    console.log('Haptic feedback not available:', error);
-  }
-};
 import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "../board/BoardThemeConfig";
 import Piece from "../board/Piece";
@@ -104,8 +96,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
           isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
         }`}
-        onPress={() => {
-          triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+        onPress={async () => {
+          await hapticsService.selection();
           updateBoard({ theme: theme.key });
         }}
       >
@@ -156,8 +148,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
           isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
         }`}
-        onPress={() => {
-          triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+        onPress={async () => {
+          await hapticsService.selection();
           updatePieces({ style: style.key });
         }}
       >
@@ -238,8 +230,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               />
               <TouchableOpacity
                 className="ml-3 px-4 py-2 bg-blue-600 rounded-lg"
-                onPress={() => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                onPress={async () => {
+                  await hapticsService.selection();
                   const randomName = generateRandomName();
                   updateProfile({ name: randomName });
                 }}
@@ -301,9 +293,9 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
             ].map((size, index) => (
               <TouchableOpacity
                 key={size.key}
-                onPress={() => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                  updatePieces({ size: size.key });
+                onPress={async () => {
+                  await hapticsService.selection();
+                  updatePieces({ size: size.key as "small" | "medium" | "large" });
                 }}
                 className={`flex-1 items-center py-2 rounded-md ${
                   settings.pieces.size === size.key ? 'bg-blue-600' : 'bg-transparent'
@@ -327,8 +319,40 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Text className="text-lg font-semibold text-gray-300 flex-1">Sound Effects</Text>
               <Switch
                 value={settings.game.soundEnabled}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  console.log('🔍 Sound switch toggled to:', value);
+                  console.log('🔍 Current haptics setting:', settings.game.hapticsEnabled);
+                  
+                  // Try VERY strong haptic patterns
+                  try {
+                    console.log('🎯 Trying TRIPLE Heavy haptics...');
+                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    console.log('✅ Triple Heavy haptics successful');
+                  } catch (error) {
+                    console.log('❌ Triple Heavy haptics failed:', error);
+                  }
+                  
+                  setTimeout(async () => {
+                    try {
+                      console.log('🎯 Trying Notification haptic...');
+                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      console.log('✅ Notification haptic successful');
+                    } catch (error) {
+                      console.log('❌ Notification haptic failed:', error);
+                    }
+                  }, 500);
+                  
+                  setTimeout(async () => {
+                    try {
+                      console.log('🎯 Trying Error notification haptic...');
+                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                      console.log('✅ Error notification haptic successful');
+                    } catch (error) {
+                      console.log('❌ Error notification haptic failed:', error);
+                    }
+                  }, 1000);
                   updateGame({ soundEnabled: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
@@ -339,8 +363,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Text className="text-lg font-semibold text-gray-300 flex-1">Animations</Text>
               <Switch
                 value={settings.game.animationsEnabled}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
                   updateGame({ animationsEnabled: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
@@ -349,17 +373,41 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 }
               />
             </View>
-            <View className="flex-row justify-between items-center py-4">
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Move Hints</Text>
               <Switch
                 value={settings.game.showMoveHints}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
                   updateGame({ showMoveHints: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.showMoveHints ? "#FFFFFF" : "#9CA3AF"}
               />
+            </View>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Haptic Feedback</Text>
+              <Switch
+                value={settings.game.hapticsEnabled}
+                onValueChange={(value) => {
+                  // Don't trigger haptic feedback when toggling haptics setting
+                  updateGame({ hapticsEnabled: value });
+                }}
+                trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
+                thumbColor={settings.game.hapticsEnabled ? "#FFFFFF" : "#9CA3AF"}
+              />
+            </View>
+            <View className="py-4">
+              <TouchableOpacity
+                className="bg-blue-600 rounded-lg py-3 px-4 items-center"
+                onPress={async () => {
+                  console.log('🧪 Testing haptics...');
+                  await HapticsTestService.testHaptics();
+                  await HapticsTestService.testHapticsService();
+                }}
+              >
+                <Text className="text-white font-semibold">🧪 Test Haptics</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -372,8 +420,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Text className="text-lg font-semibold text-gray-300 flex-1">High Contrast</Text>
               <Switch
                 value={settings.accessibility.highContrast}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
                   updateAccessibility({ highContrast: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
@@ -386,8 +434,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Text className="text-lg font-semibold text-gray-300 flex-1">Large Text</Text>
               <Switch
                 value={settings.accessibility.largeText}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
                   updateAccessibility({ largeText: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
@@ -400,8 +448,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Text className="text-lg font-semibold text-gray-300 flex-1">Reduced Motion</Text>
               <Switch
                 value={settings.accessibility.reducedMotion}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
                   updateAccessibility({ reducedMotion: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
@@ -428,8 +476,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               </View>
               <Switch
                 value={settings.developer.soloMode}
-                onValueChange={(value) => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
                   updateDeveloper({ soloMode: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#EF4444" }}
@@ -467,8 +515,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               className={`flex-1 bg-emerald-600 rounded-lg py-3 px-5 items-center ${
                 isSaving ? 'bg-gray-700 border border-gray-600 opacity-60' : ''
               }`}
-              onPress={() => {
-                triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+              onPress={async () => {
+                await hapticsService.selection();
                 handleSaveSettings();
               }}
               disabled={isSaving}
@@ -479,8 +527,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
             </TouchableOpacity>
             <TouchableOpacity
               className="flex-1 bg-gray-600 rounded-lg py-3 px-5 items-center"
-              onPress={() => {
-                triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+              onPress={async () => {
+                await hapticsService.selection();
                 handleDiscardChanges();
               }}
             >

@@ -108,14 +108,31 @@ const P2PLobbyScreen: React.FC = () => {
     };
   }, []);
 
-  // Handle cleanup when screen loses focus (user navigates away)
+  // Handle discovery when screen gains/loses focus
   useFocusEffect(
     React.useCallback(() => {
-      // Screen is focused - discovery is already started in useEffect above
+      // Screen is focused - restart discovery to ensure we see new games
+      console.log("🎮 P2PLobbyScreen: Screen focused - starting network discovery");
+      try {
+        p2pService.discoverGames().catch(error => {
+          console.error("Error restarting discovery on focus:", error);
+        });
+      } catch (error) {
+        console.error("Error starting discovery on focus:", error);
+      }
+
+      // Set up periodic refresh every 5 seconds while screen is focused
+      const refreshInterval = setInterval(() => {
+        console.log("🎮 P2PLobbyScreen: Periodic refresh - discovering games");
+        p2pService.discoverGames().catch(error => {
+          console.error("Error in periodic discovery:", error);
+        });
+      }, 5000);
       
       // Return cleanup function when screen loses focus
       return () => {
-        console.log("🎮 P2PLobbyScreen: Screen lost focus - stopping network discovery");
+        console.log("🎮 P2PLobbyScreen: Screen lost focus - stopping network discovery and periodic refresh");
+        clearInterval(refreshInterval);
         try {
           networkDiscoveryService.stopDiscovery();
           p2pService.stopDiscovery();
@@ -581,9 +598,22 @@ const P2PLobbyScreen: React.FC = () => {
       </View>
 
       <View className="flex-1 items-center">
-        <Text className="text-white text-xl font-bold mb-4 text-center">
-          Available Games
-        </Text>
+        <View className="flex-row items-center justify-between w-full mb-4">
+          <Text className="text-white text-xl font-bold text-center flex-1">
+            Available Games
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              console.log("🎮 P2PLobbyScreen: Manual refresh requested");
+              p2pService.discoverGames().catch(error => {
+                console.error("Error refreshing games:", error);
+              });
+            }}
+            className="bg-blue-500 px-3 py-2 rounded-lg"
+          >
+            <Text className="text-white text-sm font-semibold">Refresh</Text>
+          </TouchableOpacity>
+        </View>
 
         {discoveredGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8">

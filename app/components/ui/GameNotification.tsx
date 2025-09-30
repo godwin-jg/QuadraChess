@@ -12,10 +12,47 @@ export default function GameNotification({
   isVisible,
   duration = 3000,
 }: GameNotificationProps) {
-  if (!isVisible || !message) return null;
+  const [shouldShow, setShouldShow] = useState(false);
+  const fadeAnim = useState(new Animated.Value(0))[0];
+
+  useEffect(() => {
+    if (isVisible && message) {
+      // Show notification
+      setShouldShow(true);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+
+      // Auto-dismiss after duration
+      const timer = setTimeout(() => {
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }).start(() => {
+          setShouldShow(false);
+        });
+      }, duration);
+
+      return () => clearTimeout(timer);
+    } else {
+      // Hide notification immediately
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start(() => {
+        setShouldShow(false);
+      });
+    }
+  }, [isVisible, message, duration, fadeAnim]);
+
+  if (!shouldShow) return null;
 
   return (
-    <View
+    <Animated.View
       style={{
         position: "absolute",
         top: 40,
@@ -28,6 +65,15 @@ export default function GameNotification({
         borderRadius: 8,
         alignItems: "center",
         justifyContent: "center",
+        opacity: fadeAnim,
+        transform: [
+          {
+            scale: fadeAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.8, 1],
+            }),
+          },
+        ],
       }}
     >
       <Text
@@ -44,6 +90,6 @@ export default function GameNotification({
       >
         {message}
       </Text>
-    </View>
+    </Animated.View>
   );
 }

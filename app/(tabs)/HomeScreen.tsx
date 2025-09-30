@@ -17,7 +17,7 @@ import Animated, {
   cancelAnimation,
   runOnJS
 } from "react-native-reanimated";
-import * as Haptics from "expo-haptics";
+import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
@@ -95,7 +95,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
 
   const handlePressIn = () => {
     scale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticsService.buttonPress();
   };
 
   const handlePressOut = () => {

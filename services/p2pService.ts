@@ -975,6 +975,10 @@ class P2PService {
     // Sync the new "playing" state to all clients
     this.syncLobbyStateToClients();
     
+    // ✅ CRITICAL FIX: Also sync the complete game state including scores
+    console.log("🎮 P2PService: Game started - syncing complete game state to all clients");
+    this.syncGameStateToClients();
+    
     // Also notify the host's own UI immediately
     console.log("🎮 P2PService: Notifying host UI of game started");
     this.notifyHandlers("game-state-update", this.gameState);
@@ -987,13 +991,40 @@ class P2PService {
       return;
     }
 
+    // ✅ CRITICAL FIX: Send complete Redux game state instead of just P2P game state
+    const currentReduxState = store.getState().game;
+    
     const message = {
       type: 'game-state',
-      payload: this.gameState,
+      gameState: {
+        // Core game state
+        boardState: currentReduxState.boardState,
+        currentPlayerTurn: currentReduxState.currentPlayerTurn,
+        gameStatus: currentReduxState.gameStatus,
+        scores: currentReduxState.scores,
+        capturedPieces: currentReduxState.capturedPieces,
+        eliminatedPlayers: currentReduxState.eliminatedPlayers,
+        winner: currentReduxState.winner,
+        justEliminated: currentReduxState.justEliminated,
+        checkStatus: currentReduxState.checkStatus,
+        promotionState: currentReduxState.promotionState,
+        hasMoved: currentReduxState.hasMoved,
+        enPassantTargets: currentReduxState.enPassantTargets,
+        gameOverState: currentReduxState.gameOverState,
+        // Multiplayer state
+        players: currentReduxState.players,
+        isHost: currentReduxState.isHost,
+        canStartGame: currentReduxState.canStartGame,
+        gameMode: currentReduxState.gameMode,
+        // History
+        history: currentReduxState.history,
+        historyIndex: currentReduxState.historyIndex,
+        viewingHistoryIndex: currentReduxState.viewingHistoryIndex,
+      },
       timestamp: Date.now(),
     };
 
-    console.log("P2PService: Sending game state to player", peerId);
+    console.log("P2PService: Sending complete game state to player", peerId, "with scores:", currentReduxState.scores);
     this.sendMessage(peerId, message);
   }
 
@@ -1039,6 +1070,55 @@ class P2PService {
     });
     
     this.broadcastMessage(message);
+  }
+
+  // ✅ CRITICAL FIX: Sync complete game state when game starts
+  private syncGameStateToClients(): void {
+    if (!this.isHost) return;
+
+    console.log("🎮 HOST: Syncing complete game state to all clients");
+    
+    // Get the current Redux game state
+    const currentReduxState = store.getState().game;
+    
+    // Create complete game state message
+    const gameStateMessage = {
+      type: 'game-state',
+      gameState: {
+        // Core game state
+        boardState: currentReduxState.boardState,
+        currentPlayerTurn: currentReduxState.currentPlayerTurn,
+        gameStatus: currentReduxState.gameStatus,
+        scores: currentReduxState.scores,
+        capturedPieces: currentReduxState.capturedPieces,
+        eliminatedPlayers: currentReduxState.eliminatedPlayers,
+        winner: currentReduxState.winner,
+        justEliminated: currentReduxState.justEliminated,
+        checkStatus: currentReduxState.checkStatus,
+        promotionState: currentReduxState.promotionState,
+        hasMoved: currentReduxState.hasMoved,
+        enPassantTargets: currentReduxState.enPassantTargets,
+        gameOverState: currentReduxState.gameOverState,
+        // Multiplayer state
+        players: currentReduxState.players,
+        isHost: currentReduxState.isHost,
+        canStartGame: currentReduxState.canStartGame,
+        gameMode: currentReduxState.gameMode,
+        // History
+        history: currentReduxState.history,
+        historyIndex: currentReduxState.historyIndex,
+        viewingHistoryIndex: currentReduxState.viewingHistoryIndex,
+      }
+    };
+
+    console.log("🎮 HOST: Broadcasting complete game state:", {
+      scores: currentReduxState.scores,
+      currentPlayerTurn: currentReduxState.currentPlayerTurn,
+      gameStatus: currentReduxState.gameStatus,
+      players: currentReduxState.players.length
+    });
+
+    this.broadcastMessage(gameStateMessage);
   }
 
   // ✅ Helper method for serverlessSignalingService to add a player
@@ -1383,7 +1463,7 @@ class P2PService {
     if (!this.isHost) {
       console.log("📥 P2PService: Client received game state, updating Redux:", gameState);
       const { store } = require("../state/store");
-      const { syncP2PGameState, setPlayers } = require("../state/gameSlice");
+      const { syncP2PGameState, setPlayers, setGameState } = require("../state/gameSlice");
       
       // Update Redux state with the received game state
       // Use players from gameState if available, otherwise create from playerCount
@@ -1414,15 +1494,23 @@ class P2PService {
         }
       }
       
-      store.dispatch(setPlayers(players));
-      store.dispatch(syncP2PGameState({
-        currentGame: gameState,
-        players: players,
-        playerCount: gameState.playerCount,
-        canStartGame: gameState.playerCount >= 2,
-        isConnected: true,
-        connectionError: null
-      }));
+      // ✅ CRITICAL FIX: If this is a complete game state (not just lobby state), 
+      // update the entire game state including scores
+      if (gameState.scores !== undefined) {
+        console.log("📥 P2PService: Received complete game state with scores:", gameState.scores);
+        store.dispatch(setGameState(gameState));
+      } else {
+        // This is just lobby state, only update lobby-related state
+        store.dispatch(setPlayers(players));
+        store.dispatch(syncP2PGameState({
+          currentGame: gameState,
+          players: players,
+          playerCount: gameState.playerCount,
+          canStartGame: gameState.playerCount >= 2,
+          isConnected: true,
+          connectionError: null
+        }));
+      }
       console.log("📥 P2PService: Redux state updated for client with", players.length, "players");
     }
     

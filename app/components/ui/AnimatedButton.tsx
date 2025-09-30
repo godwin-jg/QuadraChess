@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   withDelay
 } from "react-native-reanimated";
-import * as Haptics from "expo-haptics";
+import { hapticsService } from "@/services/hapticsService";
 
 // --- Reusable AnimatedButton Component ---
 interface AnimatedButtonProps {
@@ -54,7 +54,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
 
   const handlePressIn = () => {
     scale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    hapticsService.buttonPress();
   };
 
   const handlePressOut = () => {

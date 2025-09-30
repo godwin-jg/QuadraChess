@@ -84,12 +84,14 @@ export default function GameOverModal({
   const statsOpacity = useSharedValue(0);
   const buttonOpacity = useSharedValue(0);
   
-  // Individual player row animations
-  const playerAnimations = leaderboard.map(() => ({
-    opacity: useSharedValue(0),
-    translateY: useSharedValue(30),
-    scale: useSharedValue(0.9)
-  }));
+  // Individual player row animations - memoized to prevent recreation
+  const playerAnimations = React.useMemo(() => 
+    leaderboard.map(() => ({
+      opacity: useSharedValue(0),
+      translateY: useSharedValue(30),
+      scale: useSharedValue(0.9)
+    })), [leaderboard.length]
+  );
 
   // Play game end sound when modal appears
   useEffect(() => {

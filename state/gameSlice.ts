@@ -945,16 +945,18 @@ const gameSlice = createSlice({
       state.boardState[toRow][toCol] = pieceCode;
       state.boardState[fromRow][fromCol] = null;
 
-      // 🔊 Play move sound effect (includes haptic fallback if needed)
-      try {
-        const soundService = require('../services/soundService').default;
-        if (capturedPiece) {
-          soundService.playCaptureSound();
-        } else {
-          soundService.playMoveSound();
+      // 🔊 Play move sound effect (only for network moves, not solo/single mode)
+      if (state.gameMode !== "solo" && state.gameMode !== "single") {
+        try {
+          const soundService = require('../services/soundService').default;
+          if (capturedPiece) {
+            soundService.playCaptureSound();
+          } else {
+            soundService.playMoveSound();
+          }
+        } catch (error) {
+          console.log('🔊 SoundService: Failed to play move sound:', error);
         }
-      } catch (error) {
-        console.log('🔊 SoundService: Failed to play move sound:', error);
       }
 
       // Check if this is a castling move

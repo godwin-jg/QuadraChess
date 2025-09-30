@@ -35,8 +35,9 @@ import Square from "./Square";
 
 export default function Board() {
   const { width } = useWindowDimensions();
-  const boardSize = Math.min(width * 0.98, 600); // Max 600px or 98% of screen width
-  const squareSize = boardSize / 14;
+  // Memoized board dimensions - only recalculates when screen width changes
+  const boardSize = React.useMemo(() => Math.min(width * 0.98, 600), [width]);
+  const squareSize = React.useMemo(() => boardSize / 14, [boardSize]);
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { settings } = useSettings();
   const boardTheme = getBoardTheme(settings);
@@ -74,45 +75,26 @@ export default function Board() {
   // Animation values for current player glow
   const glowOpacity = useSharedValue(0);
   const glowScale = useSharedValue(1);
-  const glowColor = useSharedValue("#6B7280"); // Default gray
   
-  // Use React state for gradient ID instead of shared value
-  const [currentGradientId, setCurrentGradientId] = React.useState("defaultGradient");
+  // Static constants for optimal performance
+  const GRADIENT_MAP = {
+    "r": "rGradient",
+    "b": "bGradient", 
+    "y": "yGradient",
+    "g": "gGradient"
+  } as const;
+
+  // Static SVG path data - never changes, so no need to recalculate
+  const CROSS_SHAPE_PATH = "M 30 0 L 110 0 L 110 30 L 140 30 L 140 110 L 110 110 L 110 140 L 30 140 L 30 110 L 0 110 L 0 30 L 30 30 Z";
+
+  // Memoized gradient URL calculation - only recalculates when currentPlayerTurn changes
+  const currentGradientUrl = React.useMemo(() => {
+    const gradientId = GRADIENT_MAP[currentPlayerTurn as keyof typeof GRADIENT_MAP] || "defaultGradient";
+    return `url(#${gradientId})`;
+  }, [currentPlayerTurn]);
 
   // Update glow animation when turn changes
   React.useEffect(() => {
-    // Update glow color based on current player
-    console.log("🎨 Board: Current player turn:", currentPlayerTurn);
-    console.log("🎨 Board: Previous gradientId:", currentGradientId);
-    
-    switch (currentPlayerTurn) {
-      case "r": 
-        glowColor.value = "#EF4444"; // Red
-        setCurrentGradientId("rGradient");
-        console.log("🎨 Board: Set to red gradient");
-        break;
-      case "b": 
-        glowColor.value = "#3B82F6"; // Blue
-        setCurrentGradientId("bGradient");
-        console.log("🎨 Board: Set to blue gradient");
-        break;
-      case "y": 
-        glowColor.value = "#EAB308"; // Yellow
-        setCurrentGradientId("yGradient");
-        console.log("🎨 Board: Set to yellow gradient");
-        break;
-      case "g": 
-        glowColor.value = "#10B981"; // Green
-        setCurrentGradientId("gGradient");
-        console.log("🎨 Board: Set to green gradient");
-        break;
-      default: 
-        glowColor.value = "#6B7280"; // Gray
-        setCurrentGradientId("defaultGradient");
-        console.log("🎨 Board: Set to default gradient");
-    }
-    
-    console.log("🎨 Board: New gradientId:", currentGradientId);
 
     if (currentPlayerTurn) {
       // Animate glow in
@@ -140,11 +122,6 @@ export default function Board() {
     transform: [{ scale: glowScale.value }],
   }));
 
-  // Get the current gradient URL
-  const getCurrentGradientUrl = () => {
-    console.log("🎨 Board: Getting gradient URL for:", currentGradientId);
-    return `url(#${currentGradientId})`;
-  };
 
   // Create displayed game state (either live or historical) - optimized
   const displayedGameState = useMemo(() => {
@@ -377,84 +354,41 @@ export default function Board() {
              </Filter>
 
             {/* Player gradient definitions */}
-            {/* Red Player Gradient
             <LinearGradient id="rGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="#FF6B6B" stopOpacity="1.0" />
-              <Stop offset="50%" stopColor="#EF4444" stopOpacity="0.9" />
-              <Stop offset="100%" stopColor="#DC2626" stopOpacity="0.7" />
+              <Stop offset="0%" stopColor="#B91C1C" stopOpacity="0.9" />
+              <Stop offset="50%" stopColor="#FFC1C1" stopOpacity="1.0" />
+              <Stop offset="100%" stopColor="#B91C1C" stopOpacity="1.0" />
             </LinearGradient>
 
-            {/* Blue Player Gradient */}
-            {/* <LinearGradient id="bGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="#60A5FA" stopOpacity="1.0" />
-              <Stop offset="50%" stopColor="#3B82F6" stopOpacity="0.9" />
-              <Stop offset="100%" stopColor="#2563EB" stopOpacity="0.7" />
-            </LinearGradient> */}
+            <LinearGradient id="bGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#A8C9FA" stopOpacity="0.9" />
+              <Stop offset="50%" stopColor="#3B82F6" stopOpacity="1.0" />
+              <Stop offset="100%" stopColor="#1E3A8A" stopOpacity="1.0" />
+            </LinearGradient>
 
-            {/* Yellow Player Gradient */}
-            {/* <LinearGradient id="yGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="#FDE047" stopOpacity="1.0" />
-              <Stop offset="50%" stopColor="#EAB308" stopOpacity="0.9" />
-              <Stop offset="100%" stopColor="#CA8A04" stopOpacity="0.7" />
-            </LinearGradient> */}
+            <LinearGradient id="yGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#FEF3C7" stopOpacity="0.9" />
+              <Stop offset="50%" stopColor="#EAB308" stopOpacity="1.0" />
+              <Stop offset="100%" stopColor="#92400E" stopOpacity="1.0" />
+            </LinearGradient>
 
-            {/* Green Player Gradient */}
-            {/* <LinearGradient id="gGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="#4ADE80" stopOpacity="1.0" />
-              <Stop offset="50%" stopColor="#10B981" stopOpacity="0.9" />
-              <Stop offset="100%" stopColor="#059669" stopOpacity="0.7" />
-            </LinearGradient> */}
+            <LinearGradient id="gGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#A7F3D0" stopOpacity="0.9" />
+              <Stop offset="50%" stopColor="#10B981" stopOpacity="1.0" />
+              <Stop offset="100%" stopColor="#047857" stopOpacity="1.0" />
+            </LinearGradient>
 
-            {/* Default Gradient */}
-            {/* <LinearGradient id="defaultGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="#9CA3AF" stopOpacity="1.0" />
-              <Stop offset="50%" stopColor="#6B7280" stopOpacity="0.9" />
-              <Stop offset="100%" stopColor="#4B5563" stopOpacity="0.7" />
-            </LinearGradient> */} 
-            {/* Red Player Gradient */}
-  <LinearGradient id="rGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-    {/* Specular Highlight */}
-    <Stop offset="0%" stopColor="##B91C1C" stopOpacity="0.9" />
-    {/* Main Color */}
-    <Stop offset="50%" stopColor="#FFC1C1" stopOpacity="1.0" />
-    {/* Shadow */}
-    <Stop offset="100%" stopColor="##B91C1C" stopOpacity="1.0" /> 
-    {/*altenative option #EF4444*/}
-  </LinearGradient>
-
-  {/* Blue Player Gradient */}
-  <LinearGradient id="bGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-    <Stop offset="0%" stopColor="#A8C9FA" stopOpacity="0.9" />
-    <Stop offset="50%" stopColor="#3B82F6" stopOpacity="1.0" />
-    <Stop offset="100%" stopColor="#1E3A8A" stopOpacity="1.0" />
-  </LinearGradient>
-
-  {/* Yellow Player Gradient */}
-  <LinearGradient id="yGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-    <Stop offset="0%" stopColor="#FEF3C7" stopOpacity="0.9" />
-    <Stop offset="50%" stopColor="#EAB308" stopOpacity="1.0" />
-    <Stop offset="100%" stopColor="#92400E" stopOpacity="1.0" />
-  </LinearGradient>
-
-  {/* Green Player Gradient */}
-  <LinearGradient id="gGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-    <Stop offset="0%" stopColor="#A7F3D0" stopOpacity="0.9" />
-    <Stop offset="50%" stopColor="#10B981" stopOpacity="1.0" />
-    <Stop offset="100%" stopColor="#047857" stopOpacity="1.0" />
-  </LinearGradient>
-
-  {/* Default Gradient */}
-  <LinearGradient id="defaultGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-    <Stop offset="0%" stopColor="#E5E7EB" stopOpacity="0.9" />
-    <Stop offset="50%" stopColor="#6B7280" stopOpacity="1.0" />
-    <Stop offset="100%" stopColor="#374151" stopOpacity="1.0" />
-  </LinearGradient>
+            <LinearGradient id="defaultGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#E5E7EB" stopOpacity="0.9" />
+              <Stop offset="50%" stopColor="#6B7280" stopOpacity="1.0" />
+              <Stop offset="100%" stopColor="#374151" stopOpacity="1.0" />
+            </LinearGradient>
           </Defs>
 
            {/* Cross-shaped ambient glow path */}
            <Path
-             d="M 30 0 L 110 0 L 110 30 L 140 30 L 140 110 L 110 110 L 110 140 L 30 140 L 30 110 L 0 110 L 0 30 L 30 30 Z"
-             fill={getCurrentGradientUrl()}
+             d={CROSS_SHAPE_PATH}
+             fill={currentGradientUrl}
              filter="url(#softGlow)"
            />
         </Svg>

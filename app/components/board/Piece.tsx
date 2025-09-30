@@ -17,7 +17,7 @@ interface PieceProps {
   previewStyle?: string; // Override piece style for preview purposes
 }
 
-export default function Piece({
+const Piece = React.memo(function Piece({
   piece,
   size,
   isEliminated = false,
@@ -209,4 +209,6 @@ export default function Piece({
       <Text style={getTextStyle()}>{getPieceSymbol(piece)}</Text>
     </View>
   );
-}
+});
+
+export default Piece;

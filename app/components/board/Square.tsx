@@ -38,12 +38,13 @@ const Square = React.memo(function Square({
   onHoverOut,
   boardTheme,
 }: SquareProps) {
-  // Check if this is a corner square that should not be playable
-  const isCornerSquare =
+  // Check if this is a corner square that should not be playable - memoized for performance
+  const isCornerSquare = React.useMemo(() => 
     (row < 3 && col < 3) ||
     (row < 3 && col > 10) ||
     (row > 10 && col < 3) ||
-    (row > 10 && col > 10);
+    (row > 10 && col > 10), [row, col]
+  );
 
   // If it's a corner square, render a transparent spacer
   if (isCornerSquare) {

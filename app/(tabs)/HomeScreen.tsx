@@ -162,7 +162,7 @@ export default function HomeScreen() {
   // Simplified animation values for the container
   const containerOpacity = useSharedValue(0);
 
-  // Shared values for floating background pieces
+
   const pieceAnimations = Array.from({ length: 10 }, () => ({
     opacity: useSharedValue(0),
     scale: useSharedValue(1),
@@ -247,8 +247,19 @@ export default function HomeScreen() {
   useFocusEffect(
     React.useCallback(() => {
       playEntranceAnimation();
-      // We don't need a cleanup function as the loop is now self-sustaining
-      // and will stop when the component unmounts.
+      
+      // Cleanup function to stop animations when screen loses focus
+      return () => {
+        pieceAnimations.forEach(piece => {
+          // Cancel any running animations by resetting values
+          piece.opacity.value = 0;
+          piece.scale.value = 1;
+          piece.translateX.value = 0;
+          piece.translateY.value = height;
+          piece.bubbleScale.value = 1;
+          piece.rotateZ.value = 0;
+        });
+      };
     }, [])
   );
 

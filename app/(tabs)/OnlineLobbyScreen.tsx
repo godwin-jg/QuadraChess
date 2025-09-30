@@ -416,9 +416,9 @@ const OnlineLobbyScreen: React.FC = () => {
         )}
       </View>
 
-      <View className="space-y-4 mb-8">
+      <View className="space-y-6 mb-8">
         <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-white shadow-lg"
+          className="w-full py-4 px-6 mb-2 rounded-xl bg-white shadow-lg"
           onPress={createGame}
           disabled={isLoading}
         >

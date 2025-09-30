@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { RootState } from "../../state/store";
 import { 
   resetGame, 
@@ -90,7 +91,36 @@ const P2PLobbyScreen: React.FC = () => {
     p2pService.discoverGames().catch(error => {
       console.error("Error starting discovery:", error);
     });
+
+    // Cleanup: Stop discovery when component unmounts
+    return () => {
+      console.log("🎮 P2PLobbyScreen: Cleaning up - stopping network discovery");
+      try {
+        networkDiscoveryService.stopDiscovery();
+        p2pService.stopDiscovery();
+      } catch (error) {
+        console.error("Error stopping discovery:", error);
+      }
+    };
   }, []);
+
+  // Handle cleanup when screen loses focus (user navigates away)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Screen is focused - discovery is already started in useEffect above
+      
+      // Return cleanup function when screen loses focus
+      return () => {
+        console.log("🎮 P2PLobbyScreen: Screen lost focus - stopping network discovery");
+        try {
+          networkDiscoveryService.stopDiscovery();
+          p2pService.stopDiscovery();
+        } catch (error) {
+          console.error("Error stopping discovery on focus loss:", error);
+        }
+      };
+    }, [])
+  );
 
   // Name editing functions
   const startEditingName = () => {
@@ -483,9 +513,9 @@ const P2PLobbyScreen: React.FC = () => {
         </View>
       </View>
 
-      <View className="space-y-4 mb-8">
+      <View className="space-y-6 mb-8">
         <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-white shadow-lg"
+          className="w-full py-4 px-6 mb-2 rounded-xl bg-white shadow-lg"
           onPress={createGame}
           disabled={isLoading}
         >

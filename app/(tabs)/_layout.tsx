@@ -51,7 +51,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="P2PLobbyScreen"
         options={{
-          title: "P2P",
+          title: "Local",
           tabBarIcon: ({ color }) => <TabBarIcon name="link" color={color} />,
         }}
       />

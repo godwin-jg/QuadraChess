@@ -33,6 +33,7 @@ import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
 import networkDiscoveryService from "../../services/networkDiscoveryService";
 import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
+import { hapticsService } from "../../services/hapticsService";
 
 const P2PLobbyScreen: React.FC = () => {
   console.log("🎮 P2PLobbyScreen: Component mounted/rendered");
@@ -171,6 +172,14 @@ const P2PLobbyScreen: React.FC = () => {
       const game = await p2pService.createGame(settings.profile.name.trim());
       // ✅ P2P service now updates Redux directly, no need to set local state
       
+      // 🔊 Play success sound for creating game
+      try {
+        const soundService = require('../../services/soundService').default;
+        soundService.playSuccessSound();
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play success sound:', error);
+      }
+      
       console.log("P2P Game created:", game);
     } catch (error) {
       console.error("Error creating P2P game:", error);
@@ -218,6 +227,14 @@ const P2PLobbyScreen: React.FC = () => {
       
       await p2pService.joinDiscoveredGame(gameId, settings.profile.name.trim());
       
+      // 🔊 Play success sound for joining game
+      try {
+        const soundService = require('../../services/soundService').default;
+        soundService.playSuccessSound();
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play success sound:', error);
+      }
+      
       console.log("Joined P2P game:", gameId);
     } catch (error) {
       console.error("Error joining P2P game:", error);
@@ -247,6 +264,14 @@ const P2PLobbyScreen: React.FC = () => {
       
       // This will update the host's state and trigger the sync to clients
       p2pService.sendGameStarted(); 
+      
+      // 🔊 Play game start sound
+      try {
+        const soundService = require('../../services/soundService').default;
+        soundService.playGameStartSound();
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play game start sound:', error);
+      }
       
       // The host navigates itself
       try {
@@ -409,7 +434,10 @@ const P2PLobbyScreen: React.FC = () => {
               placeholderTextColor="#9CA3AF"
             />
           ) : (
-            <TouchableOpacity onPress={startEditingName}>
+            <TouchableOpacity onPress={() => {
+              hapticsService.selection();
+              startEditingName();
+            }}>
               <Text className="text-white text-2xl font-bold">
                 {settings.profile.name}
               </Text>
@@ -549,7 +577,10 @@ const P2PLobbyScreen: React.FC = () => {
             placeholderTextColor="#9CA3AF"
           />
         ) : (
-          <TouchableOpacity onPress={startEditingName}>
+          <TouchableOpacity onPress={() => {
+            hapticsService.selection();
+            startEditingName();
+          }}>
             <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
           </TouchableOpacity>
         )}

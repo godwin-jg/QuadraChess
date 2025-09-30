@@ -9,6 +9,7 @@ import Animated, {
   withDelay
 } from "react-native-reanimated";
 import { hapticsService } from "@/services/hapticsService";
+import soundService from "@/services/soundService";
 
 // --- Reusable AnimatedButton Component ---
 interface AnimatedButtonProps {
@@ -55,6 +56,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
   const handlePressIn = () => {
     scale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
     hapticsService.buttonPress();
+    soundService.playButtonSound();
   };
 
   const handlePressOut = () => {

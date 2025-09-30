@@ -6,6 +6,7 @@ import { resignGame } from "../../../state/gameSlice";
 import onlineGameService from "../../../services/onlineGameService";
 import ResignConfirmationModal from "./ResignConfirmationModal";
 import { useLocalSearchParams } from "expo-router";
+import soundService from "../../../services/soundService";
 
 export default function ResignButton() {
   const dispatch = useDispatch();
@@ -86,6 +87,14 @@ export default function ResignButton() {
         // For local games, resign the current player's turn
         dispatch(resignGame(localPlayerColor || undefined));
       }
+      
+      // 🔊 Play game-end sound for resignation
+      try {
+        soundService.playGameEndSound();
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play game-end sound for resignation:', error);
+      }
+      
       setShowResignModal(false);
     } catch (error) {
       console.error("ResignButton: Error resigning from game:", error);

@@ -261,6 +261,14 @@ export default function HomeScreen() {
     setIsNavigating(true);
 
     try {
+      // 🔊 Play home screen button sound
+      try {
+        const soundService = require('../../services/soundService').default;
+        soundService.playButtonHomescreenSound();
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play home screen button sound:', error);
+      }
+
       await modeSwitchService.handleModeSwitch(
         targetMode,
         () => {
@@ -388,7 +396,16 @@ export default function HomeScreen() {
         </Text> */}
         <TouchableOpacity
           className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
-          onPress={() => router.push("/settings")}
+          onPress={() => {
+            // 🔊 Play home screen button sound
+            try {
+              const soundService = require('../../services/soundService').default;
+              soundService.p;
+            } catch (error) {
+              console.log('🔊 SoundService: Failed to play home screen button sound:', error);
+            }
+            router.push("/settings");
+          }}
         >
           <Text className="text-xl">⚙️</Text>
         </TouchableOpacity>

@@ -8,6 +8,7 @@ import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import Colors from "@/constants/Colors";
+import { hapticsService } from "@/services/hapticsService";
 
 // --- Helper Components ---
 function TabBarIcon(props: { name: React.ComponentProps<typeof FontAwesome>["name"]; color: string; }) {
@@ -76,7 +77,11 @@ function CustomTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           return (
             <TouchableOpacity
               key={route.key}
-              onPress={() => navigation.navigate(route.name)}
+              onPress={() => {
+                // 🔊 Play haptic feedback for tab button press
+                hapticsService.selection();
+                navigation.navigate(route.name);
+              }}
               onLayout={(event) => {
                 const { x, width } = event.nativeEvent.layout;
                 setLayouts(prev => ({ ...prev, [route.key]: { x, width } }));

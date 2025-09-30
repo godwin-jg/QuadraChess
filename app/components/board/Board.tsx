@@ -173,8 +173,22 @@ export default function Board() {
             console.error("Failed to make online move:", error);
             // Check if it's a "Not your turn" error
             if (error instanceof Error && error.message === "Not your turn") {
+              // 🔊 Play illegal move sound
+              try {
+                const soundService = require('../../services/soundService').default;
+                soundService.playIllegalMoveSound();
+              } catch (soundError) {
+                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
+              }
               Alert.alert("Not your turn", "Please wait for your turn to make a move.");
             } else {
+              // 🔊 Play illegal move sound for failed moves
+              try {
+                const soundService = require('../../services/soundService').default;
+                soundService.playIllegalMoveSound();
+              } catch (soundError) {
+                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
+              }
               // FIX: Inform the user about the failed move
               Alert.alert(
                 "Move Failed",

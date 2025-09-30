@@ -287,6 +287,14 @@ const gameSlice = createSlice({
         );
 
         if (isCastling) {
+          // 🔊 Play castle sound effect (includes haptic fallback if needed)
+          try {
+            const soundService = require('../services/soundService').default;
+            soundService.playCastleSound();
+          } catch (error) {
+            console.log('🔊 SoundService: Failed to play castle sound:', error);
+          }
+          
           // Handle castling - move both King and Rook
           const kingTargetRow = targetRow;
           const kingTargetCol = targetCol;
@@ -477,6 +485,18 @@ const gameSlice = createSlice({
         state.boardState[targetRow][targetCol] = pieceToMove;
         state.boardState[startRow][startCol] = null;
 
+        // 🔊 Play move sound effect (includes haptic fallback if needed)
+        try {
+          const soundService = require('../services/soundService').default;
+          if (capturedPiece) {
+            soundService.playCaptureSound();
+          } else {
+            soundService.playMoveSound();
+          }
+        } catch (error) {
+          console.log('🔊 SoundService: Failed to play move sound:', error);
+        }
+
         if (isPromotion) {
           // Pause the game for promotion selection
           state.promotionState = {
@@ -592,6 +612,14 @@ const gameSlice = createSlice({
                 state.currentPlayerTurn as keyof typeof state.scores
               ] += 10;
 
+              // 🔊 Play checkmate sound effect (includes haptic fallback if needed)
+              try {
+                const soundService = require('../services/soundService').default;
+                soundService.playCheckmateSound();
+              } catch (error) {
+                console.log('🔊 SoundService: Failed to play checkmate sound:', error);
+              }
+
               // Set game over state for checkmate
               state.gameOverState = {
                 isGameOver: true,
@@ -603,6 +631,14 @@ const gameSlice = createSlice({
               state.gameStatus = "stalemate";
               state.eliminatedPlayers.push(opponent);
               state.justEliminated = opponent;
+
+              // 🔊 Play stalemate sound effect (includes haptic fallback if needed)
+              try {
+                const soundService = require('../services/soundService').default;
+                soundService.playSound('stalemate');
+              } catch (error) {
+                console.log('🔊 SoundService: Failed to play stalemate sound:', error);
+              }
 
               // Set game over state for stalemate
               state.gameOverState = {
@@ -696,6 +732,15 @@ const gameSlice = createSlice({
     ) => {
       if (state.promotionState.isAwaiting && state.promotionState.position) {
         const { pieceType } = action.payload;
+        
+        // 🔊 Play promote sound effect (includes haptic fallback if needed)
+        try {
+          const soundService = require('../services/soundService').default;
+          soundService.playPromoteSound();
+        } catch (error) {
+          console.log('🔊 SoundService: Failed to play promote sound:', error);
+        }
+        
         const { row, col } = state.promotionState.position;
         const pieceColor = state.promotionState.color!;
 
@@ -900,18 +945,150 @@ const gameSlice = createSlice({
       state.boardState[toRow][toCol] = pieceCode;
       state.boardState[fromRow][fromCol] = null;
 
+      // 🔊 Play move sound effect (includes haptic fallback if needed)
+      try {
+        const soundService = require('../services/soundService').default;
+        if (capturedPiece) {
+          soundService.playCaptureSound();
+        } else {
+          soundService.playMoveSound();
+        }
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play move sound:', error);
+      }
+
+      // Check if this is a castling move
+      const isCastling = isCastlingMove(
+        pieceCode,
+        fromRow,
+        fromCol,
+        toRow,
+        toCol
+      );
+
+      if (isCastling) {
+        // 🔊 Play castle sound effect (includes haptic fallback if needed)
+        try {
+          const soundService = require('../services/soundService').default;
+          soundService.playCastleSound();
+        } catch (error) {
+          console.log('🔊 SoundService: Failed to play castle sound:', error);
+        }
+        
+        // Handle castling - move both King and Rook
+        const kingTargetRow = toRow;
+        const kingTargetCol = toCol;
+
+        // Determine rook positions based on castling direction
+        let rookStartRow: number, rookStartCol: number, rookTargetRow: number, rookTargetCol: number;
+
+        if (playerColor === "r") {
+          // Red castling
+          if (toCol === 2) {
+            // Kingside castling
+            rookStartRow = 7;
+            rookStartCol = 7;
+            rookTargetRow = 7;
+            rookTargetCol = 5;
+          } else {
+            // Queenside castling
+            rookStartRow = 7;
+            rookStartCol = 0;
+            rookTargetRow = 7;
+            rookTargetCol = 3;
+          }
+        } else if (playerColor === "b") {
+          // Blue castling
+          if (toRow === 2) {
+            // Kingside castling
+            rookStartRow = 0;
+            rookStartCol = 7;
+            rookTargetRow = 2;
+            rookTargetCol = 7;
+          } else {
+            // Queenside castling
+            rookStartRow = 0;
+            rookStartCol = 0;
+            rookTargetRow = 2;
+            rookTargetCol = 0;
+          }
+        } else if (playerColor === "y") {
+          // Yellow castling
+          if (toCol === 5) {
+            // Kingside castling
+            rookStartRow = 0;
+            rookStartCol = 7;
+            rookTargetRow = 0;
+            rookTargetCol = 5;
+          } else {
+            // Queenside castling
+            rookStartRow = 0;
+            rookStartCol = 0;
+            rookTargetRow = 0;
+            rookTargetCol = 3;
+          }
+        } else if (playerColor === "g") {
+          // Green castling
+          if (toRow === 5) {
+            // Kingside castling
+            rookStartRow = 7;
+            rookStartCol = 7;
+            rookTargetRow = 5;
+            rookTargetCol = 7;
+          } else {
+            // Queenside castling
+            rookStartRow = 7;
+            rookStartCol = 0;
+            rookTargetRow = 5;
+            rookTargetCol = 0;
+          }
+        } else {
+          // Default fallback (should not happen)
+          rookStartRow = 0;
+          rookStartCol = 0;
+          rookTargetRow = 0;
+          rookTargetCol = 0;
+        }
+
+        // Move the rook
+        const rookPiece = state.boardState[rookStartRow][rookStartCol];
+        state.boardState[rookTargetRow][rookTargetCol] = rookPiece;
+        state.boardState[rookStartRow][rookStartCol] = null;
+
+        // Update hasMoved for the rook
+        const rookId = getRookIdentifier(playerColor, rookStartRow, rookStartCol);
+        if (rookId) {
+          state.hasMoved[rookId as keyof typeof state.hasMoved] = true;
+        }
+      }
+
       // Note: For online mode, turn management is handled by the server
 
       // Clear selection
       state.selectedPiece = null;
       state.validMoves = [];
 
-      // Update check status
-      state.checkStatus = updateAllCheckStatus(
-        state.boardState,
-        state.eliminatedPlayers,
-        state.hasMoved
-      );
+        // Update check status
+        const newCheckStatus = updateAllCheckStatus(
+          state.boardState,
+          state.eliminatedPlayers,
+          state.hasMoved
+        );
+        
+        // 🔊 Play check sound if any player is now in check
+        const wasInCheck = Object.values(state.checkStatus).some(status => status);
+        const isNowInCheck = Object.values(newCheckStatus).some(status => status);
+        
+        if (!wasInCheck && isNowInCheck) {
+          try {
+            const soundService = require('../services/soundService').default;
+            soundService.playCheckSound();
+          } catch (error) {
+            console.log('🔊 SoundService: Failed to play check sound:', error);
+          }
+        }
+        
+        state.checkStatus = newCheckStatus;
 
       // ✅ CRITICAL: Add complete game logic for P2P mode (same as single player)
       if (state.gameMode === "p2p") {
@@ -954,6 +1131,14 @@ const gameSlice = createSlice({
                 playerColor as keyof typeof state.scores
               ] += 10;
 
+              // 🔊 Play checkmate sound effect (includes haptic fallback if needed)
+              try {
+                const soundService = require('../services/soundService').default;
+                soundService.playCheckmateSound();
+              } catch (error) {
+                console.log('🔊 SoundService: Failed to play checkmate sound:', error);
+              }
+
               // Set game over state for checkmate
               state.gameOverState = {
                 isGameOver: true,
@@ -966,6 +1151,14 @@ const gameSlice = createSlice({
               state.gameStatus = "stalemate";
               state.eliminatedPlayers.push(opponent);
               state.justEliminated = opponent;
+
+              // 🔊 Play stalemate sound effect (includes haptic fallback if needed)
+              try {
+                const soundService = require('../services/soundService').default;
+                soundService.playSound('stalemate');
+              } catch (error) {
+                console.log('🔊 SoundService: Failed to play stalemate sound:', error);
+              }
 
               // Set game over state for stalemate
               state.gameOverState = {

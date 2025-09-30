@@ -8,6 +8,7 @@ import {
   selectIsViewingHistory,
 } from "../../../state/gameSlice";
 import { useLocalSearchParams } from "expo-router";
+import { hapticsService } from "../../../services/hapticsService";
 
 export default function HistoryControls() {
   const dispatch = useDispatch();
@@ -46,24 +47,28 @@ export default function HistoryControls() {
 
   const handleStepBack = () => {
     if (canStepBack) {
+      hapticsService.selection();
       dispatch(stepHistory("back"));
     }
   };
 
   const handleStepPrevious = () => {
     if (canStepPrevious) {
+      hapticsService.selection();
       dispatch(stepHistory("previous"));
     }
   };
 
   const handleStepForward = () => {
     if (canStepForward) {
+      hapticsService.selection();
       dispatch(stepHistory("forward"));
     }
   };
 
   const handleReturnToLive = () => {
     if (canReturnToLive) {
+      hapticsService.selection();
       dispatch(returnToLive());
     }
   };

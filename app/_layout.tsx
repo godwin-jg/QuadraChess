@@ -18,6 +18,7 @@ import { SettingsProvider } from "../context/SettingsContext";
 // Initialize Firebase with a small delay to ensure proper initialization
 import "../services/firebaseInit";
 // Start game cleanup service
+import soundService from "../services/soundService";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -45,6 +46,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
+      // Initialize sound service
+      soundService.initialize().catch(error => {
+        console.warn('Failed to initialize sound service:', error);
+      });
+      
       // Add a small delay to ensure Firebase is fully initialized
       setTimeout(() => {
         SplashScreen.hideAsync();

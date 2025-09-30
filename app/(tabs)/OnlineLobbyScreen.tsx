@@ -21,6 +21,7 @@ import { useSettings } from "../../context/SettingsContext";
 import { SafeAreaView } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
+import { hapticsService } from "../../services/hapticsService";
 
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
@@ -318,7 +319,10 @@ const OnlineLobbyScreen: React.FC = () => {
               placeholderTextColor="#9CA3AF"
             />
           ) : (
-            <TouchableOpacity onPress={startEditingName}>
+            <TouchableOpacity onPress={() => {
+              hapticsService.selection();
+              startEditingName();
+            }}>
               <Text className="text-white text-2xl font-bold">
                 {settings.profile.name}
               </Text>
@@ -443,7 +447,10 @@ const OnlineLobbyScreen: React.FC = () => {
             placeholderTextColor="#9CA3AF"
           />
         ) : (
-          <TouchableOpacity onPress={startEditingName}>
+          <TouchableOpacity onPress={() => {
+            hapticsService.selection();
+            startEditingName();
+          }}>
             <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
           </TouchableOpacity>
         )}

@@ -11,6 +11,7 @@ import {
 import { useRouter } from "expo-router";
 import { hapticsService } from '@/services/hapticsService';
 import { HapticsTestService } from '@/services/hapticsTestService';
+import soundService from '@/services/soundService';
 import * as Haptics from 'expo-haptics';
 import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "../board/BoardThemeConfig";
@@ -365,6 +366,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 value={settings.game.animationsEnabled}
                 onValueChange={async (value) => {
                   await hapticsService.toggle();
+                  soundService.playToggleSound();
                   updateGame({ animationsEnabled: value });
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}

@@ -6,6 +6,7 @@ import { resignGame } from "../../../state/gameSlice";
 import onlineGameService from "../../../services/onlineGameService";
 import ResignConfirmationModal from "./ResignConfirmationModal";
 import { useLocalSearchParams } from "expo-router";
+import soundService from "../../../services/soundService";
 
 export default function GameMenu() {
   const dispatch = useDispatch();
@@ -57,6 +58,14 @@ export default function GameMenu() {
         // Local multiplayer or single player - use Redux action
         dispatch(resignGame());
       }
+      
+      // 🔊 Play game-end sound for resignation
+      try {
+        soundService.playGameEndSound();
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play game-end sound for resignation:', error);
+      }
+      
       setShowResignModal(false);
     } catch (error) {
       console.error("Error resigning from game:", error);

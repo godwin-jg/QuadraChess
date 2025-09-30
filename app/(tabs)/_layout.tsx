@@ -109,6 +109,7 @@ export default function TabLayout() {
     <Tabs
       // Use our custom component for the tab bar
       tabBar={(props) => <CustomTabBar {...props} />}
+      initialRouteName="HomeScreen"
       screenOptions={{
         // Hide all default headers for a fully custom/immersive look
         headerShown: false,

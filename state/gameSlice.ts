@@ -705,12 +705,19 @@ const gameSlice = createSlice({
       }
     },
     resetGame: (state) => {
+      // Preserve the current game mode before resetting
+      const currentGameMode = state.gameMode;
+      
       // Reset the entire game state back to baseInitialState
       const resetState = {
         ...baseInitialState,
         checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
       };
       Object.assign(state, resetState);
+      
+      // Restore the game mode after reset
+      state.gameMode = currentGameMode;
+      
       // Initialize history as empty - no initial snapshot
       state.history = [];
       state.historyIndex = 0; // This should be 0 for the current state, not viewing history

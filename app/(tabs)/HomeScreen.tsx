@@ -409,10 +409,11 @@ export default function HomeScreen() {
           className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
           onPress={() => {
             try {
-              const soundService = require('../../services/soundService').default;
-              soundService.playButtonSound();
+              // Only play haptic feedback, no sound
+              const { Haptics } = require('expo-haptics');
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             } catch (error) {
-              console.log('🔊 SoundService: Failed to play home screen button sound:', error);
+              console.log('🔊 Failed to play haptic feedback:', error);
             }
             router.push("/settings");
           }}

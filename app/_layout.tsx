@@ -8,12 +8,13 @@ import {
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Provider } from "react-redux";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "../global.css";
 import { store } from "../state";
 import { SettingsProvider } from "../context/SettingsContext";
+import CustomSplashScreen from "./components/ui/SplashScreen";
 
 // Initialize Firebase with a small delay to ensure proper initialization
 import "../services/firebaseInit";
@@ -38,6 +39,7 @@ export default function RootLayout() {
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     ...FontAwesome.font,
   });
+  const [showCustomSplash, setShowCustomSplash] = useState(true);
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
@@ -51,10 +53,13 @@ export default function RootLayout() {
         console.warn('Failed to initialize sound service:', error);
       });
       
-      // Add a small delay to ensure Firebase is fully initialized
+      // Hide the default splash screen immediately
+      SplashScreen.hideAsync();
+      
+      // Show our custom splash for a bit longer for a polished feel
       setTimeout(() => {
-        SplashScreen.hideAsync();
-      }, 1000);
+        setShowCustomSplash(false);
+      }, 1500);
     }
   }, [loaded]);
 
@@ -67,6 +72,7 @@ export default function RootLayout() {
       <SettingsProvider>
         <Provider store={store}>
           <RootLayoutNav />
+          <CustomSplashScreen visible={showCustomSplash} />
         </Provider>
       </SettingsProvider>
     </SafeAreaProvider>

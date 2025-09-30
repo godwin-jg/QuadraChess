@@ -54,6 +54,19 @@ export default function GameScreen() {
     // This function will be returned by the effect to clean up everything
     let cleanupFunction = () => {};
 
+    // Determine the effective mode based on settings
+    const effectiveMode = settings.developer.soloMode
+      ? "solo"
+      : (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
+    
+    console.log("🔧 GameScreen Debug:", {
+      "settings.developer.soloMode": settings.developer.soloMode,
+      "route mode": mode,
+      "effectiveMode": effectiveMode,
+      "settings object": settings.developer,
+      "full settings": settings
+    });
+
     const setupConnectionForMode = async (currentMode: string) => {
       console.log("GameScreen: Setting up connection for mode:", currentMode);
       
@@ -61,26 +74,21 @@ export default function GameScreen() {
       setIsOnlineMode(currentMode === "online" && !!gameId);
       setIsP2PMode(currentMode === "p2p");
 
-      // Set the game mode in the Redux store
-      const effectiveMode = settings.developer.soloMode
-        ? "solo"
-        : (currentMode as "solo" | "local" | "online" | "p2p" | "single");
-
       console.log(
         "GameScreen: Setting game mode:",
-        effectiveMode,
-        "from route mode:",
         currentMode,
+        "from route mode:",
+        mode,
         "solo mode enabled:",
         settings.developer.soloMode
       );
       console.log("GameScreen: Current Redux gameMode before dispatch:", store.getState().game.gameMode);
       
       // ✅ Don't override P2P mode if it's already set
-      if (store.getState().game.gameMode === "p2p" && effectiveMode !== "p2p") {
+      if (store.getState().game.gameMode === "p2p" && currentMode !== "p2p") {
         console.log("GameScreen: Skipping gameMode change - already set to p2p");
       } else {
-        dispatch(setGameMode(effectiveMode));
+        dispatch(setGameMode(currentMode as any));
         console.log("GameScreen: Current Redux gameMode after dispatch:", store.getState().game.gameMode);
       }
 
@@ -228,7 +236,7 @@ export default function GameScreen() {
       }
     };
 
-    setupConnectionForMode(mode || "solo");
+    setupConnectionForMode(effectiveMode);
 
     // The single return function ensures the previous mode's
     // connections and listeners are ALWAYS torn down before the

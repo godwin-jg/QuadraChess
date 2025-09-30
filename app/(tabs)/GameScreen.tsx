@@ -286,6 +286,7 @@ export default function GameScreen() {
   const viewingHistoryIndex = useSelector((state: RootState) => state.game.viewingHistoryIndex);
   const boardState = useSelector((state: RootState) => state.game.boardState);
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
+  
   const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
   const winner = useSelector((state: RootState) => state.game.winner);
   const capturedPieces = useSelector((state: RootState) => state.game.capturedPieces);
@@ -296,6 +297,7 @@ export default function GameScreen() {
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
   const botPlayers = useSelector((state: RootState) => state.game.botPlayers);
+  
 
   // Clear justEliminated flag after notification duration
   useEffect(() => {
@@ -313,8 +315,7 @@ export default function GameScreen() {
   // ✅ Bot Controller - triggers bot moves when it's a bot's turn
   useEffect(() => {
     // Check if the current player is a bot and the game is active
-    if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active') {
-      
+    if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active' && isGameStateReady) {
       // Add a "thinking" delay to feel more natural
       const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
 
@@ -324,7 +325,7 @@ export default function GameScreen() {
 
       return () => clearTimeout(timer);
     }
-  }, [currentPlayerTurn, botPlayers, gameStatus]);
+  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady]);
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {
@@ -482,7 +483,7 @@ export default function GameScreen() {
             style={{ position: 'absolute', width: '100%' }}
           >
             <PlayerHUDPanel 
-              players={[players[2], players[3]]} // Yellow, Green
+              players={[players[2], players[3]]}
               panelType="top"
             />
           </Animated.View>
@@ -495,9 +496,9 @@ export default function GameScreen() {
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
-      <View style={{ paddingBottom: 100, paddingTop: 8 }}> {/* 60px tab bar + 40px breathing room */}
+      <View style={{ paddingBottom: 100, paddingTop: 8 }}>
         <PlayerHUDPanel 
-          players={[players[0], players[1]]} // Red, Blue
+          players={[players[0], players[1]]}
           panelType="bottom"
         />
       </View>

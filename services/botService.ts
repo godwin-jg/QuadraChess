@@ -25,7 +25,7 @@ interface MoveOption {
   capturedPieceCode?: string | null;
 }
 
-const getAllLegalMoves = (botColor: string, gameState: GameState): MoveOption[] => {
+const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: number = 50): MoveOption[] => {
   const allMoves: MoveOption[] = [];
   const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
 
@@ -37,7 +37,10 @@ const getAllLegalMoves = (botColor: string, gameState: GameState): MoveOption[] 
           pieceCode, { row: r, col: c }, boardState, eliminatedPlayers, hasMoved, enPassantTargets
         );
         
-        movesForPiece.forEach(move => {
+        // Limit moves per piece to avoid excessive computation
+        const limitedMoves = movesForPiece.slice(0, 8); // Max 8 moves per piece
+        
+        limitedMoves.forEach(move => {
           const capturedPieceCode = boardState[move.row][move.col];
           allMoves.push({ 
             from: { row: r, col: c }, 
@@ -49,17 +52,37 @@ const getAllLegalMoves = (botColor: string, gameState: GameState): MoveOption[] 
             capturedPieceCode 
           });
         });
+        
+        // Stop if we've reached the maximum number of moves
+        if (allMoves.length >= maxMoves) {
+          break;
+        }
       }
     }
+    
+    // Break outer loop if we've reached the limit
+    if (allMoves.length >= maxMoves) {
+      break;
+    }
   }
-  return allMoves;
+  
+  return allMoves.slice(0, maxMoves); // Ensure we don't exceed the limit
 };
 
 const makeBotMove = (botColor: string) => {
   const gameState = store.getState().game;
+  
+  // Safety checks
+  if (!gameState || !gameState.boardState || gameState.gameStatus !== 'active') {
+    return;
+  }
+  
   const allLegalMoves = getAllLegalMoves(botColor, gameState);
+  console.log(`🤖 Bot ${botColor}: Found ${allLegalMoves.length} legal moves (limited for performance)`);
 
-  if (allLegalMoves.length === 0) return;
+  if (allLegalMoves.length === 0) {
+    return;
+  }
 
   const captureMoves = allLegalMoves.filter(move => move.to.isCapture && move.capturedPieceCode);
 

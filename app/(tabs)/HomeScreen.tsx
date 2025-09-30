@@ -269,7 +269,11 @@ export default function HomeScreen() {
   const handleStartSinglePlayer = () => {
     dispatch(resetGame());
     dispatch(setBotPlayers(['b', 'y', 'g'])); // Set Blue, Yellow, Green as bots
-    handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single"); 
+    
+    // Navigate after a short delay to ensure Redux actions are processed
+    setTimeout(() => {
+      handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single"); 
+    }, 50);
   };
 
   const handleModeSwitch = async (

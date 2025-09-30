@@ -10,6 +10,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { Provider } from "react-redux";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import "../global.css";
 import { store } from "../state";
 import { SettingsProvider } from "../context/SettingsContext";
@@ -56,11 +57,13 @@ export default function RootLayout() {
   }
 
   return (
-    <SettingsProvider>
-      <Provider store={store}>
-        <RootLayoutNav />
-      </Provider>
-    </SettingsProvider>
+    <SafeAreaProvider>
+      <SettingsProvider>
+        <Provider store={store}>
+          <RootLayoutNav />
+        </Provider>
+      </SettingsProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -71,7 +74,13 @@ function RootLayoutNav() {
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+        <Stack.Screen 
+          name="modal" 
+          options={{ 
+            presentation: "modal",
+            animation: 'fade'
+          }} 
+        />
       </Stack>
     </ThemeProvider>
   );

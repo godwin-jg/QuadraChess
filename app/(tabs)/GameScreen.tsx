@@ -21,6 +21,8 @@ import HistoryControls from "../components/ui/HistoryControls";
 import PlayerInfoPod from "../components/ui/PlayerInfoPod";
 import PromotionModal from "../components/ui/PromotionModal";
 import networkService from "../services/networkService";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import GridBackground from "../components/ui/GridBackground";
 
 export default function GameScreen() {
   // Get dispatch function
@@ -30,6 +32,7 @@ export default function GameScreen() {
     mode?: string;
   }>();
   const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
   const [isOnlineMode, setIsOnlineMode] = useState(false);
   const [isP2PMode, setIsP2PMode] = useState(false);
   const [connectionStatus, setConnectionStatus] =
@@ -338,32 +341,41 @@ export default function GameScreen() {
   if (!isGameStateReady) {
     return (
       <View className="flex-1 bg-black justify-center items-center">
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text className="text-white text-lg mt-4">Loading game...</Text>
-        {(isOnlineMode || isP2PMode) && (
-          <Text className="text-gray-400 text-sm mt-2">{connectionStatus}</Text>
-        )}
+        {/* Subtle blueprint grid background */}
+        <GridBackground />
+        <View style={{ paddingTop: insets.top }}>
+          <ActivityIndicator size="large" color="#ffffff" />
+          <Text className="text-white text-lg mt-4">Loading game...</Text>
+          {(isOnlineMode || isP2PMode) && (
+            <Text className="text-gray-400 text-sm mt-2">{connectionStatus}</Text>
+          )}
+        </View>
       </View>
     );
   }
 
   return (
     <View className="flex-1 bg-black justify-center items-center">
-      {/* History Controls - Top Center */}
-      <View className="absolute top-4 z-10">
+      {/* Subtle blueprint grid background */}
+      <GridBackground />
+      
+      {/* History Controls - Top Center with safe area */}
+      <View className="absolute z-10" style={{ top: insets.top + 100 }}>
         <HistoryControls />
       </View>
 
-      {/* Resign Button - Bottom Center */}
-      <ResignButton />
+      {/* Resign Button - Bottom Center with safe area */}
+      <View style={{ position: 'absolute', bottom: insets.bottom + 80 }}>
+        <ResignButton />
+      </View>
 
       {/* Chess Board - Centered */}
       <Board />
 
-      {/* Player Info Pods - Positioned in corners */}
+      {/* Player Info Pods - Positioned in corners with safe areas */}
 
       {/* Top Left - Yellow Player */}
-      <View className="absolute top-4 left-4">
+      <View className="absolute left-4" style={{ top: insets.top + 60 }}>
         <PlayerInfoPod
           player={players[2]}
           capturedPieces={players[2].capturedPieces}
@@ -373,7 +385,7 @@ export default function GameScreen() {
       </View>
 
       {/* Top Right - Green Player */}
-      <View className="absolute top-4 right-4">
+      <View className="absolute right-4" style={{ top: insets.top + 60 }}>
         <PlayerInfoPod
           player={players[3]}
           capturedPieces={players[3].capturedPieces}
@@ -383,7 +395,7 @@ export default function GameScreen() {
       </View>
 
       {/* Bottom Left - Blue Player */}
-      <View className="absolute bottom-4 left-4">
+      <View className="absolute left-4" style={{ bottom: insets.bottom + 80 }}>
         <PlayerInfoPod
           player={players[1]}
           capturedPieces={players[1].capturedPieces}
@@ -393,7 +405,7 @@ export default function GameScreen() {
       </View>
 
       {/* Bottom Right - Red Player */}
-      <View className="absolute bottom-4 right-4">
+      <View className="absolute right-4" style={{ bottom: insets.bottom + 80 }}>
         <PlayerInfoPod
           player={players[0]}
           capturedPieces={players[0].capturedPieces}

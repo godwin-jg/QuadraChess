@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { RootState } from "../../state/store";
@@ -17,6 +18,9 @@ import realtimeDatabaseService, {
 } from "../../services/realtimeDatabaseService";
 import onlineGameService from "../../services/onlineGameService";
 import { useSettings } from "../../context/SettingsContext";
+import { SafeAreaView } from "react-native-safe-area-context";
+import GridBackground from "../components/ui/GridBackground";
+import AnimatedButton from "../components/ui/AnimatedButton";
 
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
@@ -296,7 +300,10 @@ const OnlineLobbyScreen: React.FC = () => {
   if (currentGameId) {
     // In-game waiting room
     return (
-      <View className="flex-1 bg-black p-6">
+      <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+        {/* Subtle blueprint grid background */}
+        <GridBackground />
+        
         <View className="items-center mb-8">
           <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
           {isEditingName ? (
@@ -319,12 +326,12 @@ const OnlineLobbyScreen: React.FC = () => {
           )}
         </View>
 
-        <View className="bg-white/10 p-6 rounded-xl mb-6">
+        <View className="bg-white/10 p-6 rounded-xl mb-6 items-center">
           <Text className="text-white text-xl font-bold mb-4 text-center">
             Waiting for Players
           </Text>
 
-          <View className="space-y-3">
+          <View className="space-y-3 w-full">
             {players && players.length > 0 ? (
               players.map((player, index) => (
                 <View
@@ -356,23 +363,33 @@ const OnlineLobbyScreen: React.FC = () => {
         </View>
 
         {isHost && (
-          <View className="items-center gap-4">
+          <View className="items-center gap-4 mb-4">
             {players.length < 2 && (
               <Text className="text-gray-400 text-sm mb-3">
                 Need 2+ players to start
               </Text>
             )}
             <TouchableOpacity
-              className={`w-full py-3 px-6 rounded-xl shadow-lg ${
-                players.length < 2 ? "bg-gray-600" : "bg-white"
-              }`}
+              className="w-full py-3 px-6 rounded-xl shadow-lg overflow-hidden"
               onPress={startGame}
               disabled={players.length < 2 || isLoading}
             >
+              <LinearGradient
+                colors={players.length < 2 || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+              />
               <Text
                 className={`text-lg font-bold text-center ${
                   players.length < 2 ? "text-gray-300" : "text-black"
                 }`}
+                style={{
+                  fontWeight: '900',
+                  letterSpacing: 1.2,
+                  textShadowColor: 'rgba(0,0,0,0.3)',
+                  textShadowOffset: {width: 1, height: 1},
+                  textShadowRadius: 2,
+                  textTransform: 'uppercase',
+                }}
               >
                 {isLoading ? "Starting..." : "Start Game"}
               </Text>
@@ -381,21 +398,37 @@ const OnlineLobbyScreen: React.FC = () => {
         )}
 
         <TouchableOpacity
-          className="w-full py-3 px-6 rounded-xl bg-red-600 mt-4"
+          className="w-full py-3 px-6 rounded-xl overflow-hidden"
           onPress={leaveGame}
           disabled={isLoading}
         >
-          <Text className="text-white text-lg font-bold text-center">
+          <LinearGradient
+            colors={['#ef4444', '#dc2626']}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+          <Text 
+            className="text-white text-lg font-bold text-center"
+            style={{
+              fontWeight: '900',
+              letterSpacing: 1.2,
+              textShadowColor: 'rgba(0,0,0,0.3)',
+              textShadowOffset: {width: 1, height: 1},
+              textShadowRadius: 2,
+              textTransform: 'uppercase',
+            }}
+          >
             Leave Game
           </Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Main menu
   return (
-    <View className="flex-1 bg-black p-6">
+    <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+      {/* Subtle blueprint grid background */}
+      <GridBackground />
       <View className="items-center mb-8">
         <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
         {isEditingName ? (
@@ -416,30 +449,37 @@ const OnlineLobbyScreen: React.FC = () => {
         )}
       </View>
 
-      <View className="space-y-6 mb-8">
-        <TouchableOpacity
-          className="w-full py-4 px-6 mb-2 rounded-xl bg-white shadow-lg"
+      <View className="mb-8">
+        <AnimatedButton
+          icon="🌐"
+          title="Create Game"
+          subtitle={isLoading ? "Creating..." : "Start an online game"}
+          gradientColors={['#ffffff', '#f0f0f0']}
+          textColor="black"
+          subtitleColor="gray-600"
           onPress={createGame}
           disabled={isLoading}
-        >
-          <Text className="text-black text-xl font-bold text-center">
-            {isLoading ? "Creating..." : "Create Game"}
-          </Text>
-        </TouchableOpacity>
+          delay={0}
+        />
 
-        <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-white/20 border-2 border-white/30"
-          onPress={() => router.back()}
-        >
-          <Text className="text-white text-xl font-bold text-center">
-            Back to Home
-          </Text>
-        </TouchableOpacity>
+        <View style={{ marginTop: 16 }}>
+          <AnimatedButton
+            icon="🏠"
+            title="Back to Home"
+            subtitle="Return to main menu"
+            gradientColors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
+            textColor="white"
+            subtitleColor="gray-300"
+            onPress={() => router.back()}
+            disabled={false}
+            delay={150}
+          />
+        </View>
       </View>
 
-      <View className="flex-1">
-        <View className="flex-row justify-between items-center mb-4">
-          <Text className="text-white text-xl font-bold">
+      <View className="flex-1 items-center">
+        <View className="items-center mb-4">
+          <Text className="text-white text-xl font-bold text-center mb-4">
             Available Games
           </Text>
           <View className="flex-row gap-2">
@@ -474,10 +514,11 @@ const OnlineLobbyScreen: React.FC = () => {
             renderItem={renderGameItem}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
+            style={{ width: '100%' }}
           />
         )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 

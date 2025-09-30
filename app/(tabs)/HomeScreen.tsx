@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -20,6 +21,7 @@ import * as Haptics from "expo-haptics";
 import modeSwitchService from "../../services/modeSwitchService";
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
+import GridBackground from "../components/ui/GridBackground";
 
 // --- Background Piece Component ---
 const BackgroundPiece = ({ piece, size, style }: { piece: string, size: number, style: any }) => {
@@ -295,7 +297,10 @@ export default function HomeScreen() {
     });
 
   return (
-    <View className="flex-1 bg-gray-900">
+    <SafeAreaView style={{ flex: 1 }} className="bg-black">
+      {/* Subtle blueprint grid background */}
+      <GridBackground />
+      
       {/* Background Chess Pieces */}
       <View 
         className="absolute inset-0 pointer-events-none overflow-hidden" 
@@ -458,6 +463,6 @@ export default function HomeScreen() {
         </View>
       </View>
       </Animated.View>
-    </View>
+    </SafeAreaView>
   );
 }

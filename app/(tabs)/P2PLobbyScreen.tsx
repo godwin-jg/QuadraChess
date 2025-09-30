@@ -8,9 +8,11 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { RootState } from "../../state/store";
 import { 
   resetGame, 
@@ -29,6 +31,8 @@ import {
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
 import networkDiscoveryService from "../../services/networkDiscoveryService";
+import GridBackground from "../components/ui/GridBackground";
+import AnimatedButton from "../components/ui/AnimatedButton";
 
 const P2PLobbyScreen: React.FC = () => {
   console.log("🎮 P2PLobbyScreen: Component mounted/rendered");
@@ -370,7 +374,10 @@ const P2PLobbyScreen: React.FC = () => {
   // In-game waiting room
   if (currentGame) {
     return (
-      <View className="flex-1 bg-black p-6">
+      <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+        {/* Subtle blueprint grid background */}
+        <GridBackground />
+        
         <View className="items-center mb-8">
           <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
           {isEditingName ? (
@@ -393,7 +400,7 @@ const P2PLobbyScreen: React.FC = () => {
           )}
         </View>
 
-        <View className="bg-white/10 p-6 rounded-xl mb-6">
+        <View className="bg-white/10 p-6 rounded-xl mb-6 items-center">
           <Text className="text-white text-xl font-bold mb-4 text-center">
             Waiting for Players
           </Text>
@@ -402,8 +409,8 @@ const P2PLobbyScreen: React.FC = () => {
             Join Code: <Text className="text-white font-bold">{currentGame.joinCode}</Text>
           </Text>
 
-          <View className="space-y-3">
-            <Text className="text-white text-lg font-semibold mb-2">Players ({players.length})</Text>
+          <View className="space-y-3 w-full">
+            <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
             {players && players.length > 0 ? (
               players.map((player, index) => (
                 <View
@@ -437,54 +444,80 @@ const P2PLobbyScreen: React.FC = () => {
               <Text className="text-gray-400 text-center">No players yet</Text>
             )}
           </View>
+        </View>
 
-          {isHost && (
-            <View className="items-center gap-4">
-              {players.length < 2 && (
-                <Text className="text-gray-400 text-sm mb-3">
-                  Need 2+ players to start
-                </Text>
-              )}
-              <TouchableOpacity
-                className={`w-full py-3 px-6 rounded-xl shadow-lg ${
-                  !canStartGame || isLoading
-                    ? "bg-gray-600" 
-                    : "bg-white"
-                }`}
-                onPress={startGame}
-                disabled={!canStartGame || isLoading}
-              >
-                <Text className={`text-lg font-bold text-center ${
+        {isHost && (
+          <View className="items-center gap-4 mb-4">
+            {players.length < 2 && (
+              <Text className="text-gray-400 text-sm mb-3">
+                Need 2+ players to start
+              </Text>
+            )}
+            <TouchableOpacity
+              className="w-full py-3 px-6 rounded-xl shadow-lg overflow-hidden"
+              onPress={startGame}
+              disabled={!canStartGame || isLoading}
+            >
+              <LinearGradient
+                colors={!canStartGame || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+              />
+              <Text 
+                className={`text-lg font-bold text-center ${
                   !canStartGame || isLoading
                     ? "text-gray-300" 
                     : "text-black"
-                }`}>
-                  {isLoading ? "Starting..." : 
-                    !canStartGame
-                      ? "Waiting for players..."
-                      : "Start Game"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+                }`}
+                style={{
+                  fontWeight: '900',
+                  letterSpacing: 1.2,
+                  textShadowColor: 'rgba(0,0,0,0.3)',
+                  textShadowOffset: {width: 1, height: 1},
+                  textShadowRadius: 2,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {isLoading ? "Starting..." : 
+                  !canStartGame
+                    ? "Waiting for players..."
+                    : "Start Game"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <TouchableOpacity
-          className="w-full py-3 px-6 rounded-xl bg-red-600"
+          className="w-full py-3 px-6 rounded-xl overflow-hidden"
           onPress={leaveGame}
           disabled={isLoading}
         >
-          <Text className="text-white text-lg font-bold text-center">
+          <LinearGradient
+            colors={['#ef4444', '#dc2626']}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+          <Text 
+            className="text-white text-lg font-bold text-center"
+            style={{
+              fontWeight: '900',
+              letterSpacing: 1.2,
+              textShadowColor: 'rgba(0,0,0,0.3)',
+              textShadowOffset: {width: 1, height: 1},
+              textShadowRadius: 2,
+              textTransform: 'uppercase',
+            }}
+          >
             Leave Game
           </Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Main menu
   return (
-    <View className="flex-1 bg-black p-6">
+    <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+      {/* Subtle blueprint grid background */}
+      <GridBackground />
       <View className="items-center mb-8">
         <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
         {isEditingName ? (
@@ -513,35 +546,42 @@ const P2PLobbyScreen: React.FC = () => {
         </View>
       </View>
 
-      <View className="space-y-6 mb-8">
-        <TouchableOpacity
-          className="w-full py-4 px-6 mb-2 rounded-xl bg-white shadow-lg"
+      <View className="mb-8">
+        <AnimatedButton
+          icon="🎮"
+          title="Create Game"
+          subtitle={isLoading ? "Creating..." : "Start a new game"}
+          gradientColors={['#ffffff', '#f0f0f0']}
+          textColor="black"
+          subtitleColor="gray-600"
           onPress={createGame}
           disabled={isLoading}
-        >
-          <Text className="text-black text-xl font-bold text-center">
-            {isLoading ? "Creating..." : "Create Game"}
-          </Text>
-        </TouchableOpacity>
+          delay={0}
+        />
 
-        <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-white/20 border-2 border-white/30"
-          onPress={() => {
-            try {
-              router.back();
-            } catch (navError) {
-              console.error("🎮 UI: Navigation error in back button:", navError);
-            }
-          }}
-        >
-          <Text className="text-white text-xl font-bold text-center">
-            Back to Home
-          </Text>
-        </TouchableOpacity>
+        <View style={{ marginTop: 16 }}>
+          <AnimatedButton
+            icon="🏠"
+            title="Back to Home"
+            subtitle="Return to main menu"
+            gradientColors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
+            textColor="white"
+            subtitleColor="gray-300"
+            onPress={() => {
+              try {
+                router.back();
+              } catch (navError) {
+                console.error("🎮 UI: Navigation error in back button:", navError);
+              }
+            }}
+            disabled={false}
+            delay={150}
+          />
+        </View>
       </View>
 
-      <View className="flex-1">
-        <Text className="text-white text-xl font-bold mb-4">
+      <View className="flex-1 items-center">
+        <Text className="text-white text-xl font-bold mb-4 text-center">
           Available Games
         </Text>
 
@@ -562,10 +602,11 @@ const P2PLobbyScreen: React.FC = () => {
             renderItem={renderGameItem}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
+            style={{ width: '100%' }}
           />
         )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 

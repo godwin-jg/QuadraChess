@@ -69,7 +69,7 @@ export default function HistoryControls() {
   };
 
   return (
-    <View className="bg-black/80 rounded-xl p-3 m-4 items-center">
+    <View className="items-center">
       <View className="flex-row gap-2">
         <TouchableOpacity
           className={`w-12 h-10 rounded-lg justify-center items-center ${

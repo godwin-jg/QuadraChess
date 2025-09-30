@@ -104,34 +104,36 @@ class SoundService {
 
   // Play a sound effect using loaded sound files or haptic feedback
   public async playSound(soundName: string): Promise<void> {
-    if (!this.isInitialized || !this.isSoundEnabled()) {
+    if (!this.isInitialized) {
       return;
     }
 
     try {
-      // First try to play the actual sound file
-      const sound = this.sounds.get(soundName);
-      if (sound) {
-        await sound.setPositionAsync(0); // Reset to beginning
-        await sound.playAsync();
-        console.log(`🔊 SoundService: Playing sound file: ${soundName}`);
-        
-        // If both sound and haptics are enabled, also play haptic feedback
-        if (this.isHapticsEnabled()) {
-          const hapticStyle = this.getHapticStyleForSound(soundName);
-          await Haptics.impactAsync(hapticStyle);
-          console.log(`🔊 SoundService: Also playing haptic feedback for: ${soundName} (${hapticStyle})`);
+      // First try to play the actual sound file (only if sound is enabled)
+      if (this.isSoundEnabled()) {
+        const sound = this.sounds.get(soundName);
+        if (sound) {
+          await sound.setPositionAsync(0); // Reset to beginning
+          await sound.playAsync();
+          console.log(`🔊 SoundService: Playing sound file: ${soundName}`);
+          
+          // If both sound and haptics are enabled, also play haptic feedback
+          if (this.isHapticsEnabled()) {
+            const hapticStyle = this.getHapticStyleForSound(soundName);
+            await Haptics.impactAsync(hapticStyle);
+            console.log(`🔊 SoundService: Also playing haptic feedback for: ${soundName} (${hapticStyle})`);
+          }
+          return;
         }
-        return;
       }
       
-      // If no sound file loaded, fall back to haptic feedback (only if haptics are enabled)
+      // If sound is disabled OR no sound file loaded, fall back to haptic feedback (only if haptics are enabled)
       if (this.isHapticsEnabled()) {
         const hapticStyle = this.getHapticStyleForSound(soundName);
         await Haptics.impactAsync(hapticStyle);
         console.log(`🔊 SoundService: Playing haptic feedback for: ${soundName} (${hapticStyle})`);
       } else {
-        console.log(`🔊 SoundService: Sound file not available and haptics disabled for: ${soundName}`);
+        console.log(`🔊 SoundService: Sound disabled and haptics disabled for: ${soundName}`);
       }
       
     } catch (error) {

@@ -1,8 +1,21 @@
 import { useLocalSearchParams } from "expo-router";
 import React, { useMemo } from "react";
-import { Alert, Text, View, useWindowDimensions } from "react-native";
+import { Alert, Text, View, useWindowDimensions, StyleSheet } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  useAnimatedProps,
+  withSpring, 
+  withTiming,
+  withRepeat,
+  withSequence,
+  interpolate,
+  Easing
+} from "react-native-reanimated";
+import Svg, { Defs, Filter, FeGaussianBlur, FeMerge, FeMergeNode, Path, LinearGradient, Stop } from "react-native-svg";
 import { useSettings } from "../../../context/SettingsContext";
+
 import onlineGameService from "../../../services/onlineGameService";
 import p2pGameService from "../../../services/p2pGameService";
 import {
@@ -57,6 +70,81 @@ export default function Board() {
   }, [viewingHistoryIndex, history, boardState]);
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
   const players = useSelector((state: RootState) => state.game.players);
+
+  // Animation values for current player glow
+  const glowOpacity = useSharedValue(0);
+  const glowScale = useSharedValue(1);
+  const glowColor = useSharedValue("#6B7280"); // Default gray
+  
+  // Use React state for gradient ID instead of shared value
+  const [currentGradientId, setCurrentGradientId] = React.useState("defaultGradient");
+
+  // Update glow animation when turn changes
+  React.useEffect(() => {
+    // Update glow color based on current player
+    console.log("🎨 Board: Current player turn:", currentPlayerTurn);
+    console.log("🎨 Board: Previous gradientId:", currentGradientId);
+    
+    switch (currentPlayerTurn) {
+      case "r": 
+        glowColor.value = "#EF4444"; // Red
+        setCurrentGradientId("rGradient");
+        console.log("🎨 Board: Set to red gradient");
+        break;
+      case "b": 
+        glowColor.value = "#3B82F6"; // Blue
+        setCurrentGradientId("bGradient");
+        console.log("🎨 Board: Set to blue gradient");
+        break;
+      case "y": 
+        glowColor.value = "#EAB308"; // Yellow
+        setCurrentGradientId("yGradient");
+        console.log("🎨 Board: Set to yellow gradient");
+        break;
+      case "g": 
+        glowColor.value = "#10B981"; // Green
+        setCurrentGradientId("gGradient");
+        console.log("🎨 Board: Set to green gradient");
+        break;
+      default: 
+        glowColor.value = "#6B7280"; // Gray
+        setCurrentGradientId("defaultGradient");
+        console.log("🎨 Board: Set to default gradient");
+    }
+    
+    console.log("🎨 Board: New gradientId:", currentGradientId);
+
+    if (currentPlayerTurn) {
+      // Animate glow in
+      glowOpacity.value = withTiming(1, { duration: 400 });
+      
+      // ✅ Add a subtle, repeating pulse
+      glowScale.value = withRepeat(
+        withSequence(
+          withTiming(1.02, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 2500, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1, // Loop forever
+        true // Reverse the animation
+      );
+    } else {
+      // Fade out glow
+      glowOpacity.value = withTiming(0, { duration: 300 });
+      glowScale.value = withTiming(1);
+    }
+  }, [currentPlayerTurn]);
+
+  // ✅ SVG border glow style
+  const borderGlowStyle = useAnimatedStyle(() => ({
+    opacity: glowOpacity.value,
+    transform: [{ scale: glowScale.value }],
+  }));
+
+  // Get the current gradient URL
+  const getCurrentGradientUrl = () => {
+    console.log("🎨 Board: Getting gradient URL for:", currentGradientId);
+    return `url(#${currentGradientId})`;
+  };
 
   // Create displayed game state (either live or historical) - optimized
   const displayedGameState = useMemo(() => {
@@ -273,79 +361,180 @@ export default function Board() {
   }
 
   return (
-    <View
-      style={{
-        width: boardSize,
-        height: boardSize,
-        alignSelf: "center",
-        marginTop: 20,
-      }}
-    >
-      {displayBoardState.map((row, rowIndex) => {
-        // Skip null rows (buffer rows in 4-player chess)
-        if (!row || !Array.isArray(row)) {
+    <View style={{ width: boardSize, height: boardSize, alignSelf: "center", marginTop: 20 }}>
+      
+      {/* SVG Border Glow Layer */}
+      <Animated.View style={[StyleSheet.absoluteFill, borderGlowStyle]}>
+        <Svg width={boardSize} height={boardSize} viewBox="0 0 140 140">
+          <Defs>
+             {/* Enhanced ambient glow filter */}
+             <Filter id="softGlow">
+               <FeGaussianBlur stdDeviation="12" result="coloredBlur" />
+               <FeMerge>
+                 <FeMergeNode in="coloredBlur" />
+                 <FeMergeNode in="SourceGraphic" />
+               </FeMerge>
+             </Filter>
+
+            {/* Player gradient definitions */}
+            {/* Red Player Gradient
+            <LinearGradient id="rGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#FF6B6B" stopOpacity="1.0" />
+              <Stop offset="50%" stopColor="#EF4444" stopOpacity="0.9" />
+              <Stop offset="100%" stopColor="#DC2626" stopOpacity="0.7" />
+            </LinearGradient>
+
+            {/* Blue Player Gradient */}
+            {/* <LinearGradient id="bGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#60A5FA" stopOpacity="1.0" />
+              <Stop offset="50%" stopColor="#3B82F6" stopOpacity="0.9" />
+              <Stop offset="100%" stopColor="#2563EB" stopOpacity="0.7" />
+            </LinearGradient> */}
+
+            {/* Yellow Player Gradient */}
+            {/* <LinearGradient id="yGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#FDE047" stopOpacity="1.0" />
+              <Stop offset="50%" stopColor="#EAB308" stopOpacity="0.9" />
+              <Stop offset="100%" stopColor="#CA8A04" stopOpacity="0.7" />
+            </LinearGradient> */}
+
+            {/* Green Player Gradient */}
+            {/* <LinearGradient id="gGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#4ADE80" stopOpacity="1.0" />
+              <Stop offset="50%" stopColor="#10B981" stopOpacity="0.9" />
+              <Stop offset="100%" stopColor="#059669" stopOpacity="0.7" />
+            </LinearGradient> */}
+
+            {/* Default Gradient */}
+            {/* <LinearGradient id="defaultGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#9CA3AF" stopOpacity="1.0" />
+              <Stop offset="50%" stopColor="#6B7280" stopOpacity="0.9" />
+              <Stop offset="100%" stopColor="#4B5563" stopOpacity="0.7" />
+            </LinearGradient> */} 
+            {/* Red Player Gradient */}
+  <LinearGradient id="rGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+    {/* Specular Highlight */}
+    <Stop offset="0%" stopColor="##B91C1C" stopOpacity="0.9" />
+    {/* Main Color */}
+    <Stop offset="50%" stopColor="#FFC1C1" stopOpacity="1.0" />
+    {/* Shadow */}
+    <Stop offset="100%" stopColor="##B91C1C" stopOpacity="1.0" /> 
+    {/*altenative option #EF4444*/}
+  </LinearGradient>
+
+  {/* Blue Player Gradient */}
+  <LinearGradient id="bGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+    <Stop offset="0%" stopColor="#A8C9FA" stopOpacity="0.9" />
+    <Stop offset="50%" stopColor="#3B82F6" stopOpacity="1.0" />
+    <Stop offset="100%" stopColor="#1E3A8A" stopOpacity="1.0" />
+  </LinearGradient>
+
+  {/* Yellow Player Gradient */}
+  <LinearGradient id="yGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+    <Stop offset="0%" stopColor="#FEF3C7" stopOpacity="0.9" />
+    <Stop offset="50%" stopColor="#EAB308" stopOpacity="1.0" />
+    <Stop offset="100%" stopColor="#92400E" stopOpacity="1.0" />
+  </LinearGradient>
+
+  {/* Green Player Gradient */}
+  <LinearGradient id="gGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+    <Stop offset="0%" stopColor="#A7F3D0" stopOpacity="0.9" />
+    <Stop offset="50%" stopColor="#10B981" stopOpacity="1.0" />
+    <Stop offset="100%" stopColor="#047857" stopOpacity="1.0" />
+  </LinearGradient>
+
+  {/* Default Gradient */}
+  <LinearGradient id="defaultGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+    <Stop offset="0%" stopColor="#E5E7EB" stopOpacity="0.9" />
+    <Stop offset="50%" stopColor="#6B7280" stopOpacity="1.0" />
+    <Stop offset="100%" stopColor="#374151" stopOpacity="1.0" />
+  </LinearGradient>
+          </Defs>
+
+           {/* Cross-shaped ambient glow path */}
+           <Path
+             d="M 30 0 L 110 0 L 110 30 L 140 30 L 140 110 L 110 110 L 110 140 L 30 140 L 30 110 L 0 110 L 0 30 L 30 30 Z"
+             fill={getCurrentGradientUrl()}
+             filter="url(#softGlow)"
+           />
+        </Svg>
+      </Animated.View>
+
+      {/* Board Layer */}
+      <View
+        style={{
+          width: boardSize,
+          height: boardSize,
+          borderRadius: 8,
+          overflow: 'hidden',
+        }}
+      >
+        {displayBoardState.map((row, rowIndex) => {
+          // Skip null rows (buffer rows in 4-player chess)
+          if (!row || !Array.isArray(row)) {
+            return (
+              <View
+                key={rowIndex}
+                style={{ flexDirection: "row", height: squareSize }}
+              >
+                {Array.from({ length: 14 }, (_, colIndex) => (
+                  <View
+                    key={`${rowIndex}-${colIndex}`}
+                    style={{
+                      width: squareSize,
+                      height: squareSize,
+                      backgroundColor:
+                        (rowIndex + colIndex) % 2 === 0
+                          ? boardTheme.lightSquare
+                          : boardTheme.darkSquare,
+                    }}
+                  />
+                ))}
+              </View>
+            );
+          }
+
           return (
-            <View
-              key={rowIndex}
-              style={{ flexDirection: "row", height: squareSize }}
-            >
-              {Array.from({ length: 14 }, (_, colIndex) => (
-                <View
-                  key={`${rowIndex}-${colIndex}`}
-                  style={{
-                    width: squareSize,
-                    height: squareSize,
-                    backgroundColor:
-                      (rowIndex + colIndex) % 2 === 0
-                        ? boardTheme.lightSquare
-                        : boardTheme.darkSquare,
-                  }}
-                />
-              ))}
+            <View key={rowIndex} style={{ flexDirection: "row" }}>
+              {row.map((piece, colIndex) => {
+                const isLight = (rowIndex + colIndex) % 2 === 0;
+                return (
+                  <Square
+                    key={`${rowIndex}-${colIndex}`}
+                    piece={piece}
+                    color={isLight ? "light" : "dark"}
+                    size={squareSize}
+                    row={rowIndex}
+                    col={colIndex}
+                    onPress={() => handleSquarePress(rowIndex, colIndex)}
+                    isSelected={
+                      selectedPiece?.row === rowIndex &&
+                      selectedPiece?.col === colIndex
+                    }
+                    moveType={getMoveType(rowIndex, colIndex)}
+                    capturingPieceColor={getSelectedPieceColor() || undefined}
+                    isInCheck={
+                      !!(
+                        piece &&
+                        piece[1] === "K" &&
+                        checkStatus[piece[0] as keyof typeof checkStatus]
+                      )
+                    }
+                    isEliminated={isPieceEliminated(piece)}
+                    isInteractable={
+                      !piece || 
+                      effectiveMode !== "online" || 
+                      !onlineGameService.currentPlayer?.color ||
+                      piece[0] === onlineGameService.currentPlayer.color
+                    }
+                    boardTheme={boardTheme}
+                  />
+                );
+              })}
             </View>
           );
-        }
-
-        return (
-          <View key={rowIndex} style={{ flexDirection: "row" }}>
-            {row.map((piece, colIndex) => {
-              const isLight = (rowIndex + colIndex) % 2 === 0;
-              return (
-                <Square
-                  key={`${rowIndex}-${colIndex}`}
-                  piece={piece}
-                  color={isLight ? "light" : "dark"}
-                  size={squareSize}
-                  row={rowIndex}
-                  col={colIndex}
-                  onPress={() => handleSquarePress(rowIndex, colIndex)}
-                  isSelected={
-                    selectedPiece?.row === rowIndex &&
-                    selectedPiece?.col === colIndex
-                  }
-                  moveType={getMoveType(rowIndex, colIndex)}
-                  capturingPieceColor={getSelectedPieceColor() || undefined}
-                  isInCheck={
-                    !!(
-                      piece &&
-                      piece[1] === "K" &&
-                      checkStatus[piece[0] as keyof typeof checkStatus]
-                    )
-                  }
-                  isEliminated={isPieceEliminated(piece)}
-                  isInteractable={
-                    !piece || 
-                    effectiveMode !== "online" || 
-                    !onlineGameService.currentPlayer?.color ||
-                    piece[0] === onlineGameService.currentPlayer.color
-                  }
-                  boardTheme={boardTheme}
-                />
-              );
-            })}
-          </View>
-        );
-      })}
+        })}
+      </View>
     </View>
   );
 }

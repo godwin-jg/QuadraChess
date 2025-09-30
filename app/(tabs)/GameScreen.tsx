@@ -444,6 +444,13 @@ export default function GameScreen() {
           winner={winner || undefined}
           eliminatedPlayer={justEliminated || undefined}
           justEliminated={justEliminated || undefined}
+          scores={scores}
+          eliminatedPlayers={eliminatedPlayers}
+          players={players.map(p => ({
+            color: p.color,
+            name: p.name,
+            isEliminated: p.isEliminated
+          }))}
           onReset={() => dispatch(resetGame())}
         />
       )}

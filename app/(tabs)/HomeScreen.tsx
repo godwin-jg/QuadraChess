@@ -397,10 +397,9 @@ export default function HomeScreen() {
         <TouchableOpacity
           className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
           onPress={() => {
-            // 🔊 Play home screen button sound
             try {
               const soundService = require('../../services/soundService').default;
-              soundService.p;
+              soundService.playButtonSound();
             } catch (error) {
               console.log('🔊 SoundService: Failed to play home screen button sound:', error);
             }

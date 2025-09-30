@@ -45,18 +45,18 @@ const Square = React.memo(function Square({
     (row > 10 && col < 3) ||
     (row > 10 && col > 10);
 
-  // If it's a corner square, render nothing or a simple background view
+  // If it's a corner square, render a transparent spacer
   if (isCornerSquare) {
+    // Render a transparent view that occupies space but is invisible,
+    // allowing the glow from behind to show through.
     return (
-      <Pressable onPress={onPress}>
-        <View
-          style={{
-            width: size,
-            height: size,
-            backgroundColor: "#000000", // App background color for corners
-          }}
-        />
-      </Pressable>
+      <View
+        style={{
+          width: size,
+          height: size,
+          backgroundColor: "transparent",
+        }}
+      />
     );
   }
 
@@ -125,9 +125,9 @@ const Square = React.memo(function Square({
       onPress={isInteractable ? handlePress : undefined}
       onHoverIn={isInteractable ? onHover : undefined}
       onHoverOut={isInteractable ? onHoverOut : undefined}
-      style={({ pressed, hovered }) => ({
-        opacity: !isInteractable ? 0.6 : pressed ? 0.8 : hovered ? 0.9 : 1,
-        transform: [{ scale: !isInteractable ? 1 : hovered ? 1.05 : 1 }],
+      style={({ pressed }) => ({
+        opacity: !isInteractable ? 0.6 : pressed ? 0.8 : 1,
+        transform: [{ scale: !isInteractable ? 1 : 1 }],
       })}
     >
       <View

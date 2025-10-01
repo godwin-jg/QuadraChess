@@ -1016,6 +1016,7 @@ class P2PService {
         isHost: currentReduxState.isHost,
         canStartGame: currentReduxState.canStartGame,
         gameMode: currentReduxState.gameMode,
+        botPlayers: currentReduxState.botPlayers,
         // History
         history: currentReduxState.history,
         historyIndex: currentReduxState.historyIndex,
@@ -1104,6 +1105,7 @@ class P2PService {
         isHost: currentReduxState.isHost,
         canStartGame: currentReduxState.canStartGame,
         gameMode: currentReduxState.gameMode,
+        botPlayers: currentReduxState.botPlayers,
         // History
         history: currentReduxState.history,
         historyIndex: currentReduxState.historyIndex,

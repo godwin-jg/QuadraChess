@@ -1,9 +1,10 @@
 // services/botService.ts
 
 import { store } from '../state/store';
-import { makeMove } from '../state/gameSlice';
+import { makeMove, completePromotion } from '../state/gameSlice';
 import { getValidMoves } from '../functions/src/logic/gameLogic';
 import { GameState, Position } from '../state/types';
+import p2pGameService from './p2pGameService';
 
 // Point values for each piece type
 const pieceValues: { [key: string]: number } = {
@@ -70,10 +71,12 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
 };
 
 const makeBotMove = (botColor: string) => {
+  console.log(`🤖 BotService: makeBotMove called for ${botColor}`);
   const gameState = store.getState().game;
   
   // Safety checks
   if (!gameState || !gameState.boardState || gameState.gameStatus !== 'active') {
+    console.log(`🤖 BotService: Safety check failed - gameState: ${!!gameState}, boardState: ${!!gameState?.boardState}, gameStatus: ${gameState?.gameStatus}`);
     return;
   }
   
@@ -111,15 +114,49 @@ const makeBotMove = (botColor: string) => {
     }
   }
 
-  // Dispatch the complete move action
-  store.dispatch(
-    makeMove({
+  // Execute the chosen move - handle different game modes
+  if (gameState.gameMode === 'p2p') {
+    // In P2P mode, send the move over the network
+    const moveData = {
       from: chosenMove.from,
       to: { row: chosenMove.to.row, col: chosenMove.to.col },
-    })
-  );
+      pieceCode: gameState.boardState[chosenMove.from.row][chosenMove.from.col]!,
+      playerColor: botColor,
+    };
+    console.log(`🤖 Bot ${botColor}: Sending P2P move...`, moveData);
+    p2pGameService.makeMove(moveData).catch(err => {
+      console.error("Bot failed to send P2P move:", err);
+    });
+  } else {
+    // In Single Player ('solo') mode, dispatch the move locally
+    console.log(`🤖 Bot ${botColor}: Dispatching local move...`);
+    store.dispatch(
+      makeMove({
+        from: chosenMove.from,
+        to: { row: chosenMove.to.row, col: chosenMove.to.col },
+      })
+    );
+  }
+};
+
+// Handle bot pawn promotion
+const handleBotPromotion = (botColor: string) => {
+  const gameState = store.getState().game;
+  
+  // Check if there's a pending promotion for this bot
+  if (gameState.promotionState.isAwaiting && 
+      gameState.promotionState.color === botColor) {
+    
+    // Bot always promotes to Queen (most valuable piece)
+    console.log(`🤖 Bot ${botColor}: Auto-promoting pawn to Queen`);
+    store.dispatch(completePromotion({ pieceType: 'Q' }));
+    return true;
+  }
+  
+  return false;
 };
 
 export const botService = {
   makeBotMove,
+  handleBotPromotion,
 };

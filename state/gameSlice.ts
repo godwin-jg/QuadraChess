@@ -732,8 +732,12 @@ const gameSlice = createSlice({
       // Restore the game mode after reset
       state.gameMode = currentGameMode;
       
-      // Clear bot players on reset
-      state.botPlayers = [];
+      // Set bots based on game mode - no more manual preservation needed!
+      if (currentGameMode === "single") {
+        state.botPlayers = ['b', 'y', 'g']; // Single player always has bots
+      } else {
+        state.botPlayers = []; // Other modes have no bots
+      }
       
       // Initialize history as empty - no initial snapshot
       state.history = [];
@@ -1220,6 +1224,12 @@ const gameSlice = createSlice({
       // ✅ CRITICAL: Handle turn advancement for P2P mode (after elimination check)
       if (state.gameMode === "p2p") {
         console.log("applyNetworkMove: P2P mode - advancing turn after elimination check");
+        
+        // ✅ CRITICAL: Set game status to active when first move is made
+        if (state.gameStatus === "waiting") {
+          console.log("applyNetworkMove: P2P mode - setting game status to active");
+          state.gameStatus = "active";
+        }
         
         // Only advance turn if game is not over
         if (state.gameStatus !== "finished") {

@@ -26,7 +26,8 @@ import {
   syncP2PGameState,
   setPlayers,
   setIsHost,
-  setCanStartGame
+  setCanStartGame,
+  setBotPlayers
 } from "../../state/gameSlice";
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
@@ -54,6 +55,7 @@ const P2PLobbyScreen: React.FC = () => {
     connectionError,
     isEditingName,
     tempName,
+    botPlayers,
   } = useSelector((state: RootState) => state.game);
 
   // Debug logging
@@ -155,6 +157,18 @@ const P2PLobbyScreen: React.FC = () => {
       updateProfile({ name: tempName.trim() });
     }
     dispatch(setIsEditingName(false));
+  };
+
+  // Toggle bot status for a player color (host only)
+  const toggleBotPlayer = (color: string) => {
+    if (!isHost) return;
+    
+    const newBotPlayers = botPlayers.includes(color)
+      ? botPlayers.filter(c => c !== color)
+      : [...botPlayers, color];
+    
+    dispatch(setBotPlayers(newBotPlayers));
+    console.log(`🤖 P2PLobbyScreen: Toggled bot for ${color}, new botPlayers:`, newBotPlayers);
   };
 
   // Create a new P2P game
@@ -261,6 +275,9 @@ const P2PLobbyScreen: React.FC = () => {
       players.forEach((player: any) => {
         console.log(`🔗 P2PLobbyScreen: Player ${player.name} (${player.isHost ? 'host' : 'client'}): connectionState=${player.connectionState}, isConnected=${player.isConnected}`);
       });
+      
+      // ✅ Include botPlayers in the initial game state
+      console.log(`🤖 P2PLobbyScreen: Starting game with botPlayers:`, botPlayers);
       
       // This will update the host's state and trigger the sync to clients
       p2pService.sendGameStarted(); 
@@ -487,6 +504,46 @@ const P2PLobbyScreen: React.FC = () => {
               ))
             ) : (
               <Text className="text-gray-400 text-center">No players yet</Text>
+            )}
+            
+            {/* Bot Configuration Section (Host Only) */}
+            {isHost && (
+              <View className="mt-4 pt-4 border-t border-white/20">
+                <Text className="text-white text-lg font-semibold mb-3 text-center">Bot Configuration</Text>
+                <Text className="text-gray-400 text-sm mb-3 text-center">
+                  Tap to toggle bot players (host controls all bots)
+                </Text>
+                <View className="flex-row justify-around">
+                  {['r', 'b', 'y', 'g'].map((color) => {
+                    const isBot = botPlayers.includes(color);
+                    const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
+                    const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-yellow-500' : 'bg-green-500';
+                    
+                    return (
+                      <TouchableOpacity
+                        key={color}
+                        className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
+                          isBot ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'
+                        }`}
+                        onPress={() => {
+                          hapticsService.selection();
+                          toggleBotPlayer(color);
+                        }}
+                      >
+                        <View className="items-center">
+                          <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
+                          <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : 'text-gray-300'}`}>
+                            {colorName}
+                          </Text>
+                          <Text className={`text-xs ${isBot ? 'text-green-300' : 'text-gray-400'}`}>
+                            {isBot ? '🤖 Bot' : '👤 Human'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
             )}
           </View>
         </View>

@@ -15,6 +15,7 @@ import {
   clearJustEliminated,
 } from "../../state/gameSlice";
 import { botService } from "../../services/botService";
+import p2pService from "../../services/p2pService";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
 import GameNotification from "../components/ui/GameNotification";
@@ -134,13 +135,17 @@ export default function GameScreen() {
         : networkService.connected
         ? "local"
         : "solo";
+      
+      console.log(`GameScreen: Mode check - currentMode: ${currentMode}, currentConnectedMode: ${currentConnectedMode}`);
 
       // Only show warning if we're actually switching modes
       if (currentConnectedMode !== currentMode) {
+        console.log(`GameScreen: Mode switch needed - from ${currentConnectedMode} to ${currentMode}`);
         await modeSwitchService.handleModeSwitch(
           currentMode as "online" | "p2p" | "local" | "solo" | "single",
           () => {
-            // Confirm: Reset game and continue
+            // Confirm: Reset game and continue - bots are set automatically by game mode
+            console.log(`GameScreen: Mode switch confirmed - resetting game for ${currentMode}`);
             dispatch(resetGame());
           },
           () => {
@@ -149,8 +154,14 @@ export default function GameScreen() {
           }
         );
       } else if (currentMode !== "online" && currentMode !== "p2p") {
-        // Same mode but not online or P2P, safe to reset
-        dispatch(resetGame());
+        // Same mode but not online or P2P - don't reset, just ensure game mode is correct
+        const currentState = store.getState().game;
+        if (currentState.gameMode !== currentMode) {
+          console.log(`GameScreen: Updating game mode from ${currentState.gameMode} to ${currentMode}`);
+          dispatch(setGameMode(currentMode as any));
+        } else {
+          console.log(`GameScreen: Game mode already correct (${currentMode}), no reset needed`);
+        }
       }
 
       // Set up connection based on mode
@@ -297,6 +308,7 @@ export default function GameScreen() {
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
   const botPlayers = useSelector((state: RootState) => state.game.botPlayers);
+  const gameMode = useSelector((state: RootState) => state.game.gameMode);
   
 
   // Clear justEliminated flag after notification duration
@@ -311,21 +323,6 @@ export default function GameScreen() {
       return () => clearTimeout(timer);
     }
   }, [justEliminated, gameStatus, winner, dispatch]);
-
-  // ✅ Bot Controller - triggers bot moves when it's a bot's turn
-  useEffect(() => {
-    // Check if the current player is a bot and the game is active
-    if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active' && isGameStateReady) {
-      // Add a "thinking" delay to feel more natural
-      const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
-
-      const timer = setTimeout(() => {
-        botService.makeBotMove(currentPlayerTurn);
-      }, botThinkTime);
-
-      return () => clearTimeout(timer);
-    }
-  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady]);
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {
@@ -357,6 +354,72 @@ export default function GameScreen() {
     displayedGameState.boardState &&
     Array.isArray(displayedGameState.boardState) &&
     displayedGameState.boardState.length > 0;
+
+  // ✅ Bot Controller - triggers bot moves when it's a bot's turn (HOST ONLY)
+  useEffect(() => {
+    // Only run bot logic on the host device in P2P mode
+    const isHost = p2pService.isGameHost();
+    const isP2PMode = gameMode === 'p2p';
+    
+    // Debug logging for bot controller
+    console.log(`🤖 Bot Controller Debug:`, {
+      currentPlayerTurn,
+      botPlayers,
+      gameStatus,
+      isGameStateReady,
+      gameMode,
+      isHost,
+      isP2PMode,
+      isBotTurn: botPlayers.includes(currentPlayerTurn)
+    });
+    
+    // Check if the current player is a bot and the game is active
+    if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active' && isGameStateReady) {
+      // In P2P mode, only the host controls bots
+      if (isP2PMode && !isHost) {
+        console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected, but not host - skipping bot move`);
+        return;
+      }
+      
+      console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected - scheduling bot move`);
+      
+      // Add a "thinking" delay to feel more natural
+      const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
+
+      const timer = setTimeout(() => {
+        console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (host: ${isHost}, mode: ${gameMode})`);
+        botService.makeBotMove(currentPlayerTurn);
+      }, botThinkTime);
+
+      return () => clearTimeout(timer);
+    }
+  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode]);
+
+  // ✅ Bot Promotion Controller - handles bot pawn promotions (HOST ONLY)
+  useEffect(() => {
+    // Only run bot promotion logic on the host device in P2P mode
+    const isHost = p2pService.isGameHost();
+    const isP2PMode = gameMode === 'p2p';
+    
+    // Check if there's a pending promotion for a bot player
+    if (promotionState.isAwaiting && botPlayers.includes(promotionState.color || '')) {
+      // In P2P mode, only the host handles bot promotions
+      if (isP2PMode && !isHost) {
+        console.log(`🤖 GameScreen: Bot promotion for ${promotionState.color} detected, but not host - skipping`);
+        return;
+      }
+      
+      // Add a short delay for promotion decision
+      const promotionDelay = 800 + Math.random() * 400; // 0.8 - 1.2 seconds
+
+      const timer = setTimeout(() => {
+        console.log(`🤖 GameScreen: Handling bot promotion for ${promotionState.color} (host: ${isHost}, mode: ${gameMode})`);
+        botService.handleBotPromotion(promotionState.color!);
+      }, promotionDelay);
+
+      return () => clearTimeout(timer);
+    }
+  }, [promotionState, botPlayers, gameMode]);
 
   // Helper function to get player name
   const getPlayerName = (playerColor: string) => {

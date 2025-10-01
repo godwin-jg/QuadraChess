@@ -20,7 +20,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
-import { resetGame, setBotPlayers } from '../../state/gameSlice';
+import { resetGame } from '../../state/gameSlice';
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
@@ -267,13 +267,8 @@ export default function HomeScreen() {
   );
 
   const handleStartSinglePlayer = () => {
-    dispatch(resetGame());
-    dispatch(setBotPlayers(['b', 'y', 'g'])); // Set Blue, Yellow, Green as bots
-    
-    // Navigate after a short delay to ensure Redux actions are processed
-    setTimeout(() => {
-      handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single"); 
-    }, 50);
+    // Super simple: Just navigate - bots are set automatically by game mode
+    handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single"); 
   };
 
   const handleModeSwitch = async (

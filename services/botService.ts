@@ -6,6 +6,9 @@ import { getValidMoves } from '../functions/src/logic/gameLogic';
 import { GameState, Position } from '../state/types';
 import p2pGameService from './p2pGameService';
 
+// Global lock to prevent multiple bots from moving simultaneously
+let botMoveInProgress = false;
+
 // Point values for each piece type
 const pieceValues: { [key: string]: number } = {
   P: 1,  // Pawn
@@ -72,6 +75,13 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
 
 const makeBotMove = (botColor: string) => {
   console.log(`🤖 BotService: makeBotMove called for ${botColor}`);
+  
+  // ✅ CRITICAL: Prevent multiple bots from moving simultaneously
+  if (botMoveInProgress) {
+    console.log(`🤖 BotService: Another bot move is already in progress, skipping ${botColor}`);
+    return;
+  }
+  
   const gameState = store.getState().game;
   
   // Safety checks
@@ -79,11 +89,23 @@ const makeBotMove = (botColor: string) => {
     console.log(`🤖 BotService: Safety check failed - gameState: ${!!gameState}, boardState: ${!!gameState?.boardState}, gameStatus: ${gameState?.gameStatus}`);
     return;
   }
+
+  // ✅ CRITICAL: Double-check that it's actually this bot's turn
+  if (gameState.currentPlayerTurn !== botColor) {
+    console.log(`🤖 BotService: Turn mismatch! Bot ${botColor} tried to move but currentPlayerTurn is ${gameState.currentPlayerTurn}`);
+    return;
+  }
+
+  // Set the lock
+  botMoveInProgress = true;
+  console.log(`🤖 BotService: Bot move lock acquired for ${botColor}`);
   
   const allLegalMoves = getAllLegalMoves(botColor, gameState);
   console.log(`🤖 Bot ${botColor}: Found ${allLegalMoves.length} legal moves (limited for performance)`);
 
   if (allLegalMoves.length === 0) {
+    console.log(`🤖 Bot ${botColor}: No legal moves available`);
+    botMoveInProgress = false; // Release the lock
     return;
   }
 
@@ -137,6 +159,10 @@ const makeBotMove = (botColor: string) => {
       })
     );
   }
+
+  // Release the lock
+  botMoveInProgress = false;
+  console.log(`🤖 BotService: Bot move lock released for ${botColor}`);
 };
 
 // Handle bot pawn promotion

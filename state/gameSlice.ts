@@ -732,9 +732,13 @@ const gameSlice = createSlice({
       // Restore the game mode after reset
       state.gameMode = currentGameMode;
       
-      // Set bots based on game mode - no more manual preservation needed!
+      // Set bots based on game mode - simple and automatic!
       if (currentGameMode === "single") {
         state.botPlayers = ['b', 'y', 'g']; // Single player always has bots
+      } else if (currentGameMode === "p2p") {
+        // P2P mode: preserve existing bot configuration (set by host in lobby)
+        // The botPlayers array is already set by the host, don't clear it
+        // This allows P2P lobby to configure bots and they persist through resets
       } else {
         state.botPlayers = []; // Other modes have no bots
       }

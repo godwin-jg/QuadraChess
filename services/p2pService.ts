@@ -1117,6 +1117,7 @@ class P2PService {
       scores: currentReduxState.scores,
       currentPlayerTurn: currentReduxState.currentPlayerTurn,
       gameStatus: currentReduxState.gameStatus,
+      botPlayers: currentReduxState.botPlayers,
       players: currentReduxState.players.length
     });
 
@@ -1500,6 +1501,7 @@ class P2PService {
       // update the entire game state including scores
       if (gameState.scores !== undefined) {
         console.log("📥 P2PService: Received complete game state with scores:", gameState.scores);
+        console.log("📥 P2PService: Received botPlayers:", gameState.botPlayers);
         store.dispatch(setGameState(gameState));
       } else {
         // This is just lobby state, only update lobby-related state

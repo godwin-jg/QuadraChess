@@ -355,12 +355,8 @@ export default function GameScreen() {
     Array.isArray(displayedGameState.boardState) &&
     displayedGameState.boardState.length > 0;
 
-  // ✅ Bot Controller - triggers bot moves when it's a bot's turn (HOST ONLY)
+  // ✅ Bot Controller - triggers bot moves when it's a bot's turn
   useEffect(() => {
-    // Only run bot logic on the host device in P2P mode
-    const isHost = p2pService.isGameHost();
-    const isP2PMode = gameMode === 'p2p';
-    
     // Debug logging for bot controller
     console.log(`🤖 Bot Controller Debug:`, {
       currentPlayerTurn,
@@ -368,26 +364,18 @@ export default function GameScreen() {
       gameStatus,
       isGameStateReady,
       gameMode,
-      isHost,
-      isP2PMode,
       isBotTurn: botPlayers.includes(currentPlayerTurn)
     });
     
     // Check if the current player is a bot and the game is active
     if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active' && isGameStateReady) {
-      // In P2P mode, only the host controls bots
-      if (isP2PMode && !isHost) {
-        console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected, but not host - skipping bot move`);
-        return;
-      }
-      
       console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected - scheduling bot move`);
       
       // Add a "thinking" delay to feel more natural
       const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
 
       const timer = setTimeout(() => {
-        console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (host: ${isHost}, mode: ${gameMode})`);
+        console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (mode: ${gameMode})`);
         botService.makeBotMove(currentPlayerTurn);
       }, botThinkTime);
 
@@ -395,25 +383,15 @@ export default function GameScreen() {
     }
   }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode]);
 
-  // ✅ Bot Promotion Controller - handles bot pawn promotions (HOST ONLY)
+  // ✅ Bot Promotion Controller - handles bot pawn promotions
   useEffect(() => {
-    // Only run bot promotion logic on the host device in P2P mode
-    const isHost = p2pService.isGameHost();
-    const isP2PMode = gameMode === 'p2p';
-    
     // Check if there's a pending promotion for a bot player
     if (promotionState.isAwaiting && botPlayers.includes(promotionState.color || '')) {
-      // In P2P mode, only the host handles bot promotions
-      if (isP2PMode && !isHost) {
-        console.log(`🤖 GameScreen: Bot promotion for ${promotionState.color} detected, but not host - skipping`);
-        return;
-      }
-      
       // Add a short delay for promotion decision
       const promotionDelay = 800 + Math.random() * 400; // 0.8 - 1.2 seconds
 
       const timer = setTimeout(() => {
-        console.log(`🤖 GameScreen: Handling bot promotion for ${promotionState.color} (host: ${isHost}, mode: ${gameMode})`);
+        console.log(`🤖 GameScreen: Handling bot promotion for ${promotionState.color} (mode: ${gameMode})`);
         botService.handleBotPromotion(promotionState.color!);
       }, promotionDelay);
 

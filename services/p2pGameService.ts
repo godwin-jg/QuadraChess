@@ -3,11 +3,11 @@ import { initialBoardState } from "../state/boardState";
 import { applyNetworkMove, setGameState } from "../state/gameSlice";
 import { store } from "../state/store";
 import { GameState } from "../state/types";
-import p2pService, { P2PMessage, P2PPlayer } from "./p2pService";
+import p2pService from "./p2pService";
 
 export interface P2PGameService {
   currentGameId: string | null;
-  currentPlayer: P2PPlayer | null;
+  currentPlayer: any | null;
   isConnected: boolean;
   connectToGame: (gameId: string) => Promise<void>;
   disconnect: () => void;
@@ -25,7 +25,7 @@ export interface P2PGameService {
 
 class P2PGameServiceImpl implements P2PGameService {
   public currentGameId: string | null = null;
-  public currentPlayer: P2PPlayer | null = null;
+  public currentPlayer: any | null = null;
   public isConnected: boolean = false;
 
   private gameUnsubscribe: (() => void) | null = null;
@@ -70,7 +70,7 @@ class P2PGameServiceImpl implements P2PGameService {
     try {
       if (this.currentGameId) {
         await this.updatePlayerPresence(false);
-        p2pService.leaveGame();
+        p2pService.disconnect();
       }
 
       // Clean up subscriptions
@@ -181,7 +181,7 @@ class P2PGameServiceImpl implements P2PGameService {
 
   private setupMessageHandlers(): void {
     // Handle incoming messages from P2P service
-    this.gameUnsubscribe = p2pService.onMessage((message: P2PMessage) => {
+    this.gameUnsubscribe = p2pService.onMessage("gameState", (message: any) => {
       switch (message.type) {
         case "gameState":
           this.handleGameStateUpdate(message);
@@ -214,20 +214,19 @@ class P2PGameServiceImpl implements P2PGameService {
     this.moveUnsubscribe = () => {};
   }
 
-  private handleGameStateUpdate(message: P2PMessage): void {
+  private handleGameStateUpdate(message: any): void {
     const { gameState, players } = message.data;
 
     if (gameState) {
-      // Convert P2P game state to Redux game state
-      const reduxGameState = this.convertP2PToReduxGameState(gameState);
-      store.dispatch(setGameState(reduxGameState));
+      // Use the game state directly
+      store.dispatch(setGameState(gameState));
     }
 
     if (players) {
       // Update current player info
       const currentPlayerId = p2pService.getPeerId();
       this.currentPlayer =
-        players.find((p: P2PPlayer) => p.id === currentPlayerId) || null;
+        players.find((p: any) => p.id === currentPlayerId) || null;
     }
 
     // Notify callbacks
@@ -240,7 +239,7 @@ class P2PGameServiceImpl implements P2PGameService {
     });
   }
 
-  private handleMoveUpdate(message: P2PMessage): void {
+  private handleMoveUpdate(message: any): void {
     const { moveData } = message.data;
 
     // Apply move to local state
@@ -263,17 +262,17 @@ class P2PGameServiceImpl implements P2PGameService {
     });
   }
 
-  private handlePlayerJoined(message: P2PMessage): void {
+  private handlePlayerJoined(message: any): void {
     console.log("P2PGameService: Player joined:", message.data);
     // This is handled by the game state update
   }
 
-  private handlePlayerLeft(message: P2PMessage): void {
+  private handlePlayerLeft(message: any): void {
     console.log("P2PGameService: Player left:", message.data);
     // This is handled by the game state update
   }
 
-  private handleError(message: P2PMessage): void {
+  private handleError(message: any): void {
     console.error("P2PGameService: Error from peer:", message.data);
     // Handle error appropriately
   }

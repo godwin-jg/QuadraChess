@@ -161,14 +161,18 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = (color: string) => {
-    if (!isHost) return;
+    console.log(`🤖 P2PLobbyScreen: Toggle bot request for ${color}, isHost: ${isHost}`);
+    if (!isHost) {
+      console.log(`🤖 P2PLobbyScreen: Not host, ignoring bot toggle`);
+      return;
+    }
     
     const newBotPlayers = botPlayers.includes(color)
       ? botPlayers.filter(c => c !== color)
       : [...botPlayers, color];
     
     dispatch(setBotPlayers(newBotPlayers));
-    console.log(`🤖 P2PLobbyScreen: Toggled bot for ${color}, new botPlayers:`, newBotPlayers);
+    console.log(`🤖 P2PLobbyScreen: Host toggled bot for ${color}, new botPlayers:`, newBotPlayers);
   };
 
   // Create a new P2P game

@@ -1,6 +1,7 @@
 import { Position } from "../types";
 import { MoveInfo } from "./types";
 import { isCornerSquare, isEmpty, isEnemy, isWithinBounds } from "./utils";
+import { isKingInCheck, isSquareUnderAttack } from "./gameLogic";
 
 // Get valid moves for a pawn
 export const getPawnMoves = (
@@ -558,9 +559,7 @@ export const getKingMoves = (
   // Add castling moves if king hasn't moved and not in check
   if (
     hasMoved &&
-    !hasMoved[`${pieceColor}K` as keyof typeof hasMoved] &&
-    isKingInCheck &&
-    isSquareUnderAttack
+    !hasMoved[`${pieceColor}K` as keyof typeof hasMoved]
   ) {
     // Check if king is in check (can't castle while in check)
     const inCheck = isKingInCheck(pieceColor, boardState, eliminatedPlayers);

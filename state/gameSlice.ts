@@ -109,6 +109,7 @@ const initialState: GameState = {
   history: [], // Start with empty history - no initial snapshot
   historyIndex: 0, // This should be 0 for the initial state (not viewing history)
   viewingHistoryIndex: null, // Start viewing live state
+  moveCache: {}, // Initialize move cache for performance optimization
   // Ensure multiplayer state is included
   players: baseInitialState.players,
   isHost: baseInitialState.isHost,
@@ -129,13 +130,12 @@ const gameSlice = createSlice({
       state.validMoves = action.payload;
     },
     deselectPiece: (state) => {
-      console.log("Redux: deselectPiece called");
+      // OPTIMIZATION: Removed console.log for better performance
       state.selectedPiece = null;
       state.validMoves = [];
     },
     selectPiece: (state, action: PayloadAction<Position>) => {
-      console.log("Redux: selectPiece called with", action.payload);
-      console.log("Redux: currentPlayerTurn:", state.currentPlayerTurn);
+      // OPTIMIZATION: Removed console.log statements for better performance
       console.log(
         "Redux: historyIndex:",
         state.historyIndex,
@@ -145,13 +145,12 @@ const gameSlice = createSlice({
 
       // Don't allow piece selection when viewing historical moves
       if (state.viewingHistoryIndex !== null) {
-        console.log("Redux: Blocking piece selection - viewing history");
-        return;
+        return; // OPTIMIZATION: Removed console.log
       }
 
       const { row, col } = action.payload;
       const pieceCode = state.boardState[row][col];
-      console.log("Redux: pieceCode at", row, col, ":", pieceCode);
+      // OPTIMIZATION: Removed console.log for better performance
 
       // Check if clicking the same piece that's already selected - deselect it
       if (
@@ -192,14 +191,39 @@ const gameSlice = createSlice({
       console.log("Redux: Setting selectedPiece and calculating validMoves");
       state.selectedPiece = { row, col };
 
-      state.validMoves = getValidMoves(
-        pieceCode,
-        { row, col },
-        state.boardState,
-        state.eliminatedPlayers,
-        state.hasMoved,
-        state.enPassantTargets
-      );
+      // OPTIMIZATION: Check if we can reuse cached moves
+      const moveCacheKey = `${pieceCode}-${row}-${col}-${state.eliminatedPlayers.join(',')}-${JSON.stringify(state.hasMoved)}-${JSON.stringify(state.enPassantTargets)}`;
+      
+      if (state.moveCache && state.moveCache[moveCacheKey]) {
+        console.log("Redux: Using cached validMoves");
+        state.validMoves = state.moveCache[moveCacheKey];
+      } else {
+        console.log("Redux: Calculating new validMoves");
+        const validMoves = getValidMoves(
+          pieceCode,
+          { row, col },
+          state.boardState,
+          state.eliminatedPlayers,
+          state.hasMoved,
+          state.enPassantTargets
+        );
+        state.validMoves = validMoves;
+        
+        // Cache the moves for future use
+        if (!state.moveCache) {
+          state.moveCache = {};
+        }
+        state.moveCache[moveCacheKey] = validMoves;
+        
+        // Limit cache size to prevent memory issues
+        const cacheKeys = Object.keys(state.moveCache);
+        if (cacheKeys.length > 50) {
+          // Remove oldest entries (simple FIFO)
+          const keysToRemove = cacheKeys.slice(0, 10);
+          keysToRemove.forEach(key => delete state.moveCache![key]);
+        }
+      }
+      
       console.log(
         "Redux: validMoves calculated:",
         state.validMoves.length,
@@ -211,6 +235,9 @@ const gameSlice = createSlice({
       if (state.viewingHistoryIndex !== null) {
         return;
       }
+
+      // Clear move cache when board state changes
+      state.moveCache = {};
 
       const { from, to } = action.payload;
       const { row: startRow, col: startCol } = from;
@@ -245,6 +272,7 @@ const gameSlice = createSlice({
         if (
           state.gameMode !== "solo" &&
           state.gameMode !== "p2p" &&
+          state.gameMode !== "online" && // OPTIMIZATION: Allow online mode for local-first approach
           pieceColor !== state.currentPlayerTurn
         ) {
           console.log("makeMove: Turn validation blocked - not player's turn");
@@ -735,10 +763,10 @@ const gameSlice = createSlice({
       // Set bots based on game mode - simple and automatic!
       if (currentGameMode === "single") {
         state.botPlayers = ['b', 'y', 'g']; // Single player always has bots
-      } else if (currentGameMode === "p2p") {
-        // P2P mode: preserve existing bot configuration (set by host in lobby)
+      } else if (currentGameMode === "p2p" || currentGameMode === "online") {
+        // P2P and Online modes: preserve existing bot configuration (set by host in lobby)
         // The botPlayers array is already set by the host, don't clear it
-        // This allows P2P lobby to configure bots and they persist through resets
+        // This allows P2P and Online lobbies to configure bots and they persist through resets
       } else {
         state.botPlayers = []; // Other modes have no bots
       }
@@ -1275,6 +1303,8 @@ const gameSlice = createSlice({
     setGameState: (state, action: PayloadAction<GameState>) => {
       // Replace the entire game state (useful for syncing when game starts)
       const newState = action.payload;
+      // Clear move cache when game state changes
+      newState.moveCache = {};
       return { ...state, ...newState };
     },
     sendMoveToServer: (

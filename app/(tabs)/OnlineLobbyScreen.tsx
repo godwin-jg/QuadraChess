@@ -45,26 +45,28 @@ const OnlineLobbyScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("Initializing...");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [botPlayers, setBotPlayers] = useState<string[]>([]);
 
-  // Initialize Firebase auth
+  // Initialize Firebase auth (optimized)
   useEffect(() => {
     const initializeAuth = async () => {
       try {
+        setConnectionStatus("Authenticating...");
         // Use Realtime Database
         await realtimeDatabaseService.signInAnonymously();
+        
+        setConnectionStatus("Connecting...");
         setIsConnected(true);
         console.log("Realtime Database initialization successful");
         
-        // Test the connection
-        const connectionTest = await realtimeDatabaseService.testConnection();
-        if (connectionTest) {
-          console.log("✅ Firebase connection test passed");
-        } else {
-          console.warn("⚠️ Firebase connection test failed");
-        }
+        // Skip connection test to reduce loading time
+        // Connection will be validated when subscribing to games
+        console.log("✅ Firebase connection established");
       } catch (error) {
         console.error("Failed to initialize Firebase auth:", error);
+        setConnectionStatus("Connection failed");
         Alert.alert("Connection Error", "Failed to connect to online services");
       }
     };
@@ -164,7 +166,8 @@ const OnlineLobbyScreen: React.FC = () => {
       dispatch(resetGame());
       
       const gameId = await realtimeDatabaseService.createGame(
-        settings.profile.name.trim()
+        settings.profile.name.trim(),
+        botPlayers
       );
       setCurrentGameId(gameId);
     } catch (error) {
@@ -225,6 +228,18 @@ const OnlineLobbyScreen: React.FC = () => {
   const refreshGames = async () => {
     // Refresh the subscription (real-time query will automatically update)
     setRefreshKey(prev => prev + 1);
+  };
+
+  // Toggle bot status for a player color
+  const toggleBotPlayer = (color: string) => {
+    console.log(`🤖 OnlineLobbyScreen: Toggle bot request for ${color}`);
+    
+    const newBotPlayers = botPlayers.includes(color)
+      ? botPlayers.filter(c => c !== color)
+      : [...botPlayers, color];
+    
+    setBotPlayers(newBotPlayers);
+    console.log(`🤖 OnlineLobbyScreen: Toggled bot for ${color}, new botPlayers:`, newBotPlayers);
   };
 
   const cleanupCorruptedGames = async () => {
@@ -292,7 +307,10 @@ const OnlineLobbyScreen: React.FC = () => {
       <View className="flex-1 bg-black justify-center items-center">
         <ActivityIndicator size="large" color="#ffffff" />
         <Text className="text-white text-lg mt-4">
-          Connecting to online services...
+          {connectionStatus}
+        </Text>
+        <Text className="text-gray-400 text-sm mt-2">
+          Please wait while we connect...
         </Text>
       </View>
     );
@@ -456,11 +474,48 @@ const OnlineLobbyScreen: React.FC = () => {
         )}
       </View>
 
+      {/* Bot Configuration Section */}
+      <View className="mb-6">
+        <View className="bg-gray-800 rounded-lg p-4 mb-4">
+          <Text className="text-white text-lg font-semibold mb-3 text-center">Bot Configuration</Text>
+          <Text className="text-gray-400 text-sm mb-3 text-center">
+            Tap to toggle bot players (synchronized across all devices)
+          </Text>
+          <View className="flex-row justify-around">
+            {['r', 'b', 'y', 'g'].map((color) => {
+              const isBot = botPlayers.includes(color);
+              const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
+              const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-yellow-500' : 'bg-green-500';
+              
+              return (
+                <TouchableOpacity
+                  key={color}
+                  className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
+                    isBot ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'
+                  }`}
+                  onPress={() => toggleBotPlayer(color)}
+                >
+                  <View className="items-center">
+                    <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
+                    <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : 'text-gray-300'}`}>
+                      {colorName}
+                    </Text>
+                    <Text className={`text-xs ${isBot ? 'text-green-300' : 'text-gray-400'}`}>
+                      {isBot ? '🤖 Bot' : '👤 Human'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+
       <View className="mb-8">
         <AnimatedButton
           icon="🌐"
           title="Create Game"
-          subtitle={isLoading ? "Creating..." : "Start an online game"}
+          subtitle={isLoading ? "Creating..." : `Start an online game${botPlayers.length > 0 ? ` with ${botPlayers.length} bot${botPlayers.length > 1 ? 's' : ''}` : ''}`}
           gradientColors={['#ffffff', '#f0f0f0']}
           textColor="black"
           subtitleColor="gray-600"

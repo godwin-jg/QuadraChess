@@ -67,9 +67,6 @@ class RealtimeDatabaseService {
       this.currentUser = userCredential.user;
       console.log("Successfully signed in:", userCredential.user.uid);
       
-      // Wait a moment for the auth state to propagate
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
       // OPTIMIZATION: Start keep-alive to maintain connection
       this.startKeepAlive();
       
@@ -123,32 +120,16 @@ class RealtimeDatabaseService {
   }
 
 
-  // NEW: Call Cloud Function to create game (server-authoritative)
-  async createGame(hostName: string): Promise<string> {
+  // Create game directly in database (Cloud Functions temporarily disabled)
+  async createGame(hostName: string, botColors: string[] = []): Promise<string> {
     try {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      console.log("Creating game via Cloud Function:", hostName);
-
-      try {
-        // Try to call the Cloud Function first
-        const functions = require("@react-native-firebase/functions").default;
-        const createGameFunction = functions().httpsCallable("createGame");
-
-        const result = await createGameFunction({
-          playerName: hostName,
-        });
-
-        const gameId = result.data.gameId;
-        console.log("Game created via Cloud Function:", gameId);
-        return gameId;
-      } catch (cloudFunctionError) {
-        console.warn("Cloud Function not available, falling back to direct database creation:", cloudFunctionError);
-        
-        // Fallback: Create game directly in database
-        return await this.createGameDirectly(hostName);
-      }
+      console.log("Creating game directly in database:", hostName, "with bots:", botColors);
+      
+      // Use direct database creation method
+      return await this.createGameDirectly(hostName, botColors);
     } catch (error) {
       console.error("Error creating game:", error);
       throw error;
@@ -156,7 +137,7 @@ class RealtimeDatabaseService {
   }
 
   // Fallback method to create game directly in database
-  private async createGameDirectly(hostName: string): Promise<string> {
+  private async createGameDirectly(hostName: string, botColors: string[] = []): Promise<string> {
     const user = this.getCurrentUser();
     if (!user) throw new Error("User not authenticated");
 
@@ -246,6 +227,11 @@ class RealtimeDatabaseService {
     // Update the game with its ID
     await gameRef.update({ id: gameId });
 
+    // Add bots if requested
+    if (botColors.length > 0) {
+      await this.addBotsToGame(gameId, botColors);
+    }
+
     console.log(`Game created directly in database: ${gameId} by ${hostName}`);
     console.log(`Game data:`, JSON.stringify(gameData, null, 2));
     
@@ -321,32 +307,10 @@ class RealtimeDatabaseService {
         if (!user) throw new Error("Failed to authenticate user");
       }
 
-      console.log("Calling leave game Cloud Function for game:", gameId);
-
-      try {
-        // Try to call the Cloud Function first
-        const functions = require("@react-native-firebase/functions").default;
-        const leaveGameFunction = functions().httpsCallable("leaveGame");
-
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error("Cloud Function call timed out")), 8000); // 8 second timeout
-        });
-
-        const result = await Promise.race([
-          leaveGameFunction({
-            gameId: gameId,
-          }),
-          timeoutPromise
-        ]);
-
-        console.log("Leave game request processed:", result.data);
-      } catch (cloudFunctionError) {
-        console.warn("Cloud Function not available, falling back to direct database leave:", cloudFunctionError);
-        
-        // Fallback: Leave game directly in database
-        await this.leaveGameDirectly(gameId);
-      }
+      console.log("Leaving game directly in database:", gameId);
+      
+      // Use direct database leave method
+      await this.leaveGameDirectly(gameId);
     } catch (error) {
       console.error("Error calling leave game:", error);
       throw error;
@@ -387,6 +351,14 @@ class RealtimeDatabaseService {
         // If no players left, delete the game
         if (!gameData.players || Object.keys(gameData.players).length === 0) {
           console.log(`Game ${gameId} is now empty, deleting`);
+          return null; // This will delete the game
+        }
+
+        // Check if only bots remain - if so, delete the game
+        const remainingPlayers = Object.values(gameData.players);
+        const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
+        if (!hasHumanPlayers) {
+          console.log(`Game ${gameId} has only bots remaining, deleting`);
           return null; // This will delete the game
         }
 
@@ -458,10 +430,10 @@ class RealtimeDatabaseService {
     const gameRef = database().ref(`games/${gameId}`);
 
     const listener = gameRef.on("value", (snapshot) => {
-      console.log("RealtimeDatabaseService: Firebase snapshot received for game:", gameId);
+      // OPTIMIZATION: Removed console.log for better performance
       if (snapshot.exists()) {
         const gameData = { id: gameId, ...snapshot.val() } as RealtimeGame;
-        console.log("RealtimeDatabaseService: Game data exists - eliminatedPlayers:", gameData.gameState?.eliminatedPlayers);
+        // OPTIMIZATION: Removed console.log for better performance
 
         // Ensure all players have required fields
         const processedPlayers: { [playerId: string]: Player } = {};
@@ -473,6 +445,7 @@ class RealtimeDatabaseService {
               color: player.color || "g", // Default to green if missing
               isHost: player.isHost || false,
               isOnline: player.isOnline || false,
+              isBot: player.isBot || false, // Add missing isBot property
               lastSeen: player.lastSeen || Date.now(),
             };
           }
@@ -531,7 +504,7 @@ class RealtimeDatabaseService {
     };
   }
 
-  // OPTIMIZATION: Enhanced move management with optimistic updates
+  // Ultra-fast move processing (optimized for real-time)
   async makeMove(
     gameId: string,
     moveData: {
@@ -545,71 +518,69 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      // OPTIMIZATION: Add optimistic move to moves collection for instant UI update
-      const optimisticMove = {
-        ...moveData,
-        playerId: user.uid,
-        timestamp: Date.now(),
-        gameId: gameId,
-        moveNumber: Date.now(), // Temporary move number
-        isOptimistic: true, // Mark as optimistic
-      };
+      // Ultra-fast database transaction (minimal validation for speed)
+      // OPTIMIZATION: Removed console.log for better performance
+      const gameRef = database().ref(`games/${gameId}`);
+      const result = await gameRef.transaction((gameData) => {
+        if (gameData === null) {
+          console.warn(`Game ${gameId} not found`);
+          return null;
+        }
 
-      // OPTIMIZATION: Add optimistic move immediately for instant feedback
-      const movesRef = database().ref(`moves/${gameId}`);
-      const optimisticMoveRef = movesRef.push();
-      await optimisticMoveRef.set(optimisticMove);
+        // Quick player validation
+        const player = gameData.players[user.uid];
+        // OPTIMIZATION: Removed console.log for better performance
+        if (!player || player.color !== gameData.gameState.currentPlayerTurn) {
+          return gameData; // Skip move silently (no logging for speed)
+        }
 
-      // OPTIMIZATION: Batch move requests to reduce network calls
-      const moveRequest = {
-        ...moveData,
-        playerId: user.uid,
-        timestamp: Date.now(),
-        gameId: gameId,
-        optimisticMoveId: optimisticMoveRef.key, // Reference to optimistic move
-      };
+        // Direct move application (no board state conversion for speed)
+        const boardState = gameData.gameState.boardState;
+        const piece = boardState[moveData.from.row][moveData.from.col];
+        boardState[moveData.from.row][moveData.from.col] = "";
+        boardState[moveData.to.row][moveData.to.col] = piece;
 
-      this.addToMoveBatch(gameId, moveRequest);
+        // Update turn in both places for consistency
+        const currentTurn = gameData.gameState.currentPlayerTurn;
+        const nextPlayer = this.getNextPlayer(currentTurn);
+        gameData.gameState.currentPlayerTurn = nextPlayer;
+        gameData.currentPlayerTurn = nextPlayer; // Also update top-level turn
+        
+        gameData.lastMove = {
+          from: moveData.from,
+          to: moveData.to,
+          piece: moveData.pieceCode,
+          player: user.uid,
+          timestamp: Date.now(),
+        };
+        gameData.lastActivity = Date.now();
+        
+        // OPTIMIZATION: Removed console.log for better performance
 
-      console.log("Move request sent to server with optimistic update:", moveRequest);
+        return gameData;
+      });
+
+      if (!result.committed) {
+        throw new Error("Move transaction failed");
+      }
+      
+      console.log(`Move processed successfully for game ${gameId}`);
     } catch (error) {
-      console.error("Error sending move request:", error);
+      console.error("Error processing move:", error);
       throw error;
     }
   }
 
-  // Resign game - calls Cloud Function
+  // Resign game - uses direct database method
   async resignGame(gameId: string): Promise<void> {
     try {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      console.log("Calling resign Cloud Function for game:", gameId);
-
-      try {
-        // Try to call the Cloud Function first
-        const functions = require("@react-native-firebase/functions").default;
-        const resignGameFunction = functions().httpsCallable("resignGame");
-
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error("Cloud Function call timed out")), 8000); // 8 second timeout
-        });
-
-        const result = await Promise.race([
-          resignGameFunction({
-            gameId: gameId,
-          }),
-          timeoutPromise
-        ]);
-
-        console.log("Resign request processed:", result.data);
-      } catch (cloudFunctionError) {
-        console.warn("Cloud Function not available, falling back to direct database resignation:", cloudFunctionError);
-        
-        // Fallback: Resign directly in database
-        await this.resignGameDirectly(gameId);
-      }
+      console.log("Resigning game directly in database:", gameId);
+      
+      // Use direct database resignation method
+      await this.resignGameDirectly(gameId);
     } catch (error) {
       console.error("Error calling resign:", error);
       throw error;
@@ -665,6 +636,14 @@ class RealtimeDatabaseService {
         // If no players left, delete the game
         if (!gameData.players || Object.keys(gameData.players).length === 0) {
           console.log(`Game ${gameId} is now empty after resignation, deleting`);
+          return null; // This will delete the game
+        }
+
+        // Check if only bots remain - if so, delete the game
+        const remainingPlayers = Object.values(gameData.players);
+        const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
+        if (!hasHumanPlayers) {
+          console.log(`Game ${gameId} has only bots remaining after resignation, deleting`);
           return null; // This will delete the game
         }
 
@@ -897,6 +876,74 @@ class RealtimeDatabaseService {
     }
   }
 
+  // Helper functions for direct move processing
+  private convertBoardState(boardState: any, toFlattened: boolean): any {
+    if (toFlattened) {
+      // Convert 2D array to flattened format for Firebase
+      return boardState.map((row: any) =>
+        row.map((cell: any) => cell === null ? "" : cell)
+      );
+    } else {
+      // Convert flattened format back to 2D array
+      return boardState.map((row: any) =>
+        row.map((cell: any) => cell === "" ? null : cell)
+      );
+    }
+  }
+
+  private getNextPlayer(currentPlayer: string): string {
+    const turnOrder = ["r", "b", "y", "g"];
+    const currentIndex = turnOrder.indexOf(currentPlayer);
+    const nextPlayer = turnOrder[(currentIndex + 1) % turnOrder.length];
+    console.log(`getNextPlayer: ${currentPlayer} (index ${currentIndex}) -> ${nextPlayer} (index ${turnOrder.indexOf(nextPlayer)})`);
+    return nextPlayer;
+  }
+
+  // Add bots to a game with specific colors
+  private async addBotsToGame(gameId: string, botColors: string[]): Promise<void> {
+    try {
+      const gameRef = database().ref(`games/${gameId}`);
+      const snapshot = await gameRef.once("value");
+      
+      if (!snapshot.exists()) {
+        throw new Error("Game not found");
+      }
+
+      const gameData = snapshot.val();
+      const usedColors = Object.values(gameData.players).map((p: any) => p.color);
+      
+      // Filter out colors that are already taken
+      const availableBotColors = botColors.filter(color => !usedColors.includes(color));
+      
+      if (availableBotColors.length === 0) {
+        console.log(`No available colors for bots in game ${gameId}`);
+        return;
+      }
+
+      const botUpdates: any = {};
+
+      for (const botColor of availableBotColors) {
+        const botId = `bot_${botColor}_${Date.now()}`;
+        
+        botUpdates[`players/${botId}`] = {
+          id: botId,
+          name: `Bot ${botColor.toUpperCase()}`,
+          color: botColor,
+          isHost: false,
+          isOnline: true,
+          isBot: true,
+          lastSeen: Date.now(),
+        };
+      }
+
+      await gameRef.update(botUpdates);
+      console.log(`Added ${availableBotColors.length} bots to game ${gameId}:`, availableBotColors);
+    } catch (error) {
+      console.error("Error adding bots to game:", error);
+      throw error;
+    }
+  }
+
   cleanup(): void {
     if (this.gameUnsubscribe) {
       this.gameUnsubscribe();
@@ -917,28 +964,17 @@ class RealtimeDatabaseService {
     this.stopKeepAlive();
   }
 
-  // Test Firebase connection
+  // Test Firebase connection (optimized)
   async testConnection(): Promise<boolean> {
     try {
       console.log("Testing Firebase connection...");
       
-      // Ensure we're authenticated
-      const user = this.getCurrentUser();
-      if (!user) {
-        await this.signInAnonymously();
-      }
-      
-      // Test reading from database
+      // Quick connection test - just check if we can access the database
       const gamesRef = database().ref("games");
       const snapshot = await gamesRef.limitToFirst(1).once("value");
       
-      if (snapshot.exists()) {
-        console.log("✅ Firebase connection successful!");
-        return true;
-      } else {
-        console.log("✅ Firebase connection successful!");
-        return true;
-      }
+      console.log("✅ Firebase connection successful!");
+      return true;
     } catch (error) {
       console.error("❌ Firebase connection failed:", error);
       return false;

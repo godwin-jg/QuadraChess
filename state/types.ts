@@ -20,6 +20,7 @@ export interface GameState {
     | "promotion";
   selectedPiece: Position | null;
   validMoves: MoveInfo[];
+  moveCache?: { [key: string]: MoveInfo[] }; // Cache for valid moves to improve performance
   capturedPieces: { r: string[]; b: string[]; y: string[]; g: string[] };
   checkStatus: { r: boolean; b: boolean; y: boolean; g: boolean };
   winner: string | null;

@@ -7,9 +7,9 @@ import { Player } from "../app/services/networkService";
 import database from "@react-native-firebase/database";
 import {
   makeMove as makeMoveAction,
-  applyNetworkMove,
   setGameState,
   createStateSnapshot,
+  setBotPlayers,
 } from "../state/gameSlice";
 import { store } from "../state/store";
 import {
@@ -70,12 +70,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
       this.currentGameId = gameId;
       this.isConnected = true; // Mark as connected immediately when connection is established
-      console.log(
-        "OnlineGameService: Connection established, isConnected:",
-        this.isConnected,
-        "currentGameId:",
-        this.currentGameId
-      );
+      // OPTIMIZATION: Removed console.log for better performance
 
       // Subscribe to game updates
       this.gameUnsubscribe = realtimeDatabaseService.subscribeToGame(
@@ -84,11 +79,11 @@ class OnlineGameServiceImpl implements OnlineGameService {
           if (game) {
             // Keep connected status true when we receive game data
             this.isConnected = true;
-            console.log("OnlineGameService: Game data received, maintaining connection");
+            // OPTIMIZATION: Removed console.log for better performance
           } else {
             // Only mark as disconnected if we're sure the game doesn't exist
             // Don't immediately disconnect on temporary null values
-            console.log("OnlineGameService: Received null game data, checking if game exists...");
+            // OPTIMIZATION: Removed console.log for better performance
             // Keep isConnected true for now, let the resign method handle the actual connection check
           }
           this.handleGameUpdate(game);
@@ -155,77 +150,65 @@ class OnlineGameServiceImpl implements OnlineGameService {
       throw new Error("Not connected to a game");
     }
 
-    // Add retry logic for network failures
-    let retryCount = 0;
-    const maxRetries = 3;
-    let lastError: Error | null = null;
+    try {
+      // Basic client-side validation for UX (not authoritative)
+      const state = store.getState();
+      const currentGameState = state.game;
 
-    while (retryCount < maxRetries) {
-      try {
-        // Basic client-side validation for UX (not authoritative)
-        const state = store.getState();
-        const currentGameState = state.game;
-
-        // ✅ CRITICAL: Add turn validation for better UX
-        if (currentGameState.currentPlayerTurn !== moveData.playerColor) {
-          throw new Error("Not your turn");
-        }
-
-        // Basic move validation (for immediate feedback)
-        const isValidMove = this.validateMove(currentGameState, moveData);
-        if (!isValidMove) {
-          throw new Error("Invalid move");
-        }
-
-        // OPTIMISTIC UI: Apply move immediately for instant feedback
-        console.log("OnlineGameService: Applying optimistic move:", moveData);
-        
-        // Save state for potential rollback
-        this.saveMoveForRollback(moveData, currentGameState);
-        
-        store.dispatch(applyNetworkMove(moveData));
-
-        // Send move to server for validation
-        await realtimeDatabaseService.makeMove(this.currentGameId, moveData);
-
-        // If we get here, the move was sent successfully
-        // Server will send back the authoritative state which will override if needed
-        return;
-      } catch (error) {
-        lastError = error as Error;
-        
-        // REVERT OPTIMISTIC MOVE: If server validation failed, revert the move
-        console.log("OnlineGameService: Server validation failed, reverting optimistic move:", error);
-        this.revertOptimisticMove(moveData);
-        
-        retryCount++;
-
-        // Don't retry for validation errors
-        if (
-          error instanceof Error &&
-          (error.message.includes("Not your turn") ||
-            error.message.includes("Invalid move"))
-        ) {
-          throw error;
-        }
-
-        console.warn(`Move attempt ${retryCount} failed:`, error);
-
-        if (retryCount < maxRetries) {
-          // Wait before retrying (exponential backoff)
-          await new Promise((resolve) =>
-            setTimeout(resolve, 1000 * retryCount)
-          );
-        }
+      // ✅ CRITICAL: Add turn validation for better UX
+      if (currentGameState.currentPlayerTurn !== moveData.playerColor) {
+        throw new Error("Not your turn");
       }
-    }
 
-    // If we get here, all retries failed
-    console.error(
-      `Failed to send move after ${maxRetries} attempts:`,
-      lastError
-    );
-    throw lastError || new Error("Failed to send move after multiple attempts");
+      // OPTIMIZATION: Skip client validation - server validation is authoritative
+      // This eliminates redundant getValidMoves() call and improves performance
+
+      // OPTIMIZATION: Apply move locally first for instant feedback
+      // Server validation is minimal (just turn check + move application)
+      // We can do this locally and sync to server
+      
+      // Basic validation to prevent obviously invalid moves
+      const piece = currentGameState.boardState[moveData.from.row][moveData.from.col];
+      if (!piece || piece[0] !== moveData.playerColor) {
+        throw new Error("Invalid piece selection");
+      }
+      
+      // Check if destination is within bounds
+      if (moveData.to.row < 0 || moveData.to.row >= 14 || 
+          moveData.to.col < 0 || moveData.to.col >= 14) {
+        throw new Error("Move out of bounds");
+      }
+      
+      // Save current state for potential rollback
+      const currentState = store.getState().game;
+      const stateSnapshot = JSON.parse(JSON.stringify(currentState));
+      
+      // Apply move locally immediately
+      store.dispatch(makeMoveAction({
+        from: moveData.from,
+        to: moveData.to,
+        pieceCode: moveData.pieceCode,
+        playerColor: moveData.playerColor
+      }));
+
+      // Send move to server for synchronization with rollback capability
+      try {
+        await realtimeDatabaseService.makeMove(this.currentGameId, moveData);
+        // Move successful - no rollback needed
+      } catch (error) {
+        // Server rejected the move - rollback local state
+        console.error("Server rejected move, rolling back local state:", error);
+        store.dispatch(setGameState(stateSnapshot));
+        
+        // Re-throw error so UI can show appropriate message
+        throw error;
+      }
+
+      // OPTIMIZATION: Removed console.log for better performance
+    } catch (error) {
+      // OPTIMIZATION: Simplified error handling - no rollback needed
+      throw error;
+    }
   }
 
   async resignGame(): Promise<void> {
@@ -396,11 +379,23 @@ class OnlineGameServiceImpl implements OnlineGameService {
         const canStartGame =
           playersArray.length >= 2 && game.status === "waiting";
 
+        // Extract bot players for online games
+        const botPlayers = playersArray
+          .filter((player: any) => player.isBot === true)
+          .map((player: any) => player.color);
+        
+        console.log(`OnlineGameService: Detected bot players:`, botPlayers);
+
+        // Update bot players in Redux store
+        console.log(`OnlineGameService: Dispatching setBotPlayers with:`, botPlayers);
+        store.dispatch(setBotPlayers(botPlayers));
+        console.log(`OnlineGameService: Redux store botPlayers after dispatch:`, store.getState().game.botPlayers);
+
         // Ensure board state is properly copied
         const gameState = {
           ...game.gameState,
           currentPlayerTurn:
-            game.currentPlayerTurn || game.gameState.currentPlayerTurn || "r",
+            game.gameState.currentPlayerTurn || game.currentPlayerTurn || "r",
           gameStatus: (game.gameState.gameStatus || game.status || "active") as
             | "waiting"
             | "active"
@@ -431,9 +426,12 @@ class OnlineGameServiceImpl implements OnlineGameService {
           currentState.currentPlayerTurn !== gameState.currentPlayerTurn ||
           currentState.gameStatus !== gameState.gameStatus ||
           currentState.eliminatedPlayers?.length !== gameState.eliminatedPlayers?.length;
+        
+        console.log(`Turn check: current=${currentState.currentPlayerTurn}, new=${gameState.currentPlayerTurn}, changed=${currentState.currentPlayerTurn !== gameState.currentPlayerTurn}`);
 
         if (hasSignificantChanges) {
           console.log("OnlineGameService: Dispatching setGameState with eliminatedPlayers:", gameState.eliminatedPlayers);
+          console.log("OnlineGameService: Current turn:", gameState.currentPlayerTurn);
           store.dispatch(setGameState(gameState));
         } else {
           console.log("OnlineGameService: Skipping state update - no significant changes detected");
@@ -579,75 +577,10 @@ class OnlineGameServiceImpl implements OnlineGameService {
     return false;
   }
 
-  private validateMove(
-    gameState: GameState,
-    moveData: {
-      from: { row: number; col: number };
-      to: { row: number; col: number };
-      pieceCode: string;
-      playerColor: string;
-    }
-  ): boolean {
-    try {
-      // Simplified validation - let server handle authoritative validation
-      // Only do basic checks to prevent obviously invalid moves
-      
-      // Check if the piece belongs to the player
-      const piece = gameState.boardState[moveData.from.row][moveData.from.col];
-      if (!piece || piece[0] !== moveData.playerColor) {
-        return false;
-      }
+  // OPTIMIZATION: Removed validateMove function - server validation is authoritative
+  // This eliminates redundant getValidMoves() calls and improves performance
 
-      // Basic bounds checking
-      if (moveData.to.row < 0 || moveData.to.row >= 14 || 
-          moveData.to.col < 0 || moveData.to.col >= 14) {
-        return false;
-      }
-
-      // Basic move validation (simplified)
-      const validMoves = getValidMoves(
-        piece,
-        moveData.from,
-        gameState.boardState,
-        gameState.eliminatedPlayers,
-        gameState.hasMoved,
-        gameState.enPassantTargets
-      );
-
-      const isValidMove = validMoves.some(
-        (move) => move.row === moveData.to.row && move.col === moveData.to.col
-      );
-
-      return isValidMove;
-    } catch (error) {
-      console.error("Error validating move:", error);
-      return false;
-    }
-  }
-
-  // OPTIMIZATION: Move prediction and rollback methods
-  private saveMoveForRollback(moveData: any, gameState: any): void {
-    this.moveHistory.push({
-      move: moveData,
-      gameState: JSON.parse(JSON.stringify(gameState)), // Deep copy
-      timestamp: Date.now()
-    });
-
-    // Keep only recent moves
-    if (this.moveHistory.length > this.maxHistorySize) {
-      this.moveHistory.shift();
-    }
-  }
-
-  private rollbackMove(): void {
-    if (this.moveHistory.length > 0) {
-      const lastMove = this.moveHistory.pop();
-      console.log("Rolling back move due to server rejection:", lastMove.move);
-      
-      // Restore previous game state
-      store.dispatch(setGameState(lastMove.gameState));
-    }
-  }
+  // OPTIMIZATION: Removed rollback methods - not needed for performance
 
   // OPTIMIZATION: Connection quality detection methods
   private measureLatency(): number {

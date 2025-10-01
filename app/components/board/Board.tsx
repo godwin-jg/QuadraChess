@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import React, { useMemo } from "react";
+import React, { useMemo, useRef } from "react";
 import { Alert, Text, View, useWindowDimensions, StyleSheet } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import Animated, { 
@@ -81,8 +81,14 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     }
     return boardState;
   }, [viewingHistoryIndex, history, boardState]);
-  const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
-  const players = useSelector((state: RootState) => state.game.players);
+  // OPTIMIZATION: Combined selector to reduce Redux subscriptions
+  const gameState = useSelector((state: RootState) => ({
+    currentPlayerTurn: state.game.currentPlayerTurn,
+    gameStatus: state.game.gameStatus,
+    players: state.game.players,
+  }));
+  
+  const { currentPlayerTurn, gameStatus, players } = gameState;
 
   // Animation values for current player glow
   const glowOpacity = useSharedValue(0);
@@ -184,13 +190,26 @@ export default function Board({ onCapture, playerData }: BoardProps) {
   // Check if we're viewing history (not at the live game state)
   const isViewingHistory = viewingHistoryIndex !== null && viewingHistoryIndex < history.length - 1;
 
+  // Debouncing for piece selection to prevent rapid clicking
+  const lastClickTime = useRef<number>(0);
+  const DEBOUNCE_DELAY = 150; // 150ms debounce
+
+  // OPTIMIZATION: Memoize current player color to avoid repeated service lookups
+  const currentPlayerColor = useMemo(() => {
+    return effectiveMode === "online" ? onlineGameService.currentPlayer?.color : null;
+  }, [effectiveMode, onlineGameService.currentPlayer?.color]);
 
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
+    // Debounce rapid clicks
+    const now = Date.now();
+    if (now - lastClickTime.current < DEBOUNCE_DELAY) {
+      return; // OPTIMIZATION: Removed console.log
+    }
+    lastClickTime.current = now;
     // If we're viewing history, don't allow any moves
     if (isViewingHistory) {
-      console.log("Cannot make moves while viewing history");
-      return;
+      return; // OPTIMIZATION: Removed console.log
     }
 
     const pieceCode = displayBoardState[row][col];
@@ -198,15 +217,14 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     // PIECE OWNERSHIP VALIDATION: Only allow players to interact with their own pieces
     if (pieceCode && effectiveMode === "online") {
       const pieceColor = pieceCode[0];
-      const currentPlayerColor = onlineGameService.currentPlayer?.color;
       
       // If there's a piece and it doesn't belong to the current player, ignore the press
       if (currentPlayerColor && pieceColor !== currentPlayerColor) {
-        console.log(`Cannot select opponent piece: ${pieceCode} (you are ${currentPlayerColor})`);
-        return;
+        return; // OPTIMIZATION: Removed console.log
       }
     }
     
+    // OPTIMIZATION: Use cached valid moves instead of recalculating
     const isAValidMove = displayValidMoves.some(
       (move) => move.row === row && move.col === col
     );
@@ -225,6 +243,16 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     if (selectedPiece && isAValidMove) {
       const pieceToMove = displayBoardState[selectedPiece.row][selectedPiece.col];
       const pieceColor = pieceToMove?.charAt(0);
+      
+      // OPTIMIZATION: Validate turn before attempting move
+      if (effectiveMode === "online" && pieceColor !== currentPlayerTurn) {
+        return; // Not player's turn - ignore move
+      }
+      
+      // OPTIMIZATION: Validate game status
+      if (gameStatus !== "active") {
+        return; // Game not active - ignore move
+      }
       
       // Check if this move captures a piece
       const capturedPiece = displayBoardState[row][col];
@@ -271,16 +299,9 @@ export default function Board({ onCapture, playerData }: BoardProps) {
       // Handle different game modes
 
       if (effectiveMode === "online") {
-        console.log(
-          "Board: Online mode - isConnected:",
-          onlineGameService.isConnected,
-          "currentGameId:",
-          onlineGameService.currentGameId
-        );
         if (onlineGameService.isConnected && onlineGameService.currentGameId) {
           // Online multiplayer mode
           try {
-            console.log("Board: Sending move to online service:", moveData);
             await onlineGameService.makeMove(moveData);
           } catch (error) {
             console.error("Failed to make online move:", error);
@@ -513,8 +534,8 @@ export default function Board({ onCapture, playerData }: BoardProps) {
                     isInteractable={
                       !piece || 
                       effectiveMode !== "online" || 
-                      !onlineGameService.currentPlayer?.color ||
-                      piece[0] === onlineGameService.currentPlayer.color
+                      !currentPlayerColor ||
+                      piece[0] === currentPlayerColor
                     }
                     boardTheme={boardTheme}
                     playerData={playerData}

@@ -15,6 +15,7 @@ import {
   clearJustEliminated,
 } from "../../state/gameSlice";
 import { botService } from "../../services/botService";
+import { onlineBotService } from "../../services/onlineBotService";
 import p2pService from "../../services/p2pService";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
@@ -368,20 +369,38 @@ export default function GameScreen() {
     });
     
     // Check if the current player is a bot and the game is active
+    console.log(`🤖 GameScreen: Bot check - botPlayers:`, botPlayers, `currentPlayerTurn:`, currentPlayerTurn, `gameStatus:`, gameStatus, `isGameStateReady:`, isGameStateReady);
+    
     if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active' && isGameStateReady) {
       console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected - scheduling bot move`);
       
-      // Add a "thinking" delay to feel more natural
-      const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
+      if (gameMode === 'online') {
+        // For online games, use centralized bot service (single source of truth)
+        console.log(`🤖 GameScreen: Using centralized bot service for online game`);
+        // Get current game state from Redux store
+        const currentGameState = store.getState().game;
+        onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
+      } else {
+        // For other modes (solo, p2p), use local bot service
+        const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
 
-      const timer = setTimeout(() => {
-        console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (mode: ${gameMode})`);
-        botService.makeBotMove(currentPlayerTurn);
-      }, botThinkTime);
+        const timer = setTimeout(() => {
+          console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (mode: ${gameMode})`);
+          botService.makeBotMove(currentPlayerTurn);
+        }, botThinkTime);
 
-      return () => clearTimeout(timer);
+        return () => clearTimeout(timer);
+      }
     }
-  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode]);
+  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId]);
+
+  // Cleanup bot moves when game ends or changes
+  useEffect(() => {
+    if (gameMode === 'online' && (gameStatus === 'finished' || gameStatus === 'checkmate')) {
+      console.log(`🤖 GameScreen: Game ended, cancelling all bot moves`);
+      onlineBotService.cancelAllBotMoves();
+    }
+  }, [gameStatus, gameMode]);
 
   // ✅ Bot Promotion Controller - handles bot pawn promotions
   useEffect(() => {

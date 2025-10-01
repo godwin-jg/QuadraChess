@@ -18,7 +18,7 @@ const db = admin.database();
 
 // OPTIMIZATION: Helper function for fast turn advancement
 function getNextPlayer(currentPlayer: string): string {
-  const turnOrder = ['r', 'b', 'y', 'g'];
+  const turnOrder = ["r", "b", "y", "g"];
   const currentIndex = turnOrder.indexOf(currentPlayer);
   return turnOrder[(currentIndex + 1) % turnOrder.length];
 }
@@ -37,12 +37,12 @@ const gameLocks = new Map<string, Promise<any>>();
 function convertBoardState(boardState: any, toFlattened: boolean): any {
   if (toFlattened) {
     // Convert 2D array to flattened format for Firebase
-    return boardState.map((row: any) => 
+    return boardState.map((row: any) =>
       row.map((cell: any) => cell === null ? "" : cell)
     );
   } else {
     // Convert flattened format back to 2D array
-    return boardState.map((row: any) => 
+    return boardState.map((row: any) =>
       row.map((cell: any) => cell === "" ? null : cell)
     );
   }
@@ -124,21 +124,27 @@ export const createGame = onCall(async (request) => {
     }
 
     const gameData = {
-      gameId: gameId,
+      id: gameId,
+      hostId: uid,
+      hostName: request.data.playerName || request.data.name || "Player",
       status: "waiting",
       createdAt: Date.now(),
       lastActivity: Date.now(),
+      maxPlayers: 4,
+      currentPlayerTurn: "r",
+      winner: null,
+      lastMove: null,
       players: {
         [uid]: {
-          uid: uid,
-          name: request.data.name || "Player",
+          id: uid,
+          name: request.data.playerName || request.data.name || "Player",
           color: "r", // First player gets red
-          status: "active",
-          joinedAt: Date.now(),
+          isHost: true,
+          isOnline: true,
+          lastSeen: Date.now(),
         },
       },
       gameState: newGameState,
-      currentPlayerTurn: "r",
     };
 
     await gameRef.set(gameData);
@@ -193,6 +199,7 @@ export const leaveGame = onCall(async (request) => {
 
           // Remove the player from the game
           if (gameData.players && gameData.players[uid]) {
+            const leavingPlayer = gameData.players[uid];
             delete gameData.players[uid];
             gameData.lastActivity = Date.now();
 
@@ -202,11 +209,20 @@ export const leaveGame = onCall(async (request) => {
               return null; // This will delete the game
             }
 
+            // If host left, assign new host
+            if (gameData.hostId === uid) {
+              const newHostId = Object.keys(gameData.players)[0];
+              const newHost = gameData.players[newHostId];
+              gameData.hostId = newHostId;
+              gameData.hostName = newHost.name;
+              gameData.players[newHostId].isHost = true;
+            }
+
             // If the game was active and the leaving player was the current player,
             // advance to the next player
             if (
               gameData.gameState?.gameStatus === "active" &&
-              gameData.gameState?.currentPlayerTurn === gameData.players[uid]?.color
+              gameData.gameState?.currentPlayerTurn === leavingPlayer?.color
             ) {
               const turnOrder = ["r", "b", "y", "g"];
               const currentIndex = turnOrder.indexOf(
@@ -288,19 +304,35 @@ export const resignGame = onCall(async (request) => {
             return gameData;
           }
 
-          // Mark player as resigned
-          gameData.players[uid].status = "resigned";
-          gameData.players[uid].resignedAt = Date.now();
+          // Remove the player from the game (resignation = leaving)
+          const resignedPlayer = gameData.players[uid];
+          delete gameData.players[uid];
           gameData.lastActivity = Date.now();
+
+          // If no players left, delete the game
+          if (!gameData.players || Object.keys(gameData.players).length === 0) {
+            console.log(`Game ${gameId} is now empty after resignation, deleting`);
+            return null; // This will delete the game
+          }
+
+          // If host resigned, assign new host
+          if (gameData.hostId === uid) {
+            const newHostId = Object.keys(gameData.players)[0];
+            const newHost = gameData.players[newHostId];
+            gameData.hostId = newHostId;
+            gameData.hostName = newHost.name;
+            gameData.players[newHostId].isHost = true;
+          }
 
           // Add player to eliminated list
           if (!gameData.gameState.eliminatedPlayers) {
             gameData.gameState.eliminatedPlayers = [];
           }
 
-          const playerColor = player.color;
+          const playerColor = resignedPlayer.color;
           if (!gameData.gameState.eliminatedPlayers.includes(playerColor)) {
             gameData.gameState.eliminatedPlayers.push(playerColor);
+            gameData.gameState.justEliminated = playerColor;
           }
 
           // Check if game is over (3 players eliminated)
@@ -415,7 +447,7 @@ export const makeMove = onValueCreated(
           to: moveData.to,
           piece: moveData.pieceCode,
           player: uid,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         };
 
         return gameData;
@@ -474,12 +506,12 @@ export const manualCleanup = onCall(async (request) => {
       // Auto-resign inactive players (30 minutes)
       if (timeSinceLastActivity > 30 * 60 * 1000) {
         console.log(`Auto-resigning inactive players in game ${gameId}`);
-        
+
         const updatedGameData = { ...game };
-        
+
         // Mark all players as resigned
         if (updatedGameData.players) {
-          Object.keys(updatedGameData.players).forEach(playerId => {
+          Object.keys(updatedGameData.players).forEach((playerId) => {
             updates[`games/${gameId}/players/${playerId}/status`] = "resigned";
             updates[`games/${gameId}/players/${playerId}/resignedAt`] = now;
           });
@@ -489,9 +521,9 @@ export const manualCleanup = onCall(async (request) => {
         if (!updatedGameData.gameState.eliminatedPlayers) {
           updatedGameData.gameState.eliminatedPlayers = [];
         }
-        
+
         const turnOrder = ["r", "b", "y", "g"];
-        turnOrder.forEach(color => {
+        turnOrder.forEach((color) => {
           if (!updatedGameData.gameState.eliminatedPlayers.includes(color)) {
             updatedGameData.gameState.eliminatedPlayers.push(color);
           }

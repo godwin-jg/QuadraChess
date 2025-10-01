@@ -109,14 +109,24 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
   async disconnect(): Promise<void> {
     console.log("OnlineGameService: disconnect() called - currentGameId:", this.currentGameId);
-    console.trace("OnlineGameService: disconnect() call stack:");
     try {
+      // Clear optimized presence updates first
+      this.clearOptimizedPresenceUpdates();
+
       if (this.currentGameId) {
-        await this.updatePlayerPresence(false);
-        await realtimeDatabaseService.leaveGame(this.currentGameId);
+        try {
+          await this.updatePlayerPresence(false);
+          await realtimeDatabaseService.leaveGame(this.currentGameId);
+          console.log("OnlineGameService: Successfully left game and updated presence");
+        } catch (error: any) {
+          console.warn("OnlineGameService: Error during server disconnect, continuing with local cleanup:", error.message);
+          
+          // Don't throw error - continue with local cleanup even if server operations fail
+          // This prevents the app from getting stuck when there are connection issues
+        }
       }
 
-      // Clean up subscriptions
+      // Always clean up subscriptions regardless of server errors
       if (this.gameUnsubscribe) {
         this.gameUnsubscribe();
         this.gameUnsubscribe = null;
@@ -127,16 +137,29 @@ class OnlineGameServiceImpl implements OnlineGameService {
         this.movesUnsubscribe = null;
       }
 
-      // No interval cleanup needed - Firebase onDisconnect handles presence automatically
+      // Clear all intervals and timeouts
+      this.clearOptimizedPresenceUpdates();
 
       this.currentGameId = null;
       this.currentPlayer = null;
       this.isConnected = false;
       this.gameUpdateCallbacks = [];
       this.moveUpdateCallbacks = [];
+      
+      console.log("OnlineGameService: Disconnect completed successfully");
     } catch (error) {
       console.error("Error disconnecting from enhanced online game:", error);
-      throw error;
+      
+      // Force cleanup even if there's an error
+      this.clearOptimizedPresenceUpdates();
+      this.currentGameId = null;
+      this.currentPlayer = null;
+      this.isConnected = false;
+      this.gameUpdateCallbacks = [];
+      this.moveUpdateCallbacks = [];
+      
+      // Don't re-throw the error to prevent the app from getting stuck
+      console.log("OnlineGameService: Forced cleanup completed despite error");
     }
   }
 
@@ -186,9 +209,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
       // Apply move locally immediately
       store.dispatch(makeMoveAction({
         from: moveData.from,
-        to: moveData.to,
-        pieceCode: moveData.pieceCode,
-        playerColor: moveData.playerColor
+        to: moveData.to
       }));
 
       // Send move to server for synchronization with rollback capability
@@ -543,7 +564,39 @@ class OnlineGameServiceImpl implements OnlineGameService {
       lastSeen: Date.now() 
     });
 
-    console.log("Presence tracking set up with Firebase onDisconnect");
+    // Set up optimized periodic presence updates (much longer intervals)
+    this.setupOptimizedPresenceUpdates();
+
+    console.log("Presence tracking set up with Firebase onDisconnect and optimized updates");
+  }
+
+  private presenceUpdateInterval: NodeJS.Timeout | null = null;
+
+  // Optimized presence updates with longer intervals to minimize performance impact
+  private setupOptimizedPresenceUpdates(): void {
+    // Clear any existing interval
+    if (this.presenceUpdateInterval) {
+      clearInterval(this.presenceUpdateInterval);
+    }
+
+    // Update presence every 2 minutes (much longer than 15 seconds)
+    // This prevents false disconnections while minimizing network traffic
+    this.presenceUpdateInterval = setInterval(async () => {
+      try {
+        await this.updatePlayerPresence(true);
+        console.log("Optimized presence update sent (2min interval)");
+      } catch (error) {
+        console.warn("Optimized presence update failed:", error);
+        // Don't clear the interval on error - keep trying
+      }
+    }, 120000); // 2 minutes instead of 15 seconds
+  }
+
+  private clearOptimizedPresenceUpdates(): void {
+    if (this.presenceUpdateInterval) {
+      clearInterval(this.presenceUpdateInterval);
+      this.presenceUpdateInterval = null;
+    }
   }
 
   private revertOptimisticMove(moveData: {

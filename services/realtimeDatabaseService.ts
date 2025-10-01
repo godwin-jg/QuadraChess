@@ -49,7 +49,7 @@ class RealtimeDatabaseService {
   private keepAliveInterval: NodeJS.Timeout | null = null;
   private readonly KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
 
-  // Authentication methods
+  // Authentication methods with lightweight auth monitoring
   async signInAnonymously(): Promise<string> {
     try {
       console.log("Signing in anonymously to Realtime Database...");
@@ -67,6 +67,9 @@ class RealtimeDatabaseService {
       this.currentUser = userCredential.user;
       console.log("Successfully signed in:", userCredential.user.uid);
       
+      // Set up lightweight auth state listener (minimal overhead)
+      this.setupLightweightAuthListener();
+      
       // OPTIMIZATION: Start keep-alive to maintain connection
       this.startKeepAlive();
       
@@ -77,6 +80,49 @@ class RealtimeDatabaseService {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       throw new Error(`Failed to authenticate: ${errorMessage}`);
+    }
+  }
+
+  // Lightweight auth state listener - minimal performance impact
+  private setupLightweightAuthListener(): void {
+    // Only set up listener once
+    if (this.authListenerSetup) return;
+    this.authListenerSetup = true;
+
+    auth().onAuthStateChanged((user) => {
+      if (user) {
+        console.log("Auth state: User signed in", user.uid);
+        this.currentUser = user;
+      } else {
+        console.log("Auth state: User signed out - attempting lightweight reconnection");
+        this.currentUser = null;
+        
+        // Non-blocking reconnection attempt
+        this.attemptLightweightReconnection();
+      }
+    });
+  }
+
+  private authListenerSetup = false;
+
+  // Non-blocking reconnection attempt
+  private async attemptLightweightReconnection(): Promise<void> {
+    try {
+      // Only attempt if we were in a game (avoid unnecessary reconnections)
+      if (this.gameUnsubscribe) {
+        console.log("Attempting lightweight reconnection...");
+        // Use setTimeout to make it non-blocking
+        setTimeout(async () => {
+          try {
+            await this.signInAnonymously();
+            console.log("Lightweight reconnection successful");
+          } catch (error) {
+            console.warn("Lightweight reconnection failed:", error);
+          }
+        }, 1000); // 1 second delay to avoid immediate retry
+      }
+    } catch (error) {
+      console.warn("Lightweight reconnection setup failed:", error);
     }
   }
 
@@ -317,7 +363,7 @@ class RealtimeDatabaseService {
     }
   }
 
-  // Fallback method to leave game directly in database
+  // Fallback method to leave game directly in database with proper error handling
   private async leaveGameDirectly(gameId: string): Promise<void> {
     // Ensure authentication before proceeding
     let user = this.getCurrentUser();
@@ -332,59 +378,91 @@ class RealtimeDatabaseService {
 
     const gameRef = database().ref(`games/${gameId}`);
     
-    try {
-      const result = await gameRef.transaction((gameData) => {
-        if (gameData === null) {
-          console.warn(`Game ${gameId} not found`);
-          return null;
-        }
+    // Add retry logic with exponential backoff and max retries
+    let retryCount = 0;
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second base delay
+    
+    while (retryCount < maxRetries) {
+      try {
+        const result = await gameRef.transaction((gameData) => {
+          if (gameData === null) {
+            console.warn(`Game ${gameId} not found`);
+            return null;
+          }
 
-        const player = gameData.players[user.uid];
-        if (!player) {
-          console.warn(`Player ${user.uid} not found in game ${gameId}`);
+          const player = gameData.players[user.uid];
+          if (!player) {
+            console.warn(`Player ${user.uid} not found in game ${gameId}`);
+            return gameData;
+          }
+
+          // Remove the player from the game
+          delete gameData.players[user.uid];
+
+          // If no players left, delete the game
+          if (!gameData.players || Object.keys(gameData.players).length === 0) {
+            console.log(`Game ${gameId} is now empty, deleting`);
+            return null; // This will delete the game
+          }
+
+          // Check if only bots remain - if so, delete the game
+          const remainingPlayers = Object.values(gameData.players);
+          const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
+          if (!hasHumanPlayers) {
+            console.log(`Game ${gameId} has only bots remaining, deleting`);
+            return null; // This will delete the game
+          }
+
+          // If host left, assign new host
+          if (gameData.hostId === user.uid) {
+            const newHostId = Object.keys(gameData.players)[0];
+            const newHost = gameData.players[newHostId];
+            gameData.hostId = newHostId;
+            gameData.hostName = newHost.name;
+            gameData.players[newHostId].isHost = true;
+          }
+
+          gameData.lastActivity = Date.now();
+
+          console.log(`Player ${user.uid} left game ${gameId}`);
           return gameData;
+        });
+
+        if (result.committed) {
+          console.log(`Successfully left game ${gameId} after ${retryCount + 1} attempts`);
+          return; // Success!
+        } else {
+          throw new Error("Transaction failed to commit");
         }
-
-        // Remove the player from the game
-        delete gameData.players[user.uid];
-
-        // If no players left, delete the game
-        if (!gameData.players || Object.keys(gameData.players).length === 0) {
-          console.log(`Game ${gameId} is now empty, deleting`);
-          return null; // This will delete the game
+      } catch (error: any) {
+        retryCount++;
+        console.warn(`Leave game attempt ${retryCount} failed:`, error.message);
+        
+        // Check for specific Firebase errors that should not be retried
+        if (error.code === 'database/max-retries' || 
+            error.message?.includes('max-retries') ||
+            error.message?.includes('too many retries')) {
+          console.error(`Max retries exceeded for leaving game ${gameId}. Giving up.`);
+          throw new Error(`Failed to leave game after ${maxRetries} attempts: ${error.message}`);
         }
-
-        // Check if only bots remain - if so, delete the game
-        const remainingPlayers = Object.values(gameData.players);
-        const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
-        if (!hasHumanPlayers) {
-          console.log(`Game ${gameId} has only bots remaining, deleting`);
-          return null; // This will delete the game
+        
+        // Check if player is already not in the game (success case)
+        if (error.message?.includes('Player') && error.message?.includes('not found')) {
+          console.log(`Player already not in game ${gameId}. Consider this a success.`);
+          return; // This is actually success - player is already out
         }
-
-        // If host left, assign new host
-        if (gameData.hostId === user.uid) {
-          const newHostId = Object.keys(gameData.players)[0];
-          const newHost = gameData.players[newHostId];
-          gameData.hostId = newHostId;
-          gameData.hostName = newHost.name;
-          gameData.players[newHostId].isHost = true;
+        
+        if (retryCount >= maxRetries) {
+          console.error(`Failed to leave game ${gameId} after ${maxRetries} attempts`);
+          throw new Error(`Failed to leave game after ${maxRetries} attempts: ${error.message}`);
         }
-
-        gameData.lastActivity = Date.now();
-
-        console.log(`Player ${user.uid} left game ${gameId}`);
-        return gameData;
-      });
-
-      if (result.committed) {
-        console.log(`Leave game transaction committed successfully for game ${gameId}`);
-      } else {
-        throw new Error("Leave game transaction failed");
+        
+        // Wait before retrying with exponential backoff
+        const delay = baseDelay * Math.pow(2, retryCount - 1);
+        console.log(`Waiting ${delay}ms before retry ${retryCount + 1}...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    } catch (error) {
-      console.error("Error leaving game directly:", error);
-      throw error;
     }
   }
 
@@ -587,7 +665,7 @@ class RealtimeDatabaseService {
     }
   }
 
-  // Fallback method to resign game directly in database
+  // Fallback method to resign game directly in database with proper error handling
   private async resignGameDirectly(gameId: string): Promise<void> {
     const user = this.getCurrentUser();
     if (!user) throw new Error("User not authenticated");
@@ -596,114 +674,146 @@ class RealtimeDatabaseService {
 
     const gameRef = database().ref(`games/${gameId}`);
     
-    try {
-      const result = await gameRef.transaction((gameData) => {
-        if (gameData === null) {
-          console.warn(`Game ${gameId} not found`);
-          return null;
-        }
-
-        const player = gameData.players[user.uid];
-        if (!player) {
-          console.warn(`Player ${user.uid} not found in game ${gameId}`);
-          return gameData;
-        }
-
-        // Don't allow resigning if game is already over
-        if (
-          gameData.gameState.gameStatus === "finished" ||
-          gameData.gameState.gameStatus === "checkmate" ||
-          gameData.gameState.gameStatus === "stalemate"
-        ) {
-          console.warn(`Player ${user.uid} cannot resign - game is already over`);
-          return gameData;
-        }
-
-        // Initialize eliminatedPlayers array if it doesn't exist
-        if (!gameData.gameState.eliminatedPlayers) {
-          gameData.gameState.eliminatedPlayers = [];
-        }
-
-        // Add player to eliminated players
-        if (!gameData.gameState.eliminatedPlayers.includes(player.color)) {
-          gameData.gameState.eliminatedPlayers.push(player.color);
-          gameData.gameState.justEliminated = player.color;
-        }
-
-        // Remove the player from the game
-        delete gameData.players[user.uid];
-
-        // If no players left, delete the game
-        if (!gameData.players || Object.keys(gameData.players).length === 0) {
-          console.log(`Game ${gameId} is now empty after resignation, deleting`);
-          return null; // This will delete the game
-        }
-
-        // Check if only bots remain - if so, delete the game
-        const remainingPlayers = Object.values(gameData.players);
-        const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
-        if (!hasHumanPlayers) {
-          console.log(`Game ${gameId} has only bots remaining after resignation, deleting`);
-          return null; // This will delete the game
-        }
-
-        // Update check status for all players
-        gameData.gameState.checkStatus = {
-          r: false,
-          b: false,
-          y: false,
-          g: false,
-        };
-
-        // Check if the entire game is over
-        if (gameData.gameState.eliminatedPlayers.length === 3) {
-          const turnOrder = ["r", "b", "y", "g"];
-          const winner = turnOrder.find(
-            (color) => !gameData.gameState.eliminatedPlayers.includes(color)
-          );
-
-          if (winner) {
-            gameData.gameState.winner = winner;
-            gameData.gameState.gameStatus = "finished";
-            gameData.gameState.gameOverState = {
-              isGameOver: true,
-              status: "finished",
-              eliminatedPlayer: null,
-            };
+    // Add retry logic with exponential backoff and max retries
+    let retryCount = 0;
+    const maxRetries = 3;
+    const baseDelay = 1000; // 1 second base delay
+    
+    while (retryCount < maxRetries) {
+      try {
+        const result = await gameRef.transaction((gameData) => {
+          if (gameData === null) {
+            console.warn(`Game ${gameId} not found`);
+            return null;
           }
+
+          const player = gameData.players[user.uid];
+          if (!player) {
+            console.warn(`Player ${user.uid} not found in game ${gameId}`);
+            return gameData;
+          }
+
+          // Don't allow resigning if game is already over
+          if (
+            gameData.gameState.gameStatus === "finished" ||
+            gameData.gameState.gameStatus === "checkmate" ||
+            gameData.gameState.gameStatus === "stalemate"
+          ) {
+            console.warn(`Player ${user.uid} cannot resign - game is already over`);
+            return gameData;
+          }
+
+          // Initialize eliminatedPlayers array if it doesn't exist
+          if (!gameData.gameState.eliminatedPlayers) {
+            gameData.gameState.eliminatedPlayers = [];
+          }
+
+          // Add player to eliminated players
+          if (!gameData.gameState.eliminatedPlayers.includes(player.color)) {
+            gameData.gameState.eliminatedPlayers.push(player.color);
+            gameData.gameState.justEliminated = player.color;
+          }
+
+          // Remove the player from the game
+          delete gameData.players[user.uid];
+
+          // If no players left, delete the game
+          if (!gameData.players || Object.keys(gameData.players).length === 0) {
+            console.log(`Game ${gameId} is now empty after resignation, deleting`);
+            return null; // This will delete the game
+          }
+
+          // Check if only bots remain - if so, delete the game
+          const remainingPlayers = Object.values(gameData.players);
+          const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
+          if (!hasHumanPlayers) {
+            console.log(`Game ${gameId} has only bots remaining after resignation, deleting`);
+            return null; // This will delete the game
+          }
+
+          // Update check status for all players
+          gameData.gameState.checkStatus = {
+            r: false,
+            b: false,
+            y: false,
+            g: false,
+          };
+
+          // Check if the entire game is over
+          if (gameData.gameState.eliminatedPlayers.length === 3) {
+            const turnOrder = ["r", "b", "y", "g"];
+            const winner = turnOrder.find(
+              (color) => !gameData.gameState.eliminatedPlayers.includes(color)
+            );
+
+            if (winner) {
+              gameData.gameState.winner = winner;
+              gameData.gameState.gameStatus = "finished";
+              gameData.gameState.gameOverState = {
+                isGameOver: true,
+                status: "finished",
+                eliminatedPlayer: null,
+              };
+            }
+          } else {
+            // Advance to next active player
+            const turnOrder = ["r", "b", "y", "g"];
+            const currentIndex = turnOrder.indexOf(gameData.gameState.currentPlayerTurn);
+            const nextIndex = (currentIndex + 1) % 4;
+            const nextPlayerInSequence = turnOrder[nextIndex];
+
+            // Find the next active player (skip eliminated players)
+            let nextActivePlayer = nextPlayerInSequence;
+            while (gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
+              const activeIndex = turnOrder.indexOf(nextActivePlayer);
+              const nextActiveIndex = (activeIndex + 1) % 4;
+              nextActivePlayer = turnOrder[nextActiveIndex];
+            }
+
+            gameData.gameState.currentPlayerTurn = nextActivePlayer;
+          }
+
+          gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
+          gameData.lastActivity = Date.now();
+
+          console.log(`Player ${user.uid} (${player.color}) resigned from game ${gameId}`);
+          return gameData;
+        });
+
+        if (result.committed) {
+          console.log(`Successfully resigned from game ${gameId} after ${retryCount + 1} attempts`);
+          return; // Success!
         } else {
-          // Advance to next active player
-          const turnOrder = ["r", "b", "y", "g"];
-          const currentIndex = turnOrder.indexOf(gameData.gameState.currentPlayerTurn);
-          const nextIndex = (currentIndex + 1) % 4;
-          const nextPlayerInSequence = turnOrder[nextIndex];
-
-          // Find the next active player (skip eliminated players)
-          let nextActivePlayer = nextPlayerInSequence;
-          while (gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
-            const activeIndex = turnOrder.indexOf(nextActivePlayer);
-            const nextActiveIndex = (activeIndex + 1) % 4;
-            nextActivePlayer = turnOrder[nextActiveIndex];
-          }
-
-          gameData.gameState.currentPlayerTurn = nextActivePlayer;
+          throw new Error("Transaction failed to commit");
         }
-
-        gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
-        gameData.lastActivity = Date.now();
-
-        console.log(`Player ${user.uid} (${player.color}) resigned from game ${gameId}`);
-        return gameData;
-      });
-
-      if (result.committed) {
-        console.log(`Resign transaction committed successfully for game ${gameId}`);
-      } else {
-        throw new Error("Resign transaction failed");
+      } catch (error: any) {
+        retryCount++;
+        console.warn(`Resign game attempt ${retryCount} failed:`, error.message);
+        
+        // Check for specific Firebase errors that should not be retried
+        if (error.code === 'database/max-retries' || 
+            error.message?.includes('max-retries') ||
+            error.message?.includes('too many retries')) {
+          console.error(`Max retries exceeded for resigning game ${gameId}. Giving up.`);
+          throw new Error(`Failed to resign game after ${maxRetries} attempts: ${error.message}`);
+        }
+        
+        // Check if player is already not in the game (success case)
+        if (error.message?.includes('Player') && error.message?.includes('not found')) {
+          console.log(`Player already not in game ${gameId}. Consider this a success.`);
+          return; // This is actually success - player is already out
+        }
+        
+        if (retryCount >= maxRetries) {
+          console.error(`Failed to resign game ${gameId} after ${maxRetries} attempts`);
+          throw new Error(`Failed to resign game after ${maxRetries} attempts: ${error.message}`);
+        }
+        
+        // Wait before retrying with exponential backoff
+        const delay = baseDelay * Math.pow(2, retryCount - 1);
+        console.log(`Waiting ${delay}ms before retry ${retryCount + 1}...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    } catch (error) {
-      console.error("Error resigning game directly:", error);
-      throw error;
     }
   }
 

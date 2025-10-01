@@ -203,14 +203,60 @@ const OnlineLobbyScreen: React.FC = () => {
   const leaveGame = async () => {
     if (currentGameId) {
       try {
+        console.log("OnlineLobbyScreen: Attempting to leave game:", currentGameId);
         await realtimeDatabaseService.leaveGame(currentGameId);
+        console.log("OnlineLobbyScreen: Successfully left game");
+        
+        // Clean up local state
         setCurrentGameId(null);
         dispatch(setPlayers([]));
         dispatch(setIsHost(false));
         dispatch(setCanStartGame(false));
-      } catch (error) {
+        
+        // Navigate back to home screen as fallback
+        router.push("/(tabs)/");
+        
+      } catch (error: any) {
         console.error("Error leaving game:", error);
+        
+        // Handle specific error cases
+        if (error.message?.includes('max-retries') || 
+            error.message?.includes('too many retries') ||
+            error.message?.includes('Failed to leave game after')) {
+          
+          console.log("OnlineLobbyScreen: Max retries exceeded, forcing local cleanup");
+          
+          // Force local cleanup even if server operation failed
+          setCurrentGameId(null);
+          dispatch(setPlayers([]));
+          dispatch(setIsHost(false));
+          dispatch(setCanStartGame(false));
+          
+          // Show user-friendly message and navigate home
+          Alert.alert(
+            "Connection Issue", 
+            "There was a connection issue leaving the game, but you've been removed locally. You can safely continue.",
+            [{ text: "OK", onPress: () => router.push("/(tabs)/") }]
+          );
+        } else {
+          // For other errors, still try to clean up locally
+          console.log("OnlineLobbyScreen: Other error occurred, attempting local cleanup");
+          
+          setCurrentGameId(null);
+          dispatch(setPlayers([]));
+          dispatch(setIsHost(false));
+          dispatch(setCanStartGame(false));
+          
+          Alert.alert(
+            "Leave Game", 
+            "There was an issue leaving the game, but you've been removed locally.",
+            [{ text: "OK", onPress: () => router.push("/(tabs)/") }]
+          );
+        }
       }
+    } else {
+      // No game ID, just navigate home
+      router.push("/(tabs)/");
     }
   };
 

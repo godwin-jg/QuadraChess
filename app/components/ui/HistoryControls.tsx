@@ -22,10 +22,10 @@ export default function HistoryControls() {
     ? (viewingHistoryIndex || 0) + 1  // Convert 0-based index to 1-based display
     : totalMoves;
 
-  // Only show history controls in local mode
-  if (mode === "online") {
-    return null;
-  }
+  // History controls now available in all modes including online
+  // if (mode === "online") {
+  //   return null;
+  // }
 
   const canStepBack = true; // Always enabled - can go to first move or back to live state
   const canStepPrevious = viewingHistoryIndex === null || (viewingHistoryIndex !== null && viewingHistoryIndex > 0); // Can go back from live state or if not at first move

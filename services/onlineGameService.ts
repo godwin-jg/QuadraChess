@@ -10,6 +10,7 @@ import {
   setGameState,
   createStateSnapshot,
   setBotPlayers,
+  applyNetworkMove,
 } from "../state/gameSlice";
 import { store } from "../state/store";
 import {
@@ -59,6 +60,80 @@ class OnlineGameServiceImpl implements OnlineGameService {
   // OPTIMIZATION: Cache board state processing to avoid repeated work
   private lastBoardStateHash: string | null = null;
   private cachedProcessedBoardState: (string | null)[][] | null = null;
+  
+  // ✅ CRITICAL FIX: Track processed captures to prevent duplicate animations
+  private lastProcessedMove: any = null;
+  
+  // ✅ CRITICAL FIX: Debounce game updates to prevent excessive calls
+  private gameUpdateTimeout: NodeJS.Timeout | null = null;
+  
+  // ✅ CRITICAL FIX: Handle critical errors (max retries exceeded, etc.)
+  private handleCriticalError(error: string): void {
+    console.error("OnlineGameService: Handling critical error:", error);
+    
+    // Force immediate cleanup
+    this.forceCleanup();
+    
+    // Reset game state
+    const store = require('../state/store').default;
+    store.dispatch(require('../state/gameSlice').resetGame());
+    
+    // Show user-friendly error message
+    try {
+      const { Alert } = require('react-native');
+      Alert.alert(
+        "Connection Error",
+        "There was a problem with the server connection. You've been returned to the lobby.",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              // Navigate to lobby
+              try {
+                const { router } = require('expo-router');
+                router.replace('/online-lobby');
+              } catch (navError) {
+              }
+            }
+          }
+        ]
+      );
+    } catch (alertError) {
+    }
+  }
+  
+  // ✅ CRITICAL FIX: Force cleanup when critical errors occur
+  private forceCleanup(): void {
+    
+    // Clear all timeouts
+    if (this.gameUpdateTimeout) {
+      clearTimeout(this.gameUpdateTimeout);
+      this.gameUpdateTimeout = null;
+    }
+    
+    // Clear subscriptions
+    if (this.gameUnsubscribe) {
+      this.gameUnsubscribe();
+      this.gameUnsubscribe = null;
+    }
+    
+    if (this.movesUnsubscribe) {
+      this.movesUnsubscribe();
+      this.movesUnsubscribe = null;
+    }
+    
+    // Clear presence updates
+    this.clearOptimizedPresenceUpdates();
+    
+    // Reset connection state
+    this.currentGameId = null;
+    this.currentPlayer = null;
+    this.isConnected = false;
+    this.gameUpdateCallbacks = [];
+    this.moveUpdateCallbacks = [];
+    this.cachedProcessedBoardState = null;
+    this.lastProcessedMove = null;
+  }
 
   async connectToGame(gameId: string): Promise<void> {
     try {
@@ -70,7 +145,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
       this.currentGameId = gameId;
       this.isConnected = true; // Mark as connected immediately when connection is established
-      // OPTIMIZATION: Removed console.log for better performance
 
       // Subscribe to game updates
       this.gameUnsubscribe = realtimeDatabaseService.subscribeToGame(
@@ -79,11 +153,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
           if (game) {
             // Keep connected status true when we receive game data
             this.isConnected = true;
-            // OPTIMIZATION: Removed console.log for better performance
           } else {
             // Only mark as disconnected if we're sure the game doesn't exist
             // Don't immediately disconnect on temporary null values
-            // OPTIMIZATION: Removed console.log for better performance
             // Keep isConnected true for now, let the resign method handle the actual connection check
           }
           this.handleGameUpdate(game);
@@ -92,7 +164,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
       // CRITICAL: Do NOT subscribe to individual moves - causes desynchronization
       // Only subscribe to complete game state updates
-      console.log("Move subscriptions disabled to prevent desynchronization");
       console.log(
         "Only game state updates are used for reliable synchronization"
       );
@@ -108,7 +179,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   async disconnect(): Promise<void> {
-    console.log("OnlineGameService: disconnect() called - currentGameId:", this.currentGameId);
     try {
       // Clear optimized presence updates first
       this.clearOptimizedPresenceUpdates();
@@ -116,10 +186,18 @@ class OnlineGameServiceImpl implements OnlineGameService {
       if (this.currentGameId) {
         try {
           await this.updatePlayerPresence(false);
-          await realtimeDatabaseService.leaveGame(this.currentGameId);
-          console.log("OnlineGameService: Successfully left game and updated presence");
+          await realtimeDatabaseService.leaveGame(this.currentGameId, (criticalError: string) => {
+            // ✅ CRITICAL FIX: Handle max retries exceeded - force cleanup and redirect
+            console.error("OnlineGameService: Critical error during disconnect:", criticalError);
+            this.handleCriticalError(criticalError);
+          });
         } catch (error: any) {
           console.warn("OnlineGameService: Error during server disconnect, continuing with local cleanup:", error.message);
+          
+          // ✅ CRITICAL FIX: Check if this is a critical error
+          if (error.message?.includes('max-retries') || error.message?.includes('too many retries')) {
+            this.handleCriticalError(error.message);
+          }
           
           // Don't throw error - continue with local cleanup even if server operations fail
           // This prevents the app from getting stuck when there are connection issues
@@ -146,7 +224,16 @@ class OnlineGameServiceImpl implements OnlineGameService {
       this.gameUpdateCallbacks = [];
       this.moveUpdateCallbacks = [];
       
-      console.log("OnlineGameService: Disconnect completed successfully");
+      // ✅ CRITICAL FIX: Clear any cached board state and processed moves to prevent stale data
+      this.cachedProcessedBoardState = null;
+      this.lastProcessedMove = null;
+      
+      // Clear any pending game update timeout
+      if (this.gameUpdateTimeout) {
+        clearTimeout(this.gameUpdateTimeout);
+        this.gameUpdateTimeout = null;
+      }
+      
     } catch (error) {
       console.error("Error disconnecting from enhanced online game:", error);
       
@@ -158,8 +245,10 @@ class OnlineGameServiceImpl implements OnlineGameService {
       this.gameUpdateCallbacks = [];
       this.moveUpdateCallbacks = [];
       
+      // ✅ CRITICAL FIX: Clear any cached board state to prevent stale data
+      this.cachedProcessedBoardState = null;
+      
       // Don't re-throw the error to prevent the app from getting stuck
-      console.log("OnlineGameService: Forced cleanup completed despite error");
     }
   }
 
@@ -218,14 +307,33 @@ class OnlineGameServiceImpl implements OnlineGameService {
         // Move successful - no rollback needed
       } catch (error) {
         // Server rejected the move - rollback local state
-        console.error("Server rejected move, rolling back local state:", error);
-        store.dispatch(setGameState(stateSnapshot));
+        console.error("🎮 OnlineGameService: Server rejected move, rolling back local state:", error);
+        
+        // ✅ CRITICAL FIX: Preserve local selection state during rollback
+        const currentLocalState = store.getState().game;
+        const rollbackStateWithSelection = {
+          ...stateSnapshot,
+          selectedPiece: currentLocalState.selectedPiece,
+          validMoves: currentLocalState.validMoves,
+          // Include all required GameState properties
+          gameMode: currentLocalState.gameMode,
+          botPlayers: currentLocalState.botPlayers,
+          currentGame: currentLocalState.currentGame,
+          discoveredGames: currentLocalState.discoveredGames,
+          isDiscovering: currentLocalState.isDiscovering,
+          isLoading: currentLocalState.isLoading,
+          isConnected: currentLocalState.isConnected,
+          connectionError: currentLocalState.connectionError,
+          isEditingName: currentLocalState.isEditingName,
+          tempName: currentLocalState.tempName,
+        };
+        
+        store.dispatch(setGameState(rollbackStateWithSelection));
         
         // Re-throw error so UI can show appropriate message
         throw error;
       }
 
-      // OPTIMIZATION: Removed console.log for better performance
     } catch (error) {
       // OPTIMIZATION: Simplified error handling - no rollback needed
       throw error;
@@ -237,24 +345,51 @@ class OnlineGameServiceImpl implements OnlineGameService {
     if (!this.currentGameId) {
       console.warn("OnlineGameService: currentGameId is null, attempting to get from store");
       const state = store.getState();
-      const gameId = state.game.gameId;
-      if (gameId) {
-        console.log("OnlineGameService: Found gameId in store:", gameId);
-        this.currentGameId = gameId;
-      } else {
-        throw new Error("No game ID available in service or store");
+      // Note: gameId is not stored in Redux state, only in the service
+      throw new Error("No game ID available in service");
+    }
+
+    // ✅ CRITICAL FIX: Ensure we have the correct current player info
+    const user = realtimeDatabaseService.getCurrentUser();
+    if (!user) {
+      throw new Error("User not authenticated for resignation");
+    }
+
+    // ✅ CRITICAL FIX: Get current player info directly from database to ensure accuracy
+    let currentPlayerInfo = this.currentPlayer;
+    if (!currentPlayerInfo || !currentPlayerInfo.color) {
+      console.warn("OnlineGameService: currentPlayer not set or missing color, fetching from database");
+      try {
+        const gameRef = database().ref(`games/${this.currentGameId}`);
+        const gameSnapshot = await gameRef.once("value");
+        if (gameSnapshot.exists()) {
+          const gameData = gameSnapshot.val();
+          currentPlayerInfo = gameData.players[user.uid];
+          if (currentPlayerInfo) {
+            this.currentPlayer = currentPlayerInfo; // Update the service's current player
+            console.log("OnlineGameService: Retrieved current player from database:", currentPlayerInfo);
+          }
+        }
+      } catch (error) {
+        console.error("OnlineGameService: Failed to fetch current player from database:", error);
       }
     }
 
-    // Store current player info before calling Cloud Function
-    // (Cloud Function removes player from game.players, so we need to store it first)
-    const currentPlayerInfo = this.currentPlayer;
-    if (!currentPlayerInfo) {
-      console.warn("OnlineGameService: No current player found, but proceeding with resign anyway");
-      // Don't throw error - let the Cloud Function handle the validation
+    if (!currentPlayerInfo || !currentPlayerInfo.color) {
+      console.error("OnlineGameService: No current player found with valid color for resignation");
+      throw new Error("Player color not available for resignation");
     }
 
-    console.log("OnlineGameService: Attempting resign with gameId:", this.currentGameId, "player:", currentPlayerInfo);
+    console.log("OnlineGameService: Resigning player:", currentPlayerInfo.name, "with color:", currentPlayerInfo.color);
+
+    // ✅ CRITICAL FIX: Dispatch resignation action immediately for turn advancement
+    const { applyNetworkMove } = require('../state/gameSlice');
+    store.dispatch(applyNetworkMove({
+      from: { row: -1, col: -1 },
+      to: { row: -1, col: -1 },
+      pieceCode: "RESIGN",
+      playerColor: currentPlayerInfo.color,
+    }));
 
     // Add retry logic for network failures
     let retryCount = 0;
@@ -264,8 +399,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
     while (retryCount < maxRetries) {
       try {
         // Call the Cloud Function to resign
-        console.log("OnlineGameService: Calling Cloud Function with player:", currentPlayerInfo);
-        await realtimeDatabaseService.resignGame(this.currentGameId);
+        await realtimeDatabaseService.resignGame(this.currentGameId!);
 
         // If we get here, the resign was sent successfully
         return;
@@ -321,10 +455,18 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   private handleGameUpdate(game: RealtimeGame | null): void {
-    console.log("OnlineGameService: handleGameUpdate called with game:", game ? "present" : "null");
+    // ✅ CRITICAL FIX: Debounce game updates to prevent excessive calls
+    if (this.gameUpdateTimeout) {
+      clearTimeout(this.gameUpdateTimeout);
+    }
+    
+    this.gameUpdateTimeout = setTimeout(() => {
+      this.processGameUpdate(game);
+    }, 100); // 100ms debounce
+  }
+  
+  private processGameUpdate(game: RealtimeGame | null): void {
     if (game) {
-      console.log("OnlineGameService: Game update received - eliminatedPlayers:", game.gameState?.eliminatedPlayers);
-      console.log("OnlineGameService: Game update received - currentPlayerTurn:", game.gameState?.currentPlayerTurn);
       
       // Check if game data is complete
       if (!game.gameState) {
@@ -372,7 +514,28 @@ class OnlineGameServiceImpl implements OnlineGameService {
           isHost: true,
           canStartGame: false,
         };
-        store.dispatch(setGameState(fallbackState));
+        
+        // ✅ CRITICAL FIX: Preserve local selection state in fallback
+        const currentLocalState = store.getState().game;
+        const fallbackStateWithSelection = {
+          ...fallbackState,
+          // Preserve local UI state
+          selectedPiece: currentLocalState.selectedPiece,
+          validMoves: currentLocalState.validMoves,
+          // Include all required GameState properties
+          gameMode: currentLocalState.gameMode,
+          botPlayers: currentLocalState.botPlayers,
+          currentGame: currentLocalState.currentGame,
+          discoveredGames: currentLocalState.discoveredGames,
+          isDiscovering: currentLocalState.isDiscovering,
+          isLoading: currentLocalState.isLoading,
+          isConnected: currentLocalState.isConnected,
+          connectionError: currentLocalState.connectionError,
+          isEditingName: currentLocalState.isEditingName,
+          tempName: currentLocalState.tempName,
+        };
+        
+        store.dispatch(setGameState(fallbackStateWithSelection));
         return;
       }
 
@@ -405,12 +568,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
           .filter((player: any) => player.isBot === true)
           .map((player: any) => player.color);
         
-        console.log(`OnlineGameService: Detected bot players:`, botPlayers);
 
         // Update bot players in Redux store
-        console.log(`OnlineGameService: Dispatching setBotPlayers with:`, botPlayers);
         store.dispatch(setBotPlayers(botPlayers));
-        console.log(`OnlineGameService: Redux store botPlayers after dispatch:`, store.getState().game.botPlayers);
 
         // Ensure board state is properly copied
         const gameState = {
@@ -448,14 +608,100 @@ class OnlineGameServiceImpl implements OnlineGameService {
           currentState.gameStatus !== gameState.gameStatus ||
           currentState.eliminatedPlayers?.length !== gameState.eliminatedPlayers?.length;
         
-        console.log(`Turn check: current=${currentState.currentPlayerTurn}, new=${gameState.currentPlayerTurn}, changed=${currentState.currentPlayerTurn !== gameState.currentPlayerTurn}`);
 
         if (hasSignificantChanges) {
-          console.log("OnlineGameService: Dispatching setGameState with eliminatedPlayers:", gameState.eliminatedPlayers);
-          console.log("OnlineGameService: Current turn:", gameState.currentPlayerTurn);
-          store.dispatch(setGameState(gameState));
-        } else {
-          console.log("OnlineGameService: Skipping state update - no significant changes detected");
+          
+          // ✅ OPTIMIZED: Efficient capture detection using lastMove data
+          const currentLocalState = store.getState().game;
+          let capturedPiece = null;
+          let capturePosition = null;
+          
+          // ✅ CRITICAL FIX: Only process capture if this is a new move
+          if (game.lastMove && game.lastMove.from && game.lastMove.to && game.lastMove.pieceCode) {
+            const lastMove = game.lastMove;
+            const moveKey = `${lastMove.from.row},${lastMove.from.col}-${lastMove.to.row},${lastMove.to.col}-${lastMove.timestamp}`;
+            
+            // Check if we've already processed this move
+            if (this.lastProcessedMove !== moveKey) {
+              this.lastProcessedMove = moveKey;
+              const oldBoardState = currentLocalState.boardState;
+              
+              // ✅ CRITICAL FIX: Add bounds checking for safety
+              if (oldBoardState && 
+                  lastMove.to.row >= 0 && lastMove.to.row < 14 && 
+                  lastMove.to.col >= 0 && lastMove.to.col < 14 &&
+                  oldBoardState[lastMove.to.row] && 
+                  oldBoardState[lastMove.to.row][lastMove.to.col]) {
+                
+                // Check if the destination square had a piece before the move
+                const pieceAtDestination = oldBoardState[lastMove.to.row][lastMove.to.col];
+                if (pieceAtDestination && pieceAtDestination[0] !== lastMove.pieceCode[0]) {
+                  capturedPiece = pieceAtDestination;
+                  capturePosition = { row: lastMove.to.row, col: lastMove.to.col };
+                }
+              }
+            }
+          }
+          
+          // ✅ CRITICAL FIX: Preserve local selection state when syncing from server
+          const gameStateWithLocalSelection = {
+            ...gameState,
+            // Preserve local UI state that shouldn't be overwritten by server
+            selectedPiece: currentLocalState.selectedPiece,
+            validMoves: currentLocalState.validMoves,
+            // Include all required GameState properties
+            gameMode: currentLocalState.gameMode,
+            botPlayers: currentLocalState.botPlayers,
+            currentGame: currentLocalState.currentGame,
+            discoveredGames: currentLocalState.discoveredGames,
+            isDiscovering: currentLocalState.isDiscovering,
+            isLoading: currentLocalState.isLoading,
+            isConnected: currentLocalState.isConnected,
+            connectionError: currentLocalState.connectionError,
+            isEditingName: currentLocalState.isEditingName,
+            tempName: currentLocalState.tempName,
+          };
+          
+          store.dispatch(setGameState(gameStateWithLocalSelection));
+          
+          // ✅ CRITICAL FIX: Trigger capture animation if a capture was detected
+          if (capturedPiece && capturePosition) {
+            // Calculate points for captured piece
+            const capturedPieceType = capturedPiece[1];
+            let points = 0;
+            switch (capturedPieceType) {
+              case "P": // Pawn
+                points = 1;
+                break;
+              case "N": // Knight
+                points = 3;
+                break;
+              case "B": // Bishop
+              case "R": // Rook
+                points = 5;
+                break;
+              case "Q": // Queen
+                points = 9;
+                break;
+              case "K": // King
+                points = 20; // Special bonus for king capture
+                break;
+              default:
+                points = 0;
+            }
+            
+            // Calculate screen coordinates for the capture square
+            const squareSize = 600 / 14; // Assuming 600px board size
+            const boardX = (capturePosition.col * squareSize) + (squareSize / 2);
+            const boardY = (capturePosition.row * squareSize) + (squareSize / 2);
+            
+            // Trigger capture animation through the capture animation service
+            try {
+              const captureAnimationService = require('./captureAnimationService').default;
+              captureAnimationService.triggerCaptureAnimation(points, boardX, boardY, gameState.currentPlayerTurn);
+            } catch (error) {
+            }
+          }
         }
       } else {
         console.warn("Game state is missing boardState, using fallback");
@@ -521,8 +767,28 @@ class OnlineGameServiceImpl implements OnlineGameService {
           canStartGame: canStartGame,
         };
 
+        // ✅ CRITICAL FIX: Preserve local selection state in fallback
+        const currentLocalState = store.getState().game;
+        const fallbackStateWithSelection = {
+          ...fallbackState,
+          // Preserve local UI state
+          selectedPiece: currentLocalState.selectedPiece,
+          validMoves: currentLocalState.validMoves,
+          // Include all required GameState properties
+          gameMode: currentLocalState.gameMode,
+          botPlayers: currentLocalState.botPlayers,
+          currentGame: currentLocalState.currentGame,
+          discoveredGames: currentLocalState.discoveredGames,
+          isDiscovering: currentLocalState.isDiscovering,
+          isLoading: currentLocalState.isLoading,
+          isConnected: currentLocalState.isConnected,
+          connectionError: currentLocalState.connectionError,
+          isEditingName: currentLocalState.isEditingName,
+          tempName: currentLocalState.tempName,
+        };
+        
         // Apply the fallback state
-        store.dispatch(setGameState(fallbackState));
+        store.dispatch(setGameState(fallbackStateWithSelection));
       }
 
       // Notify callbacks
@@ -567,7 +833,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
     // Set up optimized periodic presence updates (much longer intervals)
     this.setupOptimizedPresenceUpdates();
 
-    console.log("Presence tracking set up with Firebase onDisconnect and optimized updates");
   }
 
   private presenceUpdateInterval: NodeJS.Timeout | null = null;
@@ -584,7 +849,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
     this.presenceUpdateInterval = setInterval(async () => {
       try {
         await this.updatePlayerPresence(true);
-        console.log("Optimized presence update sent (2min interval)");
       } catch (error) {
         console.warn("Optimized presence update failed:", error);
         // Don't clear the interval on error - keep trying
@@ -613,7 +877,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
       playerColor: moveData.playerColor,
     };
     
-    console.log("OnlineGameService: Reverting move:", revertMoveData);
     store.dispatch(applyNetworkMove(revertMoveData));
   }
 
@@ -639,7 +902,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
   private measureLatency(): number {
     const startTime = Date.now();
     // Send ping to Firebase to measure latency
-    const pingRef = realtimeDatabaseService.getDatabase().ref('.info/serverTimeOffset');
+    const pingRef = database().ref('.info/serverTimeOffset');
     pingRef.once('value', () => {
       const latency = Date.now() - startTime;
       this.updateConnectionQuality(latency);
@@ -663,7 +926,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
       this.connectionQuality = 'poor';
     }
 
-    console.log(`Connection quality: ${this.connectionQuality} (avg latency: ${avgLatency}ms)`);
   }
 
   public getConnectionQuality(): string {

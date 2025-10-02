@@ -136,12 +136,6 @@ const gameSlice = createSlice({
     },
     selectPiece: (state, action: PayloadAction<Position>) => {
       // OPTIMIZATION: Removed console.log statements for better performance
-      console.log(
-        "Redux: historyIndex:",
-        state.historyIndex,
-        "history.length:",
-        state.history.length
-      );
 
       // Don't allow piece selection when viewing historical moves
       if (state.viewingHistoryIndex !== null) {
@@ -158,14 +152,12 @@ const gameSlice = createSlice({
         state.selectedPiece.row === row &&
         state.selectedPiece.col === col
       ) {
-        console.log("Redux: Deselecting same piece");
         state.selectedPiece = null;
         state.validMoves = [];
         return;
       }
 
       if (!pieceCode) {
-        console.log("Redux: No piece at position, clearing selection");
         state.selectedPiece = null;
         state.validMoves = [];
         return;
@@ -173,32 +165,20 @@ const gameSlice = createSlice({
 
       // Check if the piece belongs to an eliminated player
       const pieceColor = pieceCode.charAt(0);
-      console.log(
-        "Redux: pieceColor:",
-        pieceColor,
-        "eliminatedPlayers:",
-        state.eliminatedPlayers
-      );
       if (state.eliminatedPlayers.includes(pieceColor)) {
-        console.log(
-          "Redux: Blocking piece selection - piece belongs to eliminated player"
-        );
         return; // Do nothing if the piece belongs to an eliminated player
       }
 
       // Allow any player to select their pieces to see moves (including en passant)
       // But only the current player can actually make moves
-      console.log("Redux: Setting selectedPiece and calculating validMoves");
       state.selectedPiece = { row, col };
 
       // OPTIMIZATION: Check if we can reuse cached moves
       const moveCacheKey = `${pieceCode}-${row}-${col}-${state.eliminatedPlayers.join(',')}-${JSON.stringify(state.hasMoved)}-${JSON.stringify(state.enPassantTargets)}`;
       
       if (state.moveCache && state.moveCache[moveCacheKey]) {
-        console.log("Redux: Using cached validMoves");
         state.validMoves = state.moveCache[moveCacheKey];
       } else {
-        console.log("Redux: Calculating new validMoves");
         const validMoves = getValidMoves(
           pieceCode,
           { row, col },
@@ -224,11 +204,6 @@ const gameSlice = createSlice({
         }
       }
       
-      console.log(
-        "Redux: validMoves calculated:",
-        state.validMoves.length,
-        "moves"
-      );
     },
     makeMove: (state, action: PayloadAction<MovePayload>) => {
       // Don't allow moves when viewing historical moves
@@ -260,14 +235,6 @@ const gameSlice = createSlice({
         // Enforce player turn - only current player can make moves
         // Skip turn validation ONLY in solo mode for testing purposes
         // For P2P mode, let the P2P service handle move validation and sending
-        console.log(
-          "makeMove: gameMode:",
-          state.gameMode,
-          "pieceColor:",
-          pieceColor,
-          "currentPlayerTurn:",
-          state.currentPlayerTurn
-        );
 
         if (
           state.gameMode !== "solo" &&
@@ -275,18 +242,13 @@ const gameSlice = createSlice({
           state.gameMode !== "online" && // OPTIMIZATION: Allow online mode for local-first approach
           pieceColor !== state.currentPlayerTurn
         ) {
-          console.log("makeMove: Turn validation blocked - not player's turn");
           return; // Don't make the move
         }
 
         // For P2P mode, validate turn and send move through P2P service
         if (state.gameMode === "p2p") {
-          console.log("makeMove: P2P mode - validating turn and sending move through P2P service");
-          
           // ✅ CRITICAL: Validate turn in P2P mode
           if (pieceColor !== state.currentPlayerTurn) {
-            console.log("makeMove: P2P turn validation blocked - not player's turn");
-            console.log("makeMove: Current turn:", state.currentPlayerTurn, "Piece color:", pieceColor);
             return; // Don't make the move
           }
           
@@ -750,12 +712,19 @@ const gameSlice = createSlice({
       // Preserve the current game mode before resetting
       const currentGameMode = state.gameMode;
       
-      // Reset the entire game state back to baseInitialState
-      const resetState = {
+      // ✅ CRITICAL FIX: Completely clear all state properties first
+      // Delete all existing properties to ensure no stale data persists
+      Object.keys(state).forEach(key => {
+        delete (state as any)[key];
+      });
+      
+      // ✅ CRITICAL FIX: Assign the complete baseInitialState
+      // This ensures ALL properties are properly reset
+      Object.assign(state, {
         ...baseInitialState,
         checkStatus: updateAllCheckStatus(initialBoardState, [], {}),
-      };
-      Object.assign(state, resetState);
+        moveCache: {}, // Clear move cache
+      });
       
       // Restore the game mode after reset
       state.gameMode = currentGameMode;
@@ -888,6 +857,7 @@ const gameSlice = createSlice({
 
       // Use provided player color or default to current player turn
       const currentPlayer = action.payload || state.currentPlayerTurn;
+      console.log("resignGame reducer: action.payload:", action.payload, "currentPlayerTurn:", state.currentPlayerTurn, "final currentPlayer:", currentPlayer);
 
       // Add current player to eliminated players
       if (!state.eliminatedPlayers.includes(currentPlayer)) {
@@ -924,7 +894,8 @@ const gameSlice = createSlice({
         }
       } else {
         // Advance to next active player
-        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn as any);
+        // ✅ CRITICAL FIX: Use the resigning player's color to calculate next turn
+        const currentIndex = turnOrder.indexOf(currentPlayer as any);
         const nextIndex = (currentIndex + 1) % turnOrder.length;
         const nextPlayerInSequence = turnOrder[nextIndex];
 
@@ -957,6 +928,72 @@ const gameSlice = createSlice({
       }>
     ) => {
       const { from, to, pieceCode, playerColor } = action.payload;
+
+      // ✅ CRITICAL FIX: Handle resignation messages
+      if (pieceCode === "RESIGN") {
+        // Add player to eliminated players
+        if (!state.eliminatedPlayers.includes(playerColor)) {
+          state.eliminatedPlayers.push(playerColor);
+          state.justEliminated = playerColor;
+        }
+
+        // Clear selection
+        state.selectedPiece = null;
+        state.validMoves = [];
+
+        // Update check status for all players
+        state.checkStatus = updateAllCheckStatus(
+          state.boardState,
+          state.eliminatedPlayers,
+          state.hasMoved
+        );
+
+        // Check if the entire game is over
+        if (state.eliminatedPlayers.length === 3) {
+          const turnOrder = ["r", "b", "y", "g"];
+          const winner = turnOrder.find(
+            (color) => !state.eliminatedPlayers.includes(color)
+          );
+
+          if (winner) {
+            state.winner = winner;
+            state.gameStatus = "finished";
+            state.gameOverState = {
+              isGameOver: true,
+              status: "finished",
+              eliminatedPlayer: null,
+            };
+          }
+        } else {
+          // Advance to next active player
+          const turnOrder = ["r", "b", "y", "g"];
+          const currentIndex = turnOrder.indexOf(playerColor);
+          const nextIndex = (currentIndex + 1) % 4;
+          const nextPlayerInSequence = turnOrder[nextIndex];
+
+          // Find the next active player (skip eliminated players)
+          let nextActivePlayer = nextPlayerInSequence;
+          while (state.eliminatedPlayers.includes(nextActivePlayer)) {
+            const activeIndex = turnOrder.indexOf(nextActivePlayer);
+            const nextActiveIndex = (activeIndex + 1) % 4;
+            nextActivePlayer = turnOrder[nextActiveIndex];
+          }
+
+          state.currentPlayerTurn = nextActivePlayer;
+        }
+
+        // Clear move cache when game state changes
+        state.moveCache = {};
+
+        // Save to history
+        if (state.historyIndex < state.history.length - 1) {
+          state.history = state.history.slice(0, state.historyIndex + 1);
+        }
+        state.history.push(createStateSnapshot(state));
+        state.historyIndex = state.history.length - 1;
+
+        return; // Exit early for resignation
+      }
 
       // Apply the move to the board
       const { row: fromRow, col: fromCol } = from;
@@ -1045,64 +1082,64 @@ const gameSlice = createSlice({
         let rookStartRow: number, rookStartCol: number, rookTargetRow: number, rookTargetCol: number;
 
         if (playerColor === "r") {
-          // Red castling
-          if (toCol === 2) {
+          // Red - bottom row
+          if (toCol > fromCol) {
             // Kingside castling
-            rookStartRow = 7;
-            rookStartCol = 7;
-            rookTargetRow = 7;
-            rookTargetCol = 5;
+            rookStartRow = 13;
+            rookStartCol = 10; // Right rook
+            rookTargetRow = 13;
+            rookTargetCol = 8;
           } else {
             // Queenside castling
-            rookStartRow = 7;
-            rookStartCol = 0;
-            rookTargetRow = 7;
-            rookTargetCol = 3;
+            rookStartRow = 13;
+            rookStartCol = 3; // Left rook
+            rookTargetRow = 13;
+            rookTargetCol = 6;
           }
         } else if (playerColor === "b") {
-          // Blue castling
-          if (toRow === 2) {
-            // Kingside castling
-            rookStartRow = 0;
-            rookStartCol = 7;
-            rookTargetRow = 2;
-            rookTargetCol = 7;
+          // Blue - left column
+          if (toRow > fromRow) {
+            // Kingside castling (down)
+            rookStartRow = 10;
+            rookStartCol = 0; // Bottom rook at (10, 0)
+            rookTargetRow = 8; // Rook moves to (8, 0)
+            rookTargetCol = 0;
           } else {
-            // Queenside castling
-            rookStartRow = 0;
-            rookStartCol = 0;
-            rookTargetRow = 2;
+            // Queenside castling (up)
+            rookStartRow = 3;
+            rookStartCol = 0; // Top rook at (3, 0)
+            rookTargetRow = 6; // Rook moves to (6, 0)
             rookTargetCol = 0;
           }
         } else if (playerColor === "y") {
-          // Yellow castling
-          if (toCol === 5) {
-            // Kingside castling
+          // Yellow - top row
+          if (toCol > fromCol) {
+            // Kingside castling (right) - King moves from (0,6) to (0,8)
             rookStartRow = 0;
-            rookStartCol = 7;
+            rookStartCol = 10; // Right rook at (0, 10)
             rookTargetRow = 0;
-            rookTargetCol = 5;
+            rookTargetCol = 7; // Rook moves to (0, 7)
           } else {
-            // Queenside castling
+            // Queenside castling (left) - King moves from (0,6) to (0,4)
             rookStartRow = 0;
-            rookStartCol = 0;
+            rookStartCol = 3; // Left rook at (0, 3)
             rookTargetRow = 0;
-            rookTargetCol = 3;
+            rookTargetCol = 5; // Rook moves to (0, 5)
           }
         } else if (playerColor === "g") {
-          // Green castling
-          if (toRow === 5) {
-            // Kingside castling
-            rookStartRow = 7;
-            rookStartCol = 7;
-            rookTargetRow = 5;
-            rookTargetCol = 7;
+          // Green - right column
+          if (toRow > fromRow) {
+            // Kingside castling (down) - King moves from (6,13) to (8,13)
+            rookStartRow = 10;
+            rookStartCol = 13; // Bottom rook at (10, 13)
+            rookTargetRow = 7; // Rook moves to (7, 13)
+            rookTargetCol = 13;
           } else {
-            // Queenside castling
-            rookStartRow = 7;
-            rookStartCol = 0;
-            rookTargetRow = 5;
-            rookTargetCol = 0;
+            // Queenside castling (up) - King moves from (6,13) to (4,13)
+            rookStartRow = 3;
+            rookStartCol = 13; // Top rook at (3, 13)
+            rookTargetRow = 5; // Rook moves to (5, 13)
+            rookTargetCol = 13;
           }
         } else {
           // Default fallback (should not happen)
@@ -1253,18 +1290,18 @@ const gameSlice = createSlice({
         }
       }
 
-      // ✅ CRITICAL: Handle turn advancement for P2P mode (after elimination check)
-      if (state.gameMode === "p2p") {
-        console.log("applyNetworkMove: P2P mode - advancing turn after elimination check");
+      // ✅ CRITICAL: Handle turn advancement for P2P and online modes (after elimination check)
+      if (state.gameMode === "p2p" || state.gameMode === "online") {
+        console.log(`applyNetworkMove: ${state.gameMode} mode - advancing turn after elimination check`);
         
         // ✅ CRITICAL: Set game status to active when first move is made
         if (state.gameStatus === "waiting") {
-          console.log("applyNetworkMove: P2P mode - setting game status to active");
+          console.log(`applyNetworkMove: ${state.gameMode} mode - setting game status to active`);
           state.gameStatus = "active";
         }
         
-        // Only advance turn if game is not over
-        if (state.gameStatus !== "finished") {
+        // Only advance turn if game is not over and this is not a resignation
+        if (state.gameStatus !== "finished" && pieceCode !== "RESIGN") {
           const turnOrder = ['r', 'b', 'y', 'g'];
           // ✅ CRITICAL FIX: Use playerColor (player who made the move) to determine next turn
           // This is correct because we want to advance from the player who just moved
@@ -1281,9 +1318,9 @@ const gameSlice = createSlice({
           }
 
           state.currentPlayerTurn = nextActivePlayer;
-          console.log(`applyNetworkMove: P2P turn advanced from ${playerColor} to ${nextActivePlayer}`);
+          console.log(`applyNetworkMove: ${state.gameMode} turn advanced from ${playerColor} to ${nextActivePlayer}`);
         } else {
-          console.log("applyNetworkMove: P2P game over, no turn advancement needed");
+          console.log(`applyNetworkMove: ${state.gameMode} game over or resignation, no turn advancement needed`);
         }
       }
 

@@ -51,7 +51,6 @@ class NetworkService {
 
   connect(serverIp: string, port: number = 3001): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log(`🔌 Attempting to connect to: ${serverIp}:${port}`);
 
       // Store the server IP for later use
       this.serverIp = serverIp;

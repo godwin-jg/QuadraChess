@@ -18,6 +18,22 @@ export default function GameMenu() {
   const { currentPlayerTurn, gameStatus, viewingHistoryIndex } = useSelector(
     (state: RootState) => state.game
   );
+  
+  // Get the local player's color for online games
+  const getLocalPlayerColor = (): string | null => {
+    if (isOnlineMode && onlineGameService.currentPlayer) {
+      console.log("GameMenu: Online mode - currentPlayer:", onlineGameService.currentPlayer);
+      console.log("GameMenu: Online mode - player color:", onlineGameService.currentPlayer.color);
+      return onlineGameService.currentPlayer.color;
+    }
+    // For local games, we don't have a specific local player concept
+    // The resign button should only appear for the current player's turn
+    console.log("GameMenu: Local mode - currentPlayerTurn:", currentPlayerTurn);
+    return currentPlayerTurn;
+  };
+  
+  const localPlayerColor = getLocalPlayerColor();
+  console.log("GameMenu: Final localPlayerColor:", localPlayerColor);
 
   const isOnlineMode = mode === "online" && !!gameId;
   const isViewingHistory = viewingHistoryIndex !== null;
@@ -51,19 +67,24 @@ export default function GameMenu() {
 
   const handleConfirmResign = async () => {
     try {
+      
       if (isOnlineMode) {
-        // Online multiplayer - call online service
+        // ✅ CRITICAL FIX: For online mode, don't update local state immediately
+        // Let the online service handle the resignation and sync the correct state
+        console.log("GameMenu: Online mode - calling onlineGameService.resignGame() first");
         await onlineGameService.resignGame();
+        console.log("GameMenu: Online mode - onlineGameService.resignGame() completed");
       } else {
         // Local multiplayer or single player - use Redux action
-        dispatch(resignGame());
+        // Pass the local player's color to resign the correct player
+        console.log("GameMenu: Local mode - calling dispatch(resignGame()) with:", localPlayerColor);
+        dispatch(resignGame(localPlayerColor || undefined));
       }
       
       // 🔊 Play game-end sound for resignation
       try {
         soundService.playGameEndSound();
       } catch (error) {
-        console.log('🔊 SoundService: Failed to play game-end sound for resignation:', error);
       }
       
       setShowResignModal(false);
@@ -97,7 +118,7 @@ export default function GameMenu() {
         visible={showResignModal}
         onConfirm={handleConfirmResign}
         onCancel={handleCancelResign}
-        playerName={getPlayerName(currentPlayerTurn)}
+        playerName={getPlayerName(localPlayerColor || currentPlayerTurn)}
       />
     </>
   );

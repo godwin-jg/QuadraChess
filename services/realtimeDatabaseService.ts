@@ -52,12 +52,10 @@ class RealtimeDatabaseService {
   // Authentication methods with lightweight auth monitoring
   async signInAnonymously(): Promise<string> {
     try {
-      console.log("Signing in anonymously to Realtime Database...");
       
       // Check if there's a current user before signing out
       const currentUser = auth().currentUser;
       if (currentUser) {
-        console.log("Signing out current user before signing in anonymously");
         await auth().signOut();
       }
       this.currentUser = null;
@@ -65,7 +63,6 @@ class RealtimeDatabaseService {
       // Sign in anonymously
       const userCredential = await auth().signInAnonymously();
       this.currentUser = userCredential.user;
-      console.log("Successfully signed in:", userCredential.user.uid);
       
       // Set up lightweight auth state listener (minimal overhead)
       this.setupLightweightAuthListener();
@@ -91,10 +88,8 @@ class RealtimeDatabaseService {
 
     auth().onAuthStateChanged((user) => {
       if (user) {
-        console.log("Auth state: User signed in", user.uid);
         this.currentUser = user;
       } else {
-        console.log("Auth state: User signed out - attempting lightweight reconnection");
         this.currentUser = null;
         
         // Non-blocking reconnection attempt
@@ -110,12 +105,10 @@ class RealtimeDatabaseService {
     try {
       // Only attempt if we were in a game (avoid unnecessary reconnections)
       if (this.gameUnsubscribe) {
-        console.log("Attempting lightweight reconnection...");
         // Use setTimeout to make it non-blocking
         setTimeout(async () => {
           try {
             await this.signInAnonymously();
-            console.log("Lightweight reconnection successful");
           } catch (error) {
             console.warn("Lightweight reconnection failed:", error);
           }
@@ -135,12 +128,9 @@ class RealtimeDatabaseService {
     try {
       const user = this.getCurrentUser();
       if (!user) {
-        console.log("❌ No authenticated user found");
         return false;
       }
       
-      console.log("✅ User authenticated:", user.uid);
-      console.log("✅ User token:", user.accessToken ? "present" : "missing");
       
       // Test a simple read operation with better error handling
       try {
@@ -148,15 +138,12 @@ class RealtimeDatabaseService {
         const snapshot = await testRef.limitToFirst(1).once("value");
         
         if (snapshot.exists()) {
-          console.log("✅ Database read access confirmed");
           return true;
         } else {
-          console.log("⚠️ Database read access limited (no games found)");
           return true; // Still authenticated, just no data
         }
       } catch (dbError) {
         console.error("❌ Database access error:", dbError);
-        console.log("🔧 This might be a rules issue or authentication problem");
         return false;
       }
     } catch (error) {
@@ -172,7 +159,6 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      console.log("Creating game directly in database:", hostName, "with bots:", botColors);
       
       // Use direct database creation method
       return await this.createGameDirectly(hostName, botColors);
@@ -187,7 +173,6 @@ class RealtimeDatabaseService {
     const user = this.getCurrentUser();
     if (!user) throw new Error("User not authenticated");
 
-    console.log("Creating game directly in database:", hostName);
 
     // Import initial board state
     const { initialBoardState } = require("../state/boardState");
@@ -261,7 +246,7 @@ class RealtimeDatabaseService {
       lastActivity: Date.now(),
     };
 
-    console.log("Creating game with data:", JSON.stringify({
+    console.log("RealtimeDatabaseService: Creating game with data:", JSON.stringify({
       ...gameData,
       gameState: "..." // Don't log the full gameState to avoid clutter
     }, null, 2));
@@ -278,14 +263,11 @@ class RealtimeDatabaseService {
       await this.addBotsToGame(gameId, botColors);
     }
 
-    console.log(`Game created directly in database: ${gameId} by ${hostName}`);
-    console.log(`Game data:`, JSON.stringify(gameData, null, 2));
     
     // Verify the game was created correctly
     const verifySnapshot = await gameRef.once("value");
     if (verifySnapshot.exists()) {
       const createdGame = verifySnapshot.val();
-      console.log(`✅ Game verification successful: ${gameId}, status: ${createdGame.status}`);
     } else {
       console.error(`❌ Game verification failed: ${gameId} not found after creation`);
     }
@@ -335,46 +317,51 @@ class RealtimeDatabaseService {
       };
 
       await gameRef.child(`players/${user.uid}`).set(newPlayer);
-      console.log("Successfully joined game:", gameId);
     } catch (error) {
       console.error("Error joining game:", error);
       throw error;
     }
   }
 
-  async leaveGame(gameId: string): Promise<void> {
+  async leaveGame(gameId: string, onCriticalError?: (error: string) => void): Promise<void> {
     try {
       // Ensure authentication before proceeding
       let user = this.getCurrentUser();
       if (!user) {
-        console.log("No authenticated user found, signing in anonymously...");
         await this.signInAnonymously();
         user = this.getCurrentUser();
         if (!user) throw new Error("Failed to authenticate user");
       }
 
-      console.log("Leaving game directly in database:", gameId);
       
       // Use direct database leave method
-      await this.leaveGameDirectly(gameId);
-    } catch (error) {
+      await this.leaveGameDirectly(gameId, onCriticalError);
+    } catch (error: any) {
       console.error("Error calling leave game:", error);
+      
+      // ✅ CRITICAL FIX: Handle max retries exceeded error
+      if (error.message?.includes('max-retries') || error.message?.includes('too many retries')) {
+        console.error("Critical error: Max retries exceeded for leaveGame");
+        if (onCriticalError) {
+          onCriticalError(error.message);
+        }
+        return; // Don't throw - let the caller handle gracefully
+      }
+      
       throw error;
     }
   }
 
   // Fallback method to leave game directly in database with proper error handling
-  private async leaveGameDirectly(gameId: string): Promise<void> {
+  private async leaveGameDirectly(gameId: string, onCriticalError?: (error: string) => void): Promise<void> {
     // Ensure authentication before proceeding
     let user = this.getCurrentUser();
     if (!user) {
-      console.log("No authenticated user found in fallback, signing in anonymously...");
       await this.signInAnonymously();
       user = this.getCurrentUser();
       if (!user) throw new Error("Failed to authenticate user");
     }
 
-    console.log("Leaving game directly in database:", gameId);
 
     const gameRef = database().ref(`games/${gameId}`);
     
@@ -402,7 +389,6 @@ class RealtimeDatabaseService {
 
           // If no players left, delete the game
           if (!gameData.players || Object.keys(gameData.players).length === 0) {
-            console.log(`Game ${gameId} is now empty, deleting`);
             return null; // This will delete the game
           }
 
@@ -410,7 +396,6 @@ class RealtimeDatabaseService {
           const remainingPlayers = Object.values(gameData.players);
           const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
           if (!hasHumanPlayers) {
-            console.log(`Game ${gameId} has only bots remaining, deleting`);
             return null; // This will delete the game
           }
 
@@ -425,12 +410,10 @@ class RealtimeDatabaseService {
 
           gameData.lastActivity = Date.now();
 
-          console.log(`Player ${user.uid} left game ${gameId}`);
           return gameData;
         });
 
         if (result.committed) {
-          console.log(`Successfully left game ${gameId} after ${retryCount + 1} attempts`);
           return; // Success!
         } else {
           throw new Error("Transaction failed to commit");
@@ -449,7 +432,6 @@ class RealtimeDatabaseService {
         
         // Check if player is already not in the game (success case)
         if (error.message?.includes('Player') && error.message?.includes('not found')) {
-          console.log(`Player already not in game ${gameId}. Consider this a success.`);
           return; // This is actually success - player is already out
         }
         
@@ -460,7 +442,6 @@ class RealtimeDatabaseService {
         
         // Wait before retrying with exponential backoff
         const delay = baseDelay * Math.pow(2, retryCount - 1);
-        console.log(`Waiting ${delay}ms before retry ${retryCount + 1}...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -484,8 +465,8 @@ class RealtimeDatabaseService {
         throw new Error("Only host can start the game");
       }
 
-      if (Object.keys(gameData.players).length < 2) {
-        throw new Error("Need at least 2 players to start");
+      if (Object.keys(gameData.players).length !== 4) {
+        throw new Error("Need exactly 4 players to start");
       }
 
       await gameRef.update({
@@ -493,7 +474,6 @@ class RealtimeDatabaseService {
         "gameState/gameStatus": "active",
       });
 
-      console.log("Game started successfully:", gameId);
     } catch (error) {
       console.error("Error starting game:", error);
       throw error;
@@ -508,10 +488,8 @@ class RealtimeDatabaseService {
     const gameRef = database().ref(`games/${gameId}`);
 
     const listener = gameRef.on("value", (snapshot) => {
-      // OPTIMIZATION: Removed console.log for better performance
       if (snapshot.exists()) {
         const gameData = { id: gameId, ...snapshot.val() } as RealtimeGame;
-        // OPTIMIZATION: Removed console.log for better performance
 
         // Ensure all players have required fields
         const processedPlayers: { [playerId: string]: Player } = {};
@@ -597,7 +575,6 @@ class RealtimeDatabaseService {
       if (!user) throw new Error("User not authenticated");
 
       // Ultra-fast database transaction (minimal validation for speed)
-      // OPTIMIZATION: Removed console.log for better performance
       const gameRef = database().ref(`games/${gameId}`);
       const result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
@@ -607,7 +584,6 @@ class RealtimeDatabaseService {
 
         // Quick player validation
         const player = gameData.players[user.uid];
-        // OPTIMIZATION: Removed console.log for better performance
         if (!player || player.color !== gameData.gameState.currentPlayerTurn) {
           return gameData; // Skip move silently (no logging for speed)
         }
@@ -615,12 +591,20 @@ class RealtimeDatabaseService {
         // Direct move application (no board state conversion for speed)
         const boardState = gameData.gameState.boardState;
         const piece = boardState[moveData.from.row][moveData.from.col];
+        
+        // ✅ CRITICAL FIX: Check if this is a capture move
+        const capturedPiece = boardState[moveData.to.row][moveData.to.col];
+        if (capturedPiece && capturedPiece[1] === "K") {
+          // Prevent king capture
+          return gameData;
+        }
+        
         boardState[moveData.from.row][moveData.from.col] = "";
         boardState[moveData.to.row][moveData.to.col] = piece;
 
         // Update turn in both places for consistency
         const currentTurn = gameData.gameState.currentPlayerTurn;
-        const nextPlayer = this.getNextPlayer(currentTurn);
+        const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
         gameData.gameState.currentPlayerTurn = nextPlayer;
         gameData.currentPlayerTurn = nextPlayer; // Also update top-level turn
         
@@ -633,7 +617,6 @@ class RealtimeDatabaseService {
         };
         gameData.lastActivity = Date.now();
         
-        // OPTIMIZATION: Removed console.log for better performance
 
         return gameData;
       });
@@ -642,7 +625,6 @@ class RealtimeDatabaseService {
         throw new Error("Move transaction failed");
       }
       
-      console.log(`Move processed successfully for game ${gameId}`);
     } catch (error) {
       console.error("Error processing move:", error);
       throw error;
@@ -655,7 +637,6 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      console.log("Resigning game directly in database:", gameId);
       
       // Use direct database resignation method
       await this.resignGameDirectly(gameId);
@@ -670,7 +651,6 @@ class RealtimeDatabaseService {
     const user = this.getCurrentUser();
     if (!user) throw new Error("User not authenticated");
 
-    console.log("Resigning game directly in database:", gameId);
 
     const gameRef = database().ref(`games/${gameId}`);
     
@@ -719,7 +699,6 @@ class RealtimeDatabaseService {
 
           // If no players left, delete the game
           if (!gameData.players || Object.keys(gameData.players).length === 0) {
-            console.log(`Game ${gameId} is now empty after resignation, deleting`);
             return null; // This will delete the game
           }
 
@@ -727,7 +706,6 @@ class RealtimeDatabaseService {
           const remainingPlayers = Object.values(gameData.players);
           const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
           if (!hasHumanPlayers) {
-            console.log(`Game ${gameId} has only bots remaining after resignation, deleting`);
             return null; // This will delete the game
           }
 
@@ -776,12 +754,10 @@ class RealtimeDatabaseService {
           gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
           gameData.lastActivity = Date.now();
 
-          console.log(`Player ${user.uid} (${player.color}) resigned from game ${gameId}`);
           return gameData;
         });
 
         if (result.committed) {
-          console.log(`Successfully resigned from game ${gameId} after ${retryCount + 1} attempts`);
           return; // Success!
         } else {
           throw new Error("Transaction failed to commit");
@@ -800,7 +776,6 @@ class RealtimeDatabaseService {
         
         // Check if player is already not in the game (success case)
         if (error.message?.includes('Player') && error.message?.includes('not found')) {
-          console.log(`Player already not in game ${gameId}. Consider this a success.`);
           return; // This is actually success - player is already out
         }
         
@@ -811,7 +786,6 @@ class RealtimeDatabaseService {
         
         // Wait before retrying with exponential backoff
         const delay = baseDelay * Math.pow(2, retryCount - 1);
-        console.log(`Waiting ${delay}ms before retry ${retryCount + 1}...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -825,7 +799,6 @@ class RealtimeDatabaseService {
     gameId: string,
     onMove: (move: RealtimeMove) => void
   ): () => void {
-    console.log("Subscribing to moves for faster updates:", gameId);
     
     const movesRef = database().ref(`moves/${gameId}`).orderByChild("timestamp");
     
@@ -833,7 +806,6 @@ class RealtimeDatabaseService {
       const moveData = snapshot.val();
       if (moveData && !moveData.isOptimistic) {
         // Only process non-optimistic moves (server-confirmed)
-        console.log("Received confirmed move:", moveData);
         onMove({
           from: moveData.from,
           to: moveData.to,
@@ -848,7 +820,6 @@ class RealtimeDatabaseService {
 
     return () => {
       movesRef.off("child_added", listener);
-      console.log("Move subscription cleaned up");
     };
   }
 
@@ -864,7 +835,6 @@ class RealtimeDatabaseService {
         lastSeen: Date.now(),
       });
 
-      console.log("Player presence updated:", isOnline);
     } catch (error) {
       console.error("Error updating player presence:", error);
       throw error;
@@ -876,14 +846,12 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      console.log("Calling manual cleanup Cloud Function");
 
       const functions = require("@react-native-firebase/functions").default;
       const manualCleanupFunction = functions().httpsCallable("manualCleanup");
 
       const result = await manualCleanupFunction({});
 
-      console.log("Manual cleanup completed:", result.data);
       return {
         cleaned: result.data.cleaned || 0,
         resigned: result.data.resigned || 0,
@@ -905,7 +873,6 @@ class RealtimeDatabaseService {
       // Send move directly without batching for instant response
       const moveRequestRef = database().ref(`move-requests/${gameId}`).push();
       await moveRequestRef.set(moveRequest);
-      console.log("Move sent immediately for instant response:", moveRequest);
     } catch (error) {
       console.error("Error sending immediate move:", error);
       throw error;
@@ -946,7 +913,6 @@ class RealtimeDatabaseService {
         }
       }
       
-      console.log(`Processed move batch: ${batch.length} moves across ${movesByGame.size} games`);
     } catch (error) {
       console.error("Error processing move batch:", error);
       // Fallback: send moves individually
@@ -972,7 +938,6 @@ class RealtimeDatabaseService {
         // Perform a lightweight operation to keep connection alive
         const testRef = database().ref(".info/connected");
         await testRef.once("value");
-        console.log("Keep-alive: Connection maintained");
       } catch (error) {
         console.warn("Keep-alive: Connection check failed:", error);
       }
@@ -1001,11 +966,18 @@ class RealtimeDatabaseService {
     }
   }
 
-  private getNextPlayer(currentPlayer: string): string {
+  private getNextPlayer(currentPlayer: string, eliminatedPlayers: string[] = []): string {
     const turnOrder = ["r", "b", "y", "g"];
     const currentIndex = turnOrder.indexOf(currentPlayer);
-    const nextPlayer = turnOrder[(currentIndex + 1) % turnOrder.length];
-    console.log(`getNextPlayer: ${currentPlayer} (index ${currentIndex}) -> ${nextPlayer} (index ${turnOrder.indexOf(nextPlayer)})`);
+    let nextIndex = (currentIndex + 1) % turnOrder.length;
+    let nextPlayer = turnOrder[nextIndex];
+
+    // Skip eliminated players
+    while (eliminatedPlayers.includes(nextPlayer)) {
+      nextIndex = (nextIndex + 1) % turnOrder.length;
+      nextPlayer = turnOrder[nextIndex];
+    }
+
     return nextPlayer;
   }
 
@@ -1026,7 +998,6 @@ class RealtimeDatabaseService {
       const availableBotColors = botColors.filter(color => !usedColors.includes(color));
       
       if (availableBotColors.length === 0) {
-        console.log(`No available colors for bots in game ${gameId}`);
         return;
       }
 
@@ -1047,7 +1018,6 @@ class RealtimeDatabaseService {
       }
 
       await gameRef.update(botUpdates);
-      console.log(`Added ${availableBotColors.length} bots to game ${gameId}:`, availableBotColors);
     } catch (error) {
       console.error("Error adding bots to game:", error);
       throw error;
@@ -1077,13 +1047,11 @@ class RealtimeDatabaseService {
   // Test Firebase connection (optimized)
   async testConnection(): Promise<boolean> {
     try {
-      console.log("Testing Firebase connection...");
       
       // Quick connection test - just check if we can access the database
       const gamesRef = database().ref("games");
       const snapshot = await gamesRef.limitToFirst(1).once("value");
       
-      console.log("✅ Firebase connection successful!");
       return true;
     } catch (error) {
       console.error("❌ Firebase connection failed:", error);
@@ -1217,10 +1185,8 @@ class RealtimeDatabaseService {
         });
         
         await gamesRef.update(updates);
-        console.log(`Client cleanup: Removed ${corruptedGames.length} corrupted games`);
         return corruptedGames.length;
       } else {
-        console.log("Client cleanup: No corrupted games found");
         return 0;
       }
     } catch (error) {

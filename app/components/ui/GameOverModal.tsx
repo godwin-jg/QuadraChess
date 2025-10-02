@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { View, Text, Pressable, Modal, ScrollView, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -39,6 +40,7 @@ export default function GameOverModal({
   players = [],
   onReset,
 }: GameOverModalProps) {
+  const router = useRouter();
   // Create leaderboard data first
   const createLeaderboard = (): PlayerResult[] => {
     const colorNames = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
@@ -99,7 +101,6 @@ export default function GameOverModal({
       const soundService = require('../../services/soundService').default;
       soundService.playGameEndSound();
     } catch (error) {
-      console.log('🔊 SoundService: Failed to play game end sound:', error);
     }
 
     // Start entrance animation sequence
@@ -319,22 +320,41 @@ export default function GameOverModal({
               </Animated.View>
 
               <Animated.View style={buttonAnimatedStyle}>
-                <Pressable
-                  onPress={() => {
-                    try {
-                      const hapticsService = require('../../services/hapticsService').default;
-                      hapticsService.buttonPress();
-                    } catch (error) {
-                      console.log('🔊 HapticsService: Failed to play button haptic:', error);
-                    }
-                    onReset();
-                  }}
-                  className="bg-blue-600 py-4 px-8 rounded-xl active:opacity-70"
-                >
-                  <Text className="text-white text-lg font-semibold text-center">
-                    🎮 Play Again
-                  </Text>
-                </Pressable>
+                <View className="gap-3">
+                  {/* Play Again Button */}
+                  <Pressable
+                    onPress={() => {
+                      try {
+                        const hapticsService = require('../../services/hapticsService').default;
+                        hapticsService.buttonPress();
+                      } catch (error) {
+                      }
+                      onReset();
+                    }}
+                    className="bg-blue-600 py-4 px-8 rounded-xl active:opacity-70"
+                  >
+                    <Text className="text-white text-lg font-semibold text-center">
+                      🎮 Play Again
+                    </Text>
+                  </Pressable>
+
+                  {/* Return to Home Button */}
+                  <Pressable
+                    onPress={() => {
+                      try {
+                        const hapticsService = require('../../services/hapticsService').default;
+                        hapticsService.buttonPress();
+                      } catch (error) {
+                      }
+                      router.push("/(tabs)/");
+                    }}
+                    className="bg-gray-600 py-4 px-8 rounded-xl active:opacity-70"
+                  >
+                    <Text className="text-white text-lg font-semibold text-center">
+                      🏠 Return to Home
+                    </Text>
+                  </Pressable>
+                </View>
               </Animated.View>
             </View>
           </ScrollView>

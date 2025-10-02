@@ -39,12 +39,10 @@ class P2PGameServiceImpl implements P2PGameService {
       this.currentGameId = gameId;
       this.isConnected = true;
 
-      console.log("P2PGameService: Connecting to serverless P2P game:", gameId);
       
       // ✅ CRITICAL: Set gameMode to p2p when connecting to P2P game
       const { store } = require("../state/store");
       const { setGameMode } = require("../state/gameSlice");
-      console.log("🎮 P2PGameService: Setting gameMode to p2p");
       store.dispatch(setGameMode("p2p"));
 
       // Set up message handlers for our serverless P2P service
@@ -53,7 +51,6 @@ class P2PGameServiceImpl implements P2PGameService {
       // Get current player info from P2P service
       this.currentPlayer = p2pService.getCurrentPlayer();
       if (this.currentPlayer) {
-        console.log("P2PGameService: Current player:", this.currentPlayer);
       }
 
       // Set up presence tracking
@@ -126,11 +123,9 @@ class P2PGameServiceImpl implements P2PGameService {
     }
 
     // ✅ Apply move locally first (optimistic UI)
-    console.log("P2PGameService: Applying move locally:", moveData);
     store.dispatch(applyNetworkMove(moveData));
 
     // ✅ Send move through P2P service
-    console.log("P2PGameService: Sending move through P2P service");
     p2pService.sendChessMove(moveData);
   }
 
@@ -139,12 +134,26 @@ class P2PGameServiceImpl implements P2PGameService {
       throw new Error("Not connected to a game");
     }
 
+    // ✅ CRITICAL FIX: Debug current player info
+    
+    // ✅ CRITICAL FIX: Get current player from P2P service if not set
+    if (!this.currentPlayer || !this.currentPlayer.color) {
+      this.currentPlayer = p2pService.getCurrentPlayer();
+    }
+
+    const playerColor = this.currentPlayer?.color || "";
+    if (!playerColor) {
+      console.error("🎮 P2PGameService: No player color available for resignation");
+      throw new Error("Player color not available for resignation");
+    }
+
+
     // Send resignation message through serverless P2P service
     p2pService.sendChessMove({
       from: { row: -1, col: -1 },
       to: { row: -1, col: -1 },
       pieceCode: "RESIGN",
-      playerColor: this.currentPlayer?.color || "",
+      playerColor: playerColor,
     });
   }
 
@@ -203,11 +212,9 @@ class P2PGameServiceImpl implements P2PGameService {
   }
 
   private setupServerlessMessageHandlers(): void {
-    console.log("P2PGameService: Setting up lightweight P2P message handlers");
     
     // ✅ Simple approach: Only listen for moves, no heavy state sync
     // Each client maintains their own game state, only moves are synchronized
-    console.log("P2PGameService: Using move-only synchronization for efficiency");
     
     // Set up dummy unsubscribers since we don't need them anymore
     this.gameUnsubscribe = () => {};
@@ -263,12 +270,10 @@ class P2PGameServiceImpl implements P2PGameService {
   }
 
   private handlePlayerJoined(message: any): void {
-    console.log("P2PGameService: Player joined:", message.data);
     // This is handled by the game state update
   }
 
   private handlePlayerLeft(message: any): void {
-    console.log("P2PGameService: Player left:", message.data);
     // This is handled by the game state update
   }
 
@@ -340,7 +345,6 @@ class P2PGameServiceImpl implements P2PGameService {
   private setupPresenceTracking(): void {
     // P2P presence is handled by WebRTC connection state
     // No need for explicit presence updates
-    console.log("P2PGameService: Presence tracking setup (handled by WebRTC)");
   }
 }
 

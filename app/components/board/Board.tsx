@@ -81,14 +81,10 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     }
     return boardState;
   }, [viewingHistoryIndex, history, boardState]);
-  // OPTIMIZATION: Combined selector to reduce Redux subscriptions
-  const gameState = useSelector((state: RootState) => ({
-    currentPlayerTurn: state.game.currentPlayerTurn,
-    gameStatus: state.game.gameStatus,
-    players: state.game.players,
-  }));
-  
-  const { currentPlayerTurn, gameStatus, players } = gameState;
+  // OPTIMIZATION: Use separate selectors to avoid creating new objects
+  const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
+  const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
+  const players = useSelector((state: RootState) => state.game.players);
 
   // Animation values for current player glow
   const glowOpacity = useSharedValue(0);

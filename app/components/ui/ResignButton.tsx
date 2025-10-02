@@ -23,14 +23,18 @@ export default function ResignButton() {
   // Get the local player's color for online games
   const getLocalPlayerColor = (): string | null => {
     if (isOnlineMode && onlineGameService.currentPlayer) {
+      console.log("ResignButton: Online mode - currentPlayer:", onlineGameService.currentPlayer);
+      console.log("ResignButton: Online mode - player color:", onlineGameService.currentPlayer.color);
       return onlineGameService.currentPlayer.color;
     }
     // For local games, we don't have a specific local player concept
     // The resign button should only appear for the current player's turn
+    console.log("ResignButton: Local mode - currentPlayerTurn:", currentPlayerTurn);
     return currentPlayerTurn;
   };
   
   const localPlayerColor = getLocalPlayerColor();
+  console.log("ResignButton: Final localPlayerColor:", localPlayerColor);
 
   const isOnlineMode = mode === "online" && !!gameId;
   const isViewingHistory = viewingHistoryIndex !== null;
@@ -63,14 +67,11 @@ export default function ResignButton() {
   const handleConfirmResign = async () => {
     setIsResigning(true);
     try {
-      console.log("ResignButton: Resigning player:", localPlayerColor, "in mode:", isOnlineMode ? "online" : "local");
       
       if (isOnlineMode) {
-        // Online multiplayer - update local state immediately for better UX
-        // Pass the local player's color to resign the correct player
-        dispatch(resignGame(localPlayerColor || undefined));
-        // Then call online service to sync with server
-        console.log("ResignButton: Calling online service resign...");
+        // ✅ CRITICAL FIX: For online mode, don't update local state immediately
+        // Let the online service handle the resignation and sync the correct state
+        console.log("ResignButton: Online mode - calling onlineGameService.resignGame() first");
         
         // Add timeout to prevent hanging
         const timeoutPromise = new Promise((_, reject) => {
@@ -81,10 +82,12 @@ export default function ResignButton() {
           onlineGameService.resignGame(),
           timeoutPromise
         ]);
-        console.log("ResignButton: Online service resign completed");
+        
+        console.log("ResignButton: Online mode - onlineGameService.resignGame() completed");
       } else {
         // Local multiplayer or single player - use Redux action only
         // For local games, resign the current player's turn
+        console.log("ResignButton: Local mode - calling dispatch(resignGame()) with:", localPlayerColor);
         dispatch(resignGame(localPlayerColor || undefined));
       }
       
@@ -92,7 +95,6 @@ export default function ResignButton() {
       try {
         soundService.playGameEndSound();
       } catch (error) {
-        console.log('🔊 SoundService: Failed to play game-end sound for resignation:', error);
       }
       
       setShowResignModal(false);
@@ -101,7 +103,6 @@ export default function ResignButton() {
       
       // For online mode, the local state was already updated, so we can close the modal
       if (isOnlineMode) {
-        console.log("ResignButton: Local resign completed, closing modal despite server error");
         setShowResignModal(false);
         // Don't show error alert since the resign worked locally
       } else {
@@ -109,7 +110,6 @@ export default function ResignButton() {
         alert("Failed to resign from game. Please try again.");
       }
     } finally {
-      console.log("ResignButton: Resetting isResigning to false");
       setIsResigning(false);
     }
   };

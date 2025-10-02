@@ -17,6 +17,11 @@ class ModeSwitchService {
       return true;
     }
 
+    // Check if currently in a P2P game
+    if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+      return true;
+    }
+
     // Check if currently in a local network game
     if (networkService.connected && networkService.roomId) {
       return true;
@@ -116,15 +121,22 @@ class ModeSwitchService {
 
   private async disconnectFromCurrentGame(): Promise<void> {
     try {
-      // Disconnect from online game if connected
-      if (onlineGameService.isConnected && onlineGameService.currentGameId) {
-        console.log("Disconnecting from online game due to mode switch");
+      // ✅ CRITICAL FIX: Always disconnect from online game if it exists
+      if (onlineGameService.currentGameId || onlineGameService.isConnected) {
         await onlineGameService.disconnect();
+      }
+
+      // ✅ CRITICAL FIX: Always disconnect from P2P game if it exists
+      if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+        try {
+          await p2pGameService.disconnect();
+        } catch (p2pError) {
+          console.warn("P2P disconnect failed during mode switch:", p2pError);
+        }
       }
 
       // Disconnect from local network game if connected
       if (networkService.connected && networkService.roomId) {
-        console.log("Disconnecting from local game due to mode switch");
         networkService.leaveGame();
         networkService.disconnect();
       }

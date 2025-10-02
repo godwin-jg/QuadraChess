@@ -145,8 +145,8 @@ export class GameStateManager {
       return false;
     }
 
-    if (this.gameState.playerCount < 2) {
-      console.warn('🎮 GameStateManager: Cannot start game - need at least 2 players');
+    if (this.gameState.playerCount !== 4) {
+      console.warn('🎮 GameStateManager: Cannot start game - need exactly 4 players');
       return false;
     }
 

@@ -59,11 +59,9 @@ const OnlineLobbyScreen: React.FC = () => {
         
         setConnectionStatus("Connecting...");
         setIsConnected(true);
-        console.log("Realtime Database initialization successful");
         
         // Skip connection test to reduce loading time
         // Connection will be validated when subscribing to games
-        console.log("✅ Firebase connection established");
       } catch (error) {
         console.error("Failed to initialize Firebase auth:", error);
         setConnectionStatus("Connection failed");
@@ -98,7 +96,6 @@ const OnlineLobbyScreen: React.FC = () => {
           currentGameId
         );
         await onlineGameService.connectToGame(currentGameId);
-        console.log("OnlineLobbyScreen: Successfully connected to game");
       } catch (error) {
         console.error("OnlineLobbyScreen: Failed to connect to game:", error);
         Alert.alert("Connection Error", "Failed to connect to the game");
@@ -160,6 +157,13 @@ const OnlineLobbyScreen: React.FC = () => {
       return;
     }
 
+    // 🔊 Play button sound for create game action
+    try {
+      const soundService = require('../../services/soundService').default;
+      soundService.playButtonSound();
+    } catch (error) {
+    }
+
     setIsLoading(true);
     try {
       // Reset local game state before creating new game
@@ -170,6 +174,13 @@ const OnlineLobbyScreen: React.FC = () => {
         botPlayers
       );
       setCurrentGameId(gameId);
+      
+      // 🔊 Play success sound for creating game
+      try {
+        const soundService = require('../../services/soundService').default;
+        soundService.playSuccessSound();
+      } catch (error) {
+      }
     } catch (error) {
       console.error("Error creating game:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -203,9 +214,7 @@ const OnlineLobbyScreen: React.FC = () => {
   const leaveGame = async () => {
     if (currentGameId) {
       try {
-        console.log("OnlineLobbyScreen: Attempting to leave game:", currentGameId);
         await realtimeDatabaseService.leaveGame(currentGameId);
-        console.log("OnlineLobbyScreen: Successfully left game");
         
         // Clean up local state
         setCurrentGameId(null);
@@ -213,8 +222,7 @@ const OnlineLobbyScreen: React.FC = () => {
         dispatch(setIsHost(false));
         dispatch(setCanStartGame(false));
         
-        // Navigate back to home screen as fallback
-        router.push("/(tabs)/");
+        // Stay in the lobby - no navigation needed
         
       } catch (error: any) {
         console.error("Error leaving game:", error);
@@ -224,7 +232,6 @@ const OnlineLobbyScreen: React.FC = () => {
             error.message?.includes('too many retries') ||
             error.message?.includes('Failed to leave game after')) {
           
-          console.log("OnlineLobbyScreen: Max retries exceeded, forcing local cleanup");
           
           // Force local cleanup even if server operation failed
           setCurrentGameId(null);
@@ -236,11 +243,9 @@ const OnlineLobbyScreen: React.FC = () => {
           Alert.alert(
             "Connection Issue", 
             "There was a connection issue leaving the game, but you've been removed locally. You can safely continue.",
-            [{ text: "OK", onPress: () => router.push("/(tabs)/") }]
           );
         } else {
           // For other errors, still try to clean up locally
-          console.log("OnlineLobbyScreen: Other error occurred, attempting local cleanup");
           
           setCurrentGameId(null);
           dispatch(setPlayers([]));
@@ -250,21 +255,45 @@ const OnlineLobbyScreen: React.FC = () => {
           Alert.alert(
             "Leave Game", 
             "There was an issue leaving the game, but you've been removed locally.",
-            [{ text: "OK", onPress: () => router.push("/(tabs)/") }]
           );
         }
       }
     } else {
-      // No game ID, just navigate home
-      router.push("/(tabs)/");
+      // No game ID, just stay in lobby
     }
+  };
+
+  // Back to home action
+  const handleBackToHome = () => {
+    // 🔊 Play button sound for back to home action
+    try {
+      const soundService = require('../../services/soundService').default;
+      soundService.playButtonSound();
+    } catch (error) {
+    }
+    
+    router.back();
   };
 
   const startGame = async () => {
     if (!currentGameId) return;
 
+    // 🔊 Play button sound for start game action
+    try {
+      const soundService = require('../../services/soundService').default;
+      soundService.playButtonSound();
+    } catch (error) {
+    }
+
     try {
       await realtimeDatabaseService.startGame(currentGameId);
+      
+      // 🔊 Play game start sound
+      try {
+        const soundService = require('../../services/soundService').default;
+        soundService.playGameStartSound();
+      } catch (error) {
+      }
     } catch (error) {
       console.error("Error starting game:", error);
       Alert.alert("Error", "Failed to start game");
@@ -278,14 +307,12 @@ const OnlineLobbyScreen: React.FC = () => {
 
   // Toggle bot status for a player color
   const toggleBotPlayer = (color: string) => {
-    console.log(`🤖 OnlineLobbyScreen: Toggle bot request for ${color}`);
     
     const newBotPlayers = botPlayers.includes(color)
       ? botPlayers.filter(c => c !== color)
       : [...botPlayers, color];
     
     setBotPlayers(newBotPlayers);
-    console.log(`🤖 OnlineLobbyScreen: Toggled bot for ${color}, new botPlayers:`, newBotPlayers);
   };
 
   const cleanupCorruptedGames = async () => {
@@ -328,7 +355,15 @@ const OnlineLobbyScreen: React.FC = () => {
     return (
       <TouchableOpacity
         className="bg-white/10 p-4 rounded-xl mb-3 border border-white/20"
-        onPress={() => joinGame(item.id)}
+        onPress={() => {
+          // ✅ Add haptic feedback for buttons that don't play sounds
+          try {
+            const hapticsService = require('../../services/hapticsService').default;
+            hapticsService.buttonPress();
+          } catch (error) {
+          }
+          joinGame(item.id);
+        }}
         disabled={isLoading}
       >
         <View className="flex-row justify-between items-center">
@@ -432,23 +467,23 @@ const OnlineLobbyScreen: React.FC = () => {
 
         {isHost && (
           <View className="items-center gap-4 mb-4">
-            {players.length < 2 && (
+            {players.length < 4 && (
               <Text className="text-gray-400 text-sm mb-3">
-                Need 2+ players to start
+                Need exactly 4 players to start
               </Text>
             )}
             <TouchableOpacity
               className="w-full py-3 px-6 rounded-xl shadow-lg overflow-hidden"
               onPress={startGame}
-              disabled={players.length < 2 || isLoading}
+              disabled={players.length !== 4 || isLoading}
             >
               <LinearGradient
-                colors={players.length < 2 || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
+                colors={players.length !== 4 || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
                 style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
               />
               <Text
                 className={`text-lg font-bold text-center ${
-                  players.length < 2 ? "text-gray-300" : "text-black"
+                  players.length !== 4 ? "text-gray-300" : "text-black"
                 }`}
                 style={{
                   fontWeight: '900',
@@ -467,7 +502,15 @@ const OnlineLobbyScreen: React.FC = () => {
 
         <TouchableOpacity
           className="w-full py-3 px-6 rounded-xl overflow-hidden"
-          onPress={leaveGame}
+          onPress={() => {
+            // ✅ Add haptic feedback for buttons that don't play sounds
+            try {
+              const hapticsService = require('../../services/hapticsService').default;
+              hapticsService.buttonPress();
+            } catch (error) {
+            }
+            leaveGame();
+          }}
           disabled={isLoading}
         >
           <LinearGradient
@@ -539,7 +582,15 @@ const OnlineLobbyScreen: React.FC = () => {
                   className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
                     isBot ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'
                   }`}
-                  onPress={() => toggleBotPlayer(color)}
+                  onPress={() => {
+                    // ✅ Add haptic feedback for buttons that don't play sounds
+                    try {
+                      const hapticsService = require('../../services/hapticsService').default;
+                      hapticsService.buttonPress();
+                    } catch (error) {
+                    }
+                    toggleBotPlayer(color);
+                  }}
                 >
                   <View className="items-center">
                     <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
@@ -578,7 +629,7 @@ const OnlineLobbyScreen: React.FC = () => {
             gradientColors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
             textColor="white"
             subtitleColor="gray-300"
-            onPress={() => router.back()}
+            onPress={handleBackToHome}
             disabled={false}
             delay={150}
           />
@@ -593,19 +644,43 @@ const OnlineLobbyScreen: React.FC = () => {
           <View className="flex-row gap-2">
             <TouchableOpacity
               className="bg-blue-600 px-3 py-2 rounded-lg"
-              onPress={refreshGames}
+              onPress={() => {
+                // ✅ Add haptic feedback for buttons that don't play sounds
+                try {
+                  const hapticsService = require('../../services/hapticsService').default;
+                  hapticsService.buttonPress();
+                } catch (error) {
+                }
+                refreshGames();
+              }}
             >
               <Text className="text-white text-sm font-bold">Refresh</Text>
             </TouchableOpacity>
             <TouchableOpacity
               className="bg-green-600 px-3 py-2 rounded-lg"
-              onPress={forceReauth}
+              onPress={() => {
+                // ✅ Add haptic feedback for buttons that don't play sounds
+                try {
+                  const hapticsService = require('../../services/hapticsService').default;
+                  hapticsService.buttonPress();
+                } catch (error) {
+                }
+                forceReauth();
+              }}
             >
               <Text className="text-white text-sm font-bold">Re-auth</Text>
             </TouchableOpacity>
             <TouchableOpacity
               className="bg-red-600 px-3 py-2 rounded-lg"
-              onPress={cleanupCorruptedGames}
+              onPress={() => {
+                // ✅ Add haptic feedback for buttons that don't play sounds
+                try {
+                  const hapticsService = require('../../services/hapticsService').default;
+                  hapticsService.buttonPress();
+                } catch (error) {
+                }
+                cleanupCorruptedGames();
+              }}
             >
               <Text className="text-white text-sm font-bold">Cleanup</Text>
             </TouchableOpacity>

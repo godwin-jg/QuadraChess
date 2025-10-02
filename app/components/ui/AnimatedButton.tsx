@@ -55,8 +55,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
 
   const handlePressIn = () => {
     scale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
-    hapticsService.buttonPress();
-    soundService.playButtonSound();
+    // ✅ No automatic haptics - each action handles its own haptics through soundService
   };
 
   const handlePressOut = () => {
@@ -79,8 +78,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
       >
         <LinearGradient
           colors={gradientColors as any}
-          style={StyleSheet.absoluteFill}
-          borderRadius={12}
+          style={[StyleSheet.absoluteFill, { borderRadius: 12 }]}
         />
         <Text className="text-2xl text-center mb-1">{icon}</Text>
         <Text

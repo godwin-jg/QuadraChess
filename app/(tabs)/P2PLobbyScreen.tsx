@@ -554,23 +554,23 @@ const P2PLobbyScreen: React.FC = () => {
 
         {isHost && (
           <View className="items-center gap-4 mb-4">
-            {players.length < 2 && (
+            {players.length < 4 && (
               <Text className="text-gray-400 text-sm mb-3">
-                Need 2+ players to start
+                Need exactly 4 players to start
               </Text>
             )}
             <TouchableOpacity
               className="w-full py-3 px-6 rounded-xl shadow-lg overflow-hidden"
               onPress={startGame}
-              disabled={!canStartGame || isLoading}
+              disabled={players.length !== 4 || isLoading}
             >
               <LinearGradient
-                colors={!canStartGame || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
+                colors={players.length !== 4 || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
                 style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
               />
               <Text 
                 className={`text-lg font-bold text-center ${
-                  !canStartGame || isLoading
+                  players.length !== 4 || isLoading
                     ? "text-gray-300" 
                     : "text-black"
                 }`}
@@ -584,7 +584,7 @@ const P2PLobbyScreen: React.FC = () => {
                 }}
               >
                 {isLoading ? "Starting..." : 
-                  !canStartGame
+                  players.length !== 4
                     ? "Waiting for players..."
                     : "Start Game"}
               </Text>

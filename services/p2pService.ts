@@ -172,7 +172,7 @@ class P2PService {
       currentGame: this.gameState,
       players: Array.from(this.players.values()),
       isHost: true,
-      canStartGame: false, // Can't start until more players join
+      canStartGame: false, // Can't start until exactly 4 players join
       gameMode: "p2p", // Set correct game mode
       currentPlayerTurn: "r", // Red starts first (host)
       gameStatus: "waiting" // Game is waiting for players
@@ -1053,12 +1053,12 @@ class P2PService {
     
     // ✅ Update Redux state for host as well
     console.log("📢 HOST: Updating Redux state with players:", lobbyState.players.length);
-    console.log("📢 HOST: canStartGame will be:", lobbyState.players.length >= 2 && lobbyState.status === 'waiting');
+    console.log("📢 HOST: canStartGame will be:", lobbyState.players.length === 4 && lobbyState.status === 'waiting');
     store.dispatch(syncP2PGameState({
       currentGame: this.gameState,
       players: lobbyState.players,
       isHost: true,
-      canStartGame: lobbyState.players.length >= 2 && lobbyState.status === 'waiting'
+      canStartGame: lobbyState.players.length === 4 && lobbyState.status === 'waiting'
     }));
     console.log("📢 HOST: Redux state updated successfully");
     
@@ -1348,7 +1348,7 @@ class P2PService {
       currentGame: this.gameState,
       players: lobbyState.players,
       isHost: false,
-      canStartGame: lobbyState.players.length >= 2 && lobbyState.status === 'waiting'
+      canStartGame: lobbyState.players.length === 4 && lobbyState.status === 'waiting'
     });
     
     // Ensure we have a valid currentGame to pass to Redux
@@ -1366,7 +1366,7 @@ class P2PService {
       currentGame: currentGameForRedux,
       players: playersArray,
       isHost: false,
-      canStartGame: playersArray.length >= 2 && lobbyState.status === 'waiting'
+      canStartGame: playersArray.length === 4 && lobbyState.status === 'waiting'
     }));
     
     // ✅ CRITICAL: Set gameMode to p2p for the client
@@ -1510,7 +1510,7 @@ class P2PService {
           currentGame: gameState,
           players: players,
           playerCount: gameState.playerCount,
-          canStartGame: gameState.playerCount >= 2,
+          canStartGame: gameState.playerCount === 4,
           isConnected: true,
           connectionError: null
         }));
@@ -1699,7 +1699,7 @@ class P2PService {
               currentGame: gameState,
               players: players,
               playerCount: gameState.playerCount,
-              canStartGame: gameState.playerCount >= 2
+              canStartGame: gameState.playerCount === 4
             }));
             
             console.log("🔄 P2PService: HTTP relay fallback successful!");
@@ -1781,7 +1781,7 @@ class P2PService {
               currentGame: gameState,
               players: players,
               playerCount: gameState.playerCount,
-              canStartGame: gameState.playerCount >= 2
+              canStartGame: gameState.playerCount === 4
             }));
             
             console.log(`🔄 P2PService: Updated game state - status: ${gameState.status}`);

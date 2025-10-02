@@ -32,18 +32,6 @@ export default function HistoryControls() {
   const canStepForward = viewingHistoryIndex !== null && viewingHistoryIndex < history.length - 1;
   const canReturnToLive = viewingHistoryIndex !== null;
 
-  // Debug logging
-  console.log('HistoryControls Debug:', {
-    viewingHistoryIndex,
-    isViewingHistory,
-    totalMoves,
-    currentMoveNumber,
-    canStepBack,
-    canStepPrevious,
-    canStepForward,
-    canReturnToLive,
-    historyLength: history.length
-  });
 
   const handleStepBack = () => {
     if (canStepBack) {
@@ -74,50 +62,77 @@ export default function HistoryControls() {
   };
 
   return (
-    <View className="flex-row gap-2">
-      <TouchableOpacity
-        className={`w-12 h-10 rounded-lg justify-center items-center ${
-          canStepBack ? "bg-gray-700" : "bg-gray-500"
-        }`}
-        onPress={handleStepBack}
-        activeOpacity={canStepBack ? 0.7 : 1}
-        disabled={!canStepBack}
-      >
-        <Text className={`text-lg font-bold ${canStepBack ? "text-white" : "text-gray-300"}`}>«</Text>
-      </TouchableOpacity>
+    <View className="flex-col gap-2">
+      {/* Move counter */}
+      <View className="flex-row justify-center">
+        <Text className="text-sm text-gray-300 font-medium">
+          Move {currentMoveNumber} of {totalMoves}
+        </Text>
+      </View>
+      
+      {/* Navigation buttons */}
+      <View className="flex-row gap-2">
+        <TouchableOpacity
+          className={`w-12 h-10 rounded-lg justify-center items-center ${
+            canStepBack ? "bg-gray-700" : "bg-gray-500"
+          }`}
+          onPress={handleStepBack}
+          activeOpacity={canStepBack ? 0.7 : 1}
+          disabled={!canStepBack}
+        >
+          <Text className={`text-lg font-bold ${canStepBack ? "text-white" : "text-gray-300"}`}>«</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        className={`w-12 h-10 rounded-lg justify-center items-center ${
-          canStepPrevious ? "bg-gray-700" : "bg-gray-500"
-        }`}
-        onPress={handleStepPrevious}
-        activeOpacity={canStepPrevious ? 0.7 : 1}
-        disabled={!canStepPrevious}
-      >
-        <Text className={`text-lg font-bold ${canStepPrevious ? "text-white" : "text-gray-300"}`}>◀</Text>
-      </TouchableOpacity>
+        <TouchableOpacity
+          className={`w-12 h-10 rounded-lg justify-center items-center ${
+            canStepPrevious ? "bg-gray-700" : "bg-gray-500"
+          }`}
+          onPress={handleStepPrevious}
+          activeOpacity={canStepPrevious ? 0.7 : 1}
+          disabled={!canStepPrevious}
+        >
+          <Text className={`text-lg font-bold ${canStepPrevious ? "text-white" : "text-gray-300"}`}>◀</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        className={`w-12 h-10 rounded-lg justify-center items-center ${
-          canStepForward ? "bg-gray-700" : "bg-gray-500"
-        }`}
-        onPress={handleStepForward}
-        activeOpacity={canStepForward ? 0.7 : 1}
-        disabled={!canStepForward}
-      >
-        <Text className={`text-lg font-bold ${canStepForward ? "text-white" : "text-gray-300"}`}>▶</Text>
-      </TouchableOpacity>
+        <TouchableOpacity
+          className={`w-12 h-10 rounded-lg justify-center items-center ${
+            canStepForward ? "bg-gray-700" : "bg-gray-500"
+          }`}
+          onPress={handleStepForward}
+          activeOpacity={canStepForward ? 0.7 : 1}
+          disabled={!canStepForward}
+        >
+          <Text className={`text-lg font-bold ${canStepForward ? "text-white" : "text-gray-300"}`}>▶</Text>
+        </TouchableOpacity>
 
-      <TouchableOpacity
-        className={`w-12 h-10 rounded-lg justify-center items-center ${
-          canReturnToLive ? "bg-gray-700" : "bg-gray-500"
-        }`}
-        onPress={handleReturnToLive}
-        activeOpacity={canReturnToLive ? 0.7 : 1}
-        disabled={!canReturnToLive}
-      >
-        <Text className={`text-lg font-bold ${canReturnToLive ? "text-white" : "text-gray-300"}`}>»</Text>
-      </TouchableOpacity>
+        <TouchableOpacity
+          className={`w-12 h-10 rounded-lg justify-center items-center ${
+            canReturnToLive ? "bg-gray-700" : "bg-gray-500"
+          }`}
+          onPress={handleReturnToLive}
+          activeOpacity={canReturnToLive ? 0.7 : 1}
+          disabled={!canReturnToLive}
+        >
+          <Text className={`text-lg font-bold ${canReturnToLive ? "text-white" : "text-gray-300"}`}>»</Text>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Button labels */}
+      <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 4 }}>
+        {/* Each label is wrapped in a View for proper layout */}
+        <View style={{ width: 48, alignItems: 'center' }}>
+          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Start</Text>
+        </View>
+        <View style={{ width: 48, alignItems: 'center' }}>
+          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Prev</Text>
+        </View>
+        <View style={{ width: 48, alignItems: 'center' }}>
+          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Next</Text>
+        </View>
+        <View style={{ width: 48, alignItems: 'center' }}>
+          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Live</Text>
+        </View>
+      </View>
     </View>
   );
 }

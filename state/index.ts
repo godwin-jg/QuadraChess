@@ -20,6 +20,7 @@ export {
   setPlayers,
   setIsHost,
   setCanStartGame,
+  setGameMode,
   baseInitialState,
 } from "./gameSlice";
 

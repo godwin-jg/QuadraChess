@@ -278,8 +278,8 @@ class OnlineBotService {
       clearTimeout(existingTimeout);
     }
 
-    // Schedule bot move with random delay (1-3 seconds)
-    const delay = 1000 + Math.random() * 2000;
+    // Schedule bot move with faster delay (0.3-0.8 seconds)
+    const delay = 300 + Math.random() * 500;
 
     const timeout = setTimeout(() => {
       this.processBotMove(gameId, botColor, gameState);

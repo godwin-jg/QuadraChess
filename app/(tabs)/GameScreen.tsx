@@ -171,6 +171,17 @@ export default function GameScreen() {
         try {
           setConnectionStatus("Connecting to game...");
           console.log("GameScreen: Attempting to connect to online game:", gameId);
+          
+          // ✅ CRITICAL FIX: Ensure game mode is set to "online" BEFORE connecting to the service
+          // This prevents the race condition where game updates are skipped because mode is still "single"
+          const currentState = store.getState().game;
+          if (currentState.gameMode !== "online") {
+            console.log("GameScreen: Setting game mode to 'online' before connecting to service");
+            dispatch(setGameMode("online"));
+            // Give Redux a moment to update the state
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          
           await onlineGameService.connectToGame(gameId);
           console.log("GameScreen: Successfully connected to online game");
           setConnectionStatus("Connected");
@@ -382,7 +393,7 @@ export default function GameScreen() {
         onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
       } else {
         // For other modes (solo, p2p), use local bot service
-        const botThinkTime = 1200 + Math.random() * 800; // 1.2 - 2 seconds
+        const botThinkTime = 400 + Math.random() * 400; // 0.4 - 0.8 seconds
 
         const timer = setTimeout(() => {
           console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (mode: ${gameMode})`);
@@ -407,7 +418,7 @@ export default function GameScreen() {
     // Check if there's a pending promotion for a bot player
     if (promotionState.isAwaiting && botPlayers.includes(promotionState.color || '')) {
       // Add a short delay for promotion decision
-      const promotionDelay = 800 + Math.random() * 400; // 0.8 - 1.2 seconds
+      const promotionDelay = 300 + Math.random() * 300; // 0.3 - 0.6 seconds
 
       const timer = setTimeout(() => {
         console.log(`🤖 GameScreen: Handling bot promotion for ${promotionState.color} (mode: ${gameMode})`);

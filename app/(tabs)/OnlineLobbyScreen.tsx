@@ -13,6 +13,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { RootState } from "../../state/store";
 import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state";
+import { setGameMode } from "../../state/gameSlice";
 import realtimeDatabaseService, {
   RealtimeGame,
 } from "../../services/realtimeDatabaseService";
@@ -168,6 +169,8 @@ const OnlineLobbyScreen: React.FC = () => {
     try {
       // Reset local game state before creating new game
       dispatch(resetGame());
+      // ✅ CRITICAL FIX: Set game mode to "online" when creating a game
+      dispatch(setGameMode("online"));
       
       const gameId = await realtimeDatabaseService.createGame(
         settings.profile.name.trim(),
@@ -200,6 +203,8 @@ const OnlineLobbyScreen: React.FC = () => {
     try {
       // Reset local game state before joining new game
       dispatch(resetGame());
+      // ✅ CRITICAL FIX: Set game mode to "online" when joining a game
+      dispatch(setGameMode("online"));
       
       await realtimeDatabaseService.joinGame(gameId, settings.profile.name);
       setCurrentGameId(gameId);

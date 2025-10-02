@@ -547,11 +547,13 @@ const gameSlice = createSlice({
         state.validMoves = [];
 
         // Update check status for all players
-        state.checkStatus = updateAllCheckStatus(
+        const newCheckStatus = updateAllCheckStatus(
           state.boardState,
           state.eliminatedPlayers,
           state.hasMoved
         );
+        
+        state.checkStatus = newCheckStatus;
 
         // Check if the current player is in check after their move
         const currentPlayerInCheck =
@@ -1342,6 +1344,15 @@ const gameSlice = createSlice({
       const newState = action.payload;
       // Clear move cache when game state changes
       newState.moveCache = {};
+      
+      // ✅ CRITICAL FIX: Recalculate check status when syncing from server
+      const recalculatedCheckStatus = updateAllCheckStatus(
+        newState.boardState,
+        newState.eliminatedPlayers,
+        newState.hasMoved
+      );
+      newState.checkStatus = recalculatedCheckStatus;
+      
       return { ...state, ...newState };
     },
     sendMoveToServer: (

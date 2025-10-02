@@ -123,13 +123,17 @@ class ModeSwitchService {
     try {
       // ✅ CRITICAL FIX: Always disconnect from online game if it exists
       if (onlineGameService.currentGameId || onlineGameService.isConnected) {
+        console.log("ModeSwitchService: Disconnecting from online game...");
         await onlineGameService.disconnect();
+        console.log("ModeSwitchService: Online game disconnected successfully");
       }
 
       // ✅ CRITICAL FIX: Always disconnect from P2P game if it exists
       if (p2pGameService.isConnected && p2pGameService.currentGameId) {
         try {
+          console.log("ModeSwitchService: Disconnecting from P2P game...");
           await p2pGameService.disconnect();
+          console.log("ModeSwitchService: P2P game disconnected successfully");
         } catch (p2pError) {
           console.warn("P2P disconnect failed during mode switch:", p2pError);
         }
@@ -137,9 +141,15 @@ class ModeSwitchService {
 
       // Disconnect from local network game if connected
       if (networkService.connected && networkService.roomId) {
+        console.log("ModeSwitchService: Disconnecting from local network game...");
         networkService.leaveGame();
         networkService.disconnect();
+        console.log("ModeSwitchService: Local network game disconnected successfully");
       }
+
+      // ✅ CRITICAL FIX: Add a small delay to ensure all disconnections are complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+      console.log("ModeSwitchService: All disconnections completed");
     } catch (error) {
       console.error("Error disconnecting from current game:", error);
       // Continue with mode switch even if disconnection fails

@@ -109,7 +109,6 @@ export default function Board({ onCapture, playerData }: BoardProps) {
 
   // Update glow animation when turn changes
   React.useEffect(() => {
-
     if (currentPlayerTurn) {
       // Animate glow in
       glowOpacity.value = withTiming(1, { duration: 400 });
@@ -136,26 +135,6 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     transform: [{ scale: glowScale.value }],
   }));
 
-
-  // Create displayed game state (either live or historical) - optimized
-  const displayedGameState = useMemo(() => {
-    // If we are in "review mode" and the index is valid...
-    if (viewingHistoryIndex !== null && viewingHistoryIndex < history.length && history[viewingHistoryIndex]) {
-      return history[viewingHistoryIndex]; // ...show the historical state.
-    }
-    // ...otherwise, show the live game state composed from individual selectors
-    return {
-      boardState: displayBoardState,
-      selectedPiece,
-      validMoves: displayValidMoves,
-      checkStatus,
-      eliminatedPlayers,
-      currentPlayerTurn,
-      players,
-      history,
-      viewingHistoryIndex
-    };
-  }, [history, viewingHistoryIndex, displayBoardState, selectedPiece, displayValidMoves, checkStatus, eliminatedPlayers, currentPlayerTurn, players]);
 
   // Get dispatch function
   const dispatch = useDispatch();
@@ -200,25 +179,15 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     // Debounce rapid clicks
     const now = Date.now();
     if (now - lastClickTime.current < DEBOUNCE_DELAY) {
-      return; // OPTIMIZATION: Removed console.log
+      return;
     }
     lastClickTime.current = now;
     // If we're viewing history, don't allow any moves
     if (isViewingHistory) {
-      return; // OPTIMIZATION: Removed console.log
+      return;
     }
 
     const pieceCode = displayBoardState[row][col];
-    
-    // PIECE OWNERSHIP VALIDATION: Only allow players to interact with their own pieces
-    if (pieceCode && effectiveMode === "online") {
-      const pieceColor = pieceCode[0];
-      
-      // If there's a piece and it doesn't belong to the current player, ignore the press
-      if (currentPlayerColor && pieceColor !== currentPlayerColor) {
-        return; // OPTIMIZATION: Removed console.log
-      }
-    }
     
     // OPTIMIZATION: Use cached valid moves instead of recalculating
     const isAValidMove = displayValidMoves.some(
@@ -293,7 +262,6 @@ export default function Board({ onCapture, playerData }: BoardProps) {
       };
 
       // Handle different game modes
-
       if (effectiveMode === "online") {
         if (onlineGameService.isConnected && onlineGameService.currentGameId) {
           // Online multiplayer mode
@@ -527,12 +495,7 @@ export default function Board({ onCapture, playerData }: BoardProps) {
                       )
                     }
                     isEliminated={isPieceEliminated(piece)}
-                    isInteractable={
-                      !piece || 
-                      effectiveMode !== "online" || 
-                      !currentPlayerColor ||
-                      piece[0] === currentPlayerColor
-                    }
+                    isInteractable={true}
                     boardTheme={boardTheme}
                     playerData={playerData}
                   />

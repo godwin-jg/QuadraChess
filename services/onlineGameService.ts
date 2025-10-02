@@ -455,6 +455,13 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   private handleGameUpdate(game: RealtimeGame | null): void {
+    // ✅ CRITICAL FIX: Don't process updates if current game mode is not online
+    const currentGameMode = store.getState().game.gameMode;
+    if (currentGameMode !== "online") {
+      console.log(`OnlineGameService: Skipping handleGameUpdate - current mode is ${currentGameMode}, not online`);
+      return;
+    }
+    
     // ✅ CRITICAL FIX: Debounce game updates to prevent excessive calls
     if (this.gameUpdateTimeout) {
       clearTimeout(this.gameUpdateTimeout);
@@ -466,6 +473,19 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
   
   private processGameUpdate(game: RealtimeGame | null): void {
+    // ✅ CRITICAL FIX: Don't process updates if service is disconnected
+    if (!this.isConnected || !this.currentGameId) {
+      console.log("OnlineGameService: Skipping game update - service is disconnected");
+      return;
+    }
+    
+    // ✅ CRITICAL FIX: Don't process updates if current game mode is not online
+    const currentGameMode = store.getState().game.gameMode;
+    if (currentGameMode !== "online") {
+      console.log(`OnlineGameService: Skipping game update - current mode is ${currentGameMode}, not online`);
+      return;
+    }
+    
     if (game) {
       
       // Check if game data is complete
@@ -800,6 +820,19 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   private handleMoveUpdate(move: RealtimeMove): void {
+    // ✅ CRITICAL FIX: Don't process moves if service is disconnected
+    if (!this.isConnected || !this.currentGameId) {
+      console.log("OnlineGameService: Skipping move update - service is disconnected");
+      return;
+    }
+    
+    // ✅ CRITICAL FIX: Don't process moves if current game mode is not online
+    const currentGameMode = store.getState().game.gameMode;
+    if (currentGameMode !== "online") {
+      console.log(`OnlineGameService: Skipping move update - current mode is ${currentGameMode}, not online`);
+      return;
+    }
+    
     // CRITICAL: Do NOT apply individual moves to local state
     // This causes desynchronization if any game state update is missed
     // The only source of truth is the complete game state from handleGameUpdate

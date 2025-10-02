@@ -28,7 +28,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.expo,
       slug: "chess4d",
       scheme: "chess4d",
-      icon: "./assets/images/icon.png",
+      icon: "./assets/images/chess.png",
       splash: {
         image: "./assets/images/splash-icon.png",
         resizeMode: "contain",
@@ -38,7 +38,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ...config.expo?.android,
         package: "com.chess4d",
         adaptiveIcon: {
-          foregroundImage: "./assets/images/adaptive-icon.png",
+          foregroundImage: "./assets/images/chess.png",
           backgroundColor: "#000000"
         },
         screenOrientation: "portrait"

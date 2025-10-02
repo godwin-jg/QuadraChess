@@ -15,9 +15,9 @@ import Animated, {
   interpolate,
   Easing,
   withSpring,
-  cancelAnimation,
-  runOnJS
+  cancelAnimation
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
 import { resetGame } from '../../state/gameSlice';
@@ -205,7 +205,7 @@ export default function HomeScreen() {
         if (finished) {
           // Add a delay before restarting to keep bubbles visible longer
           setTimeout(() => {
-            runOnJS(animatePiece)(index);
+            scheduleOnRN(animatePiece, index);
           }, 3000 + Math.random() * 2000); // 3-5 second pause at the top
         }
       }
@@ -462,7 +462,7 @@ export default function HomeScreen() {
                 </G>
               </Svg> */}
               <Text className="text-4xl font-extrabold text-white tracking-widest">
-              4 PLAYERS CHESS
+              QUADRA CHESS
               </Text>
               {/* <Svg width={32} height={32} viewBox="0 0 48 48" className="ml-2">
                 <G fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

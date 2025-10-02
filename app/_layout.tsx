@@ -7,7 +7,6 @@ import {
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
 import { Provider } from "react-redux";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -31,15 +30,13 @@ export const unstable_settings = {
   initialRouteName: "(tabs)",
 };
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
-
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     ...FontAwesome.font,
   });
   const [showCustomSplash, setShowCustomSplash] = useState(true);
+  const [splashTransitioning, setSplashTransitioning] = useState(false);
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
@@ -53,13 +50,13 @@ export default function RootLayout() {
         console.warn('Failed to initialize sound service:', error);
       });
       
-      // Hide the default splash screen immediately
-      SplashScreen.hideAsync();
-      
-      // Show our custom splash for a bit longer for a polished feel
+      // Show our custom splash for the full video duration
       setTimeout(() => {
-        setShowCustomSplash(false);
-      }, 1500);
+        setSplashTransitioning(true); // Start transition
+        setTimeout(() => {
+          setShowCustomSplash(false); // Hide splash after transition
+        }, 500); // 500ms transition duration
+      }, 3600); // 3.6 seconds - slightly longer to prevent flash
     }
   }, [loaded]);
 
@@ -71,8 +68,13 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <SettingsProvider>
         <Provider store={store}>
-          <RootLayoutNav />
-          <CustomSplashScreen visible={showCustomSplash} />
+          {!showCustomSplash && <RootLayoutNav />}
+          <CustomSplashScreen 
+            visible={showCustomSplash} 
+            transitioning={splashTransitioning}
+            useVideo={true} // ✅ Auto-enabled when video is added
+            videoSource={require('../assets/videos/splash-video.mp4')} // ✅ Direct require
+          />
         </Provider>
       </SettingsProvider>
     </SafeAreaProvider>
@@ -84,14 +86,15 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen 
-          name="modal" 
-          options={{ 
-            presentation: "modal",
-            animation: 'fade'
-          }} 
+      <Stack
+        screenOptions={{
+          headerShown: false,
+        }}>
+        <Stack.Screen name="index"
+        options={{ 
+          presentation: "modal",
+          animation: 'fade'
+        }} 
         />
       </Stack>
     </ThemeProvider>

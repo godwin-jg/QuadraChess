@@ -10,9 +10,9 @@ import Animated, {
   withDelay,
   withTiming,
   withRepeat,
-  withSequence,
-  runOnJS
+  withSequence
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 
 interface PlayerResult {
   color: string;

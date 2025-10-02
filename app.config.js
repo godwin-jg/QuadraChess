@@ -40,11 +40,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         adaptiveIcon: {
           foregroundImage: "./assets/images/adaptive-icon.png",
           backgroundColor: "#000000"
-        }
+        },
+        screenOrientation: "portrait"
       },
       ios: {
         ...config.expo?.ios,
         bundleIdentifier: "com.chess4d",
+        screenOrientation: "portrait"
       },
       owner: "jgnsecrets",
       plugins: [
@@ -63,6 +65,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             },
           },
         ],
+        "expo-video",
       ],
       extra: {
         ...config.expo?.extra,

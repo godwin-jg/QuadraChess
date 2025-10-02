@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 interface SimpleNotificationProps {
   message: string;
@@ -24,7 +25,7 @@ const SimpleNotification: React.FC<SimpleNotificationProps> = ({
     // Auto-dismiss after 2 seconds
     const timer = setTimeout(() => {
       opacity.value = withTiming(0, { duration: 200 }, () => {
-        runOnJS(onComplete)();
+        scheduleOnRN(onComplete);
       });
       translateY.value = withTiming(-20, { duration: 200 });
     }, 2000);

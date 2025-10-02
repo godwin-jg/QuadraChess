@@ -5,9 +5,9 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSequence,
-  runOnJS,
   Easing,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 interface FloatingPointsTextProps {
   points: number;
@@ -33,7 +33,7 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
     translateY.value = withSequence(
       withTiming(-50, { duration: 1800, easing: Easing.out(Easing.cubic) }, () => {
         // Call onComplete when animation finishes
-        runOnJS(onComplete)();
+        scheduleOnRN(onComplete);
       })
     );
     

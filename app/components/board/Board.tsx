@@ -11,9 +11,9 @@ import Animated, {
   withRepeat,
   withSequence,
   interpolate,
-  Easing,
-  runOnJS
+  Easing
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import Svg, { Defs, Filter, FeGaussianBlur, FeMerge, FeMergeNode, Path, LinearGradient, Stop } from "react-native-svg";
 import { useSettings } from "../../../context/SettingsContext";
 import notificationService from "../../../services/notificationService";
@@ -221,10 +221,10 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
       piecePositionX.value = withTiming(toX, { duration: 250, easing: Easing.out(Easing.quad) });
       piecePositionY.value = withTiming(toY, { duration: 250, easing: Easing.out(Easing.quad) }, (isFinished) => {
         if (isFinished) {
-          // Hide the animated piece using runOnJS
-          runOnJS(setAnimatedPiece)(null);
-          // Call the completion callback using runOnJS
-          runOnJS(onComplete)();
+          // Hide the animated piece using scheduleOnRN
+          scheduleOnRN(setAnimatedPiece, null);
+          // Call the completion callback using scheduleOnRN
+          scheduleOnRN(onComplete);
         }
       });
     });

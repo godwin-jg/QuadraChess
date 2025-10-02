@@ -4,8 +4,8 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   Easing,
-  runOnJS,
 } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 import Piece from './Piece';
 
 interface AnimatedCaptureProps {
@@ -22,9 +22,9 @@ const AnimatedCapture = ({ pieceCode, size, onAnimationComplete }: AnimatedCaptu
     // Start the "poof" animation immediately
     opacity.value = withTiming(0, { duration: 300, easing: Easing.ease });
     scale.value = withTiming(0.5, { duration: 300, easing: Easing.ease }, (isFinished) => {
-      if (isFinished) {
-        runOnJS(onAnimationComplete)();
-      }
+        if (isFinished) {
+          scheduleOnRN(onAnimationComplete);
+        }
     });
   }, []);
 

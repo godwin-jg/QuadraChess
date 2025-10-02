@@ -704,7 +704,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
                 points = 9;
                 break;
               case "K": // King
-                points = 20; // Special bonus for king capture
+                points = 0; // Kings cannot be captured - should be checkmated instead
                 break;
               default:
                 points = 0;

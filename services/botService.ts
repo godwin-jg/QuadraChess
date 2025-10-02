@@ -96,6 +96,12 @@ const makeBotMove = (botColor: string) => {
     return;
   }
 
+  // ✅ CRITICAL FIX: Check if bot is eliminated
+  if (gameState.eliminatedPlayers.includes(botColor)) {
+    console.log(`🤖 BotService: Bot ${botColor} is eliminated, skipping move`);
+    return;
+  }
+
   // Set the lock
   botMoveInProgress = true;
   

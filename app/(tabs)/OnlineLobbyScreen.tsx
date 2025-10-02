@@ -363,7 +363,7 @@ const OnlineLobbyScreen: React.FC = () => {
         onPress={() => {
           // ✅ Add haptic feedback for buttons that don't play sounds
           try {
-            const hapticsService = require('../../services/hapticsService').default;
+            const { hapticsService } = require('../../services/hapticsService');
             hapticsService.buttonPress();
           } catch (error) {
           }
@@ -510,7 +510,7 @@ const OnlineLobbyScreen: React.FC = () => {
           onPress={() => {
             // ✅ Add haptic feedback for buttons that don't play sounds
             try {
-              const hapticsService = require('../../services/hapticsService').default;
+              const { hapticsService } = require('../../services/hapticsService');
               hapticsService.buttonPress();
             } catch (error) {
             }
@@ -590,7 +590,7 @@ const OnlineLobbyScreen: React.FC = () => {
                   onPress={() => {
                     // ✅ Add haptic feedback for buttons that don't play sounds
                     try {
-                      const hapticsService = require('../../services/hapticsService').default;
+                      const { hapticsService } = require('../../services/hapticsService');
                       hapticsService.buttonPress();
                     } catch (error) {
                     }
@@ -652,7 +652,7 @@ const OnlineLobbyScreen: React.FC = () => {
               onPress={() => {
                 // ✅ Add haptic feedback for buttons that don't play sounds
                 try {
-                  const hapticsService = require('../../services/hapticsService').default;
+                  const { hapticsService } = require('../../services/hapticsService');
                   hapticsService.buttonPress();
                 } catch (error) {
                 }
@@ -666,7 +666,7 @@ const OnlineLobbyScreen: React.FC = () => {
               onPress={() => {
                 // ✅ Add haptic feedback for buttons that don't play sounds
                 try {
-                  const hapticsService = require('../../services/hapticsService').default;
+                  const { hapticsService } = require('../../services/hapticsService');
                   hapticsService.buttonPress();
                 } catch (error) {
                 }
@@ -680,7 +680,7 @@ const OnlineLobbyScreen: React.FC = () => {
               onPress={() => {
                 // ✅ Add haptic feedback for buttons that don't play sounds
                 try {
-                  const hapticsService = require('../../services/hapticsService').default;
+                  const { hapticsService } = require('../../services/hapticsService');
                   hapticsService.buttonPress();
                 } catch (error) {
                 }

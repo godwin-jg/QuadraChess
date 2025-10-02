@@ -455,7 +455,7 @@ const gameSlice = createSlice({
               points = 9;
               break;
             case "K": // King
-              points = 20; // Special bonus for king capture
+              points = 0; // Kings cannot be captured - should be checkmated instead
               break;
             default:
               points = 0;
@@ -616,7 +616,7 @@ const gameSlice = createSlice({
               state.justEliminated = opponent;
               state.scores[
                 state.currentPlayerTurn as keyof typeof state.scores
-              ] += 10;
+              ] += 20;
 
               // 🔊 Play checkmate sound effect (includes haptic fallback if needed)
               try {
@@ -637,6 +637,15 @@ const gameSlice = createSlice({
               state.gameStatus = "stalemate";
               state.eliminatedPlayers.push(opponent);
               state.justEliminated = opponent;
+
+              // Award points for stalemating opponent: +10 for each player still in game
+              const remainingPlayers = ['r', 'b', 'y', 'g'].filter(
+                (player) => !state.eliminatedPlayers.includes(player)
+              );
+              const stalematePoints = remainingPlayers.length * 10;
+              state.scores[
+                state.currentPlayerTurn as keyof typeof state.scores
+              ] += stalematePoints;
 
               // 🔊 Play stalemate sound effect (includes haptic fallback if needed)
               try {
@@ -692,6 +701,10 @@ const gameSlice = createSlice({
 
           // Clear justEliminated flag after a delay to allow UI to react
           // We'll clear it in the next move instead
+        } else {
+          // ✅ CRITICAL FIX: Reset game status to active after elimination (unless game is finished)
+          // This allows the game to continue with remaining players
+          state.gameStatus = "active";
         }
 
         // Save current state to history (only if not in promotion mode)
@@ -756,6 +769,8 @@ const gameSlice = createSlice({
         status: null,
         eliminatedPlayer: null,
       };
+      // ✅ CRITICAL FIX: Also reset gameStatus to allow modal dismissal
+      state.gameStatus = "active";
     },
     completePromotion: (
       state,

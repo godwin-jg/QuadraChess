@@ -13,6 +13,7 @@ import {
   setGameMode,
   setGameState,
   clearJustEliminated,
+  clearGameOver,
 } from "../../state/gameSlice";
 import { botService } from "../../services/botService";
 import { onlineBotService } from "../../services/onlineBotService";
@@ -382,7 +383,10 @@ export default function GameScreen() {
     // Check if the current player is a bot and the game is active
     console.log(`🤖 GameScreen: Bot check - botPlayers:`, botPlayers, `currentPlayerTurn:`, currentPlayerTurn, `gameStatus:`, gameStatus, `isGameStateReady:`, isGameStateReady);
     
-    if (botPlayers.includes(currentPlayerTurn) && gameStatus === 'active' && isGameStateReady) {
+    if (botPlayers.includes(currentPlayerTurn) && 
+        (gameStatus === 'active' || gameStatus === 'promotion') && // ✅ CRITICAL FIX: Allow bots in promotion mode too
+        isGameStateReady &&
+        !eliminatedPlayers.includes(currentPlayerTurn)) { // ✅ CRITICAL FIX: Don't trigger bot moves for eliminated players
       console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected - scheduling bot move`);
       
       if (gameMode === 'online') {
@@ -403,7 +407,7 @@ export default function GameScreen() {
         return () => clearTimeout(timer);
       }
     }
-  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId]);
+  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId, eliminatedPlayers]);
 
   // Cleanup bot moves when game ends or changes
   useEffect(() => {
@@ -648,6 +652,10 @@ export default function GameScreen() {
             isEliminated: p.isEliminated
           }))}
           onReset={() => dispatch(resetGame())}
+          onDismiss={() => {
+            // Clear the game over state to dismiss the modal
+            dispatch(clearGameOver());
+          }}
         />
       )}
 

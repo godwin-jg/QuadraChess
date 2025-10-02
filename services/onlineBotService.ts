@@ -154,6 +154,12 @@ class OnlineBotService {
         return;
       }
 
+      // ✅ CRITICAL FIX: Check if bot is eliminated
+      if (gameState.eliminatedPlayers.includes(botColor)) {
+        console.log(`🤖 OnlineBotService: Bot ${botColor} is eliminated, skipping move`);
+        return;
+      }
+
       const moveData = {
         from: chosenMove.from,
         to: { row: chosenMove.to.row, col: chosenMove.to.col },

@@ -2,12 +2,15 @@ import React, { useEffect } from "react";
 import { View, Text, Pressable, Modal, ScrollView, StyleSheet } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
   withSpring, 
   withDelay,
   withTiming,
+  withRepeat,
+  withSequence,
   runOnJS
 } from "react-native-reanimated";
 
@@ -28,6 +31,7 @@ interface GameOverModalProps {
   eliminatedPlayers?: string[];
   players?: Array<{ color: string; name: string; isEliminated: boolean }>;
   onReset: () => void;
+  onDismiss?: () => void; // ✅ NEW: Optional dismiss callback
 }
 
 export default function GameOverModal({
@@ -39,6 +43,7 @@ export default function GameOverModal({
   eliminatedPlayers = [],
   players = [],
   onReset,
+  onDismiss,
 }: GameOverModalProps) {
   const router = useRouter();
   // Create leaderboard data first
@@ -86,19 +91,40 @@ export default function GameOverModal({
   const statsOpacity = useSharedValue(0);
   const buttonOpacity = useSharedValue(0);
   
-  // Individual player row animations - memoized to prevent recreation
-  const playerAnimations = React.useMemo(() => 
-    leaderboard.map(() => ({
-      opacity: useSharedValue(0),
-      translateY: useSharedValue(30),
-      scale: useSharedValue(0.9)
-    })), [leaderboard.length]
-  );
+  // Individual player row animations - create shared values at top level (max 4 players)
+  const player1Opacity = useSharedValue(0);
+  const player1TranslateY = useSharedValue(30);
+  const player1Scale = useSharedValue(0.9);
+  
+  const player2Opacity = useSharedValue(0);
+  const player2TranslateY = useSharedValue(30);
+  const player2Scale = useSharedValue(0.9);
+  
+  const player3Opacity = useSharedValue(0);
+  const player3TranslateY = useSharedValue(30);
+  const player3Scale = useSharedValue(0.9);
+  
+  const player4Opacity = useSharedValue(0);
+  const player4TranslateY = useSharedValue(30);
+  const player4Scale = useSharedValue(0.9);
+  
+  // Winner-specific animations
+  const winnerPulseScale = useSharedValue(1);
+  const winnerGlowOpacity = useSharedValue(0);
+  const winnerShimmerTranslate = useSharedValue(-200);
+  
+  // Map animations to players
+  const playerAnimations = React.useMemo(() => [
+    { opacity: player1Opacity, translateY: player1TranslateY, scale: player1Scale },
+    { opacity: player2Opacity, translateY: player2TranslateY, scale: player2Scale },
+    { opacity: player3Opacity, translateY: player3TranslateY, scale: player3Scale },
+    { opacity: player4Opacity, translateY: player4TranslateY, scale: player4Scale }
+  ].slice(0, leaderboard.length), [leaderboard.length]);
 
   // Play game end sound when modal appears
   useEffect(() => {
     try {
-      const soundService = require('../../services/soundService').default;
+      const soundService = require('../../../services/soundService').default;
       soundService.playGameEndSound();
     } catch (error) {
     }
@@ -124,6 +150,23 @@ export default function GameOverModal({
     // Animate stats and button
     statsOpacity.value = withDelay(1200, withTiming(1, { duration: 400 }));
     buttonOpacity.value = withDelay(1400, withTiming(1, { duration: 400 }));
+    
+    // Start winner animations after the winner appears
+    const winnerDelay = 600 + ((leaderboard.length - 1) * 150) + 300; // After winner appears
+    winnerGlowOpacity.value = withDelay(winnerDelay, withTiming(1, { duration: 500 }));
+    winnerPulseScale.value = withDelay(winnerDelay, withRepeat(
+      withSequence(
+        withTiming(1.05, { duration: 1000 }),
+        withTiming(1, { duration: 1000 })
+      ),
+      -1, // Infinite repeat
+      false // Don't reverse
+    ));
+    winnerShimmerTranslate.value = withDelay(winnerDelay + 500, withRepeat(
+      withTiming(200, { duration: 2000 }),
+      -1, // Infinite repeat
+      false // Don't reverse
+    ));
   }, []);
 
   // Helper functions
@@ -196,9 +239,22 @@ export default function GameOverModal({
     opacity: buttonOpacity.value,
   }));
 
+  // Winner animation styles
+  const winnerPulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: winnerPulseScale.value }],
+  }));
+
+  const winnerGlowStyle = useAnimatedStyle(() => ({
+    opacity: winnerGlowOpacity.value,
+  }));
+
+  const winnerShimmerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: winnerShimmerTranslate.value }],
+  }));
+
   return (
     <Modal visible={true} transparent animationType="fade">
-      <View className="flex-1 bg-black/70 justify-center items-center px-4">
+      <SafeAreaView className="flex-1 bg-black/70 justify-center items-center px-4 py-8">
         {/* The main animated container for a spring/slide-in effect */}
         <Animated.View 
           className="w-full max-w-md mx-auto rounded-2xl overflow-hidden"
@@ -211,9 +267,28 @@ export default function GameOverModal({
             colors={['rgba(31, 41, 55, 0.8)', 'rgba(17, 24, 39, 0.8)']}
             style={StyleSheet.absoluteFill}
           />
+          
+          {/* Close Button - positioned outside ScrollView */}
+          {onDismiss && (
+            <Pressable
+              onPress={() => {
+                try {
+                  const { hapticsService } = require('../../../services/hapticsService');
+                  hapticsService.buttonPress();
+                } catch (error) {
+                  // Haptics not critical, continue
+                }
+                onDismiss();
+              }}
+              className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full bg-black/30 justify-center items-center active:opacity-70"
+            >
+              <Text className="text-white text-xl font-bold">×</Text>
+            </Pressable>
+          )}
+          
           <ScrollView 
-            className="max-h-[80%]"
             showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 0 }}
           >
             <View className="p-6">
               <Animated.View style={titleAnimatedStyle}>
@@ -250,16 +325,61 @@ export default function GameOverModal({
                   return (
                     <Animated.View
                       key={player.color}
-                      style={playerAnimatedStyle}
+                      style={[
+                        playerAnimatedStyle,
+                        isWinner ? winnerPulseStyle : undefined
+                      ]}
                       className={`flex-row items-center justify-between p-3 mb-2 rounded-xl overflow-hidden ${
                         isWinner ? '' : 'bg-white/5 border border-white/10'
                       }`}
                     >
                       {isWinner && (
-                        <LinearGradient
-                          colors={['#58AFFF', '#357ABD']}
-                          style={StyleSheet.absoluteFill}
-                        />
+                        <>
+                          {/* More transparent yellow gradient */}
+                          <LinearGradient
+                            colors={['rgba(255, 215, 0, 0.3)', 'rgba(255, 193, 7, 0.3)']}
+                            style={StyleSheet.absoluteFill}
+                          />
+                          
+                          {/* Glow effect */}
+                          <Animated.View
+                            style={[
+                              StyleSheet.absoluteFill,
+                              winnerGlowStyle,
+                              {
+                                backgroundColor: 'rgba(255, 215, 0, 0.1)',
+                                borderRadius: 12,
+                              }
+                            ]}
+                          />
+                          
+                          {/* Shimmer effect */}
+                          <Animated.View
+                            style={[
+                              {
+                                position: 'absolute',
+                                top: 0,
+                                left: -200,
+                                width: 200,
+                                bottom: 0,
+                                backgroundColor: 'transparent',
+                                borderRadius: 12,
+                              },
+                              winnerShimmerStyle
+                            ]}
+                          >
+                            <LinearGradient
+                              colors={['transparent', 'transparent', 'rgba(255, 255, 255, 0.4)', 'transparent', 'transparent']}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 0 }}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                borderRadius: 12,
+                              }}
+                            />
+                          </Animated.View>
+                        </>
                       )}
 
                       <View className="flex-row items-center flex-1">
@@ -325,7 +445,7 @@ export default function GameOverModal({
                   <Pressable
                     onPress={() => {
                       try {
-                        const hapticsService = require('../../services/hapticsService').default;
+                        const { hapticsService } = require('../../../services/hapticsService');
                         hapticsService.buttonPress();
                       } catch (error) {
                       }
@@ -342,7 +462,7 @@ export default function GameOverModal({
                   <Pressable
                     onPress={() => {
                       try {
-                        const hapticsService = require('../../services/hapticsService').default;
+                        const { hapticsService } = require('../../../services/hapticsService');
                         hapticsService.buttonPress();
                       } catch (error) {
                       }
@@ -359,7 +479,7 @@ export default function GameOverModal({
             </View>
           </ScrollView>
         </Animated.View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }

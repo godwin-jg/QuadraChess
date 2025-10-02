@@ -32,7 +32,10 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
     // Start animation sequence
     translateY.value = withSequence(
       withTiming(-60, { duration: 1500, easing: Easing.out(Easing.cubic) }),
-      withTiming(-80, { duration: 500, easing: Easing.in(Easing.cubic) })
+      withTiming(-80, { duration: 500, easing: Easing.in(Easing.cubic) }, () => {
+        // Call onComplete when animation finishes
+        runOnJS(onComplete)();
+      })
     );
     
     opacity.value = withSequence(
@@ -45,13 +48,6 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
       withTiming(1.2, { duration: 300 }),
       withTiming(0.9, { duration: 1000, easing: Easing.out(Easing.cubic) })
     );
-
-    // Call onComplete after animation finishes
-    const timer = setTimeout(() => {
-      runOnJS(onComplete)();
-    }, 2000);
-
-    return () => clearTimeout(timer);
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -69,7 +65,7 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
       case 'b':
         return { color: '#4DABF7', textShadowColor: '#1E3A8A' };
       case 'y':
-        return { color: '#FFD43B', textShadowColor: '#92400E' };
+        return { color: '#7C3AED', textShadowColor: '#4C1D95' };
       case 'g':
         return { color: '#51CF66', textShadowColor: '#047857' };
       default:

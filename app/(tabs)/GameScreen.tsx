@@ -27,6 +27,7 @@ import PlayerHUDPanel from "../components/ui/PlayerHUDPanel";
 import GameUtilityPanel from "../components/ui/GameUtilityPanel";
 import PromotionModal from "../components/ui/PromotionModal";
 import FloatingPointsText from "../components/ui/FloatingPointsText";
+import captureAnimationService from "../../services/captureAnimationService";
 import networkService from "../services/networkService";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
@@ -432,6 +433,17 @@ export default function GameScreen() {
       return () => clearTimeout(timer);
     }
   }, [promotionState, botPlayers, gameMode]);
+
+  // ✅ Setup capture animation service callback for bot captures
+  useEffect(() => {
+    // Set up the capture animation callback
+    captureAnimationService.setCaptureCallback(triggerFloatingPoints);
+    
+    // Cleanup on unmount
+    return () => {
+      captureAnimationService.clearCallback();
+    };
+  }, []);
 
   // Helper function to get player name
   const getPlayerName = (playerColor: string) => {

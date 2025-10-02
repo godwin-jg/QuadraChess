@@ -28,9 +28,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...config.expo,
       slug: "chess4d",
       scheme: "chess4d",
+      icon: "./assets/images/icon.png",
+      splash: {
+        image: "./assets/images/splash-icon.png",
+        resizeMode: "contain",
+        backgroundColor: "#000000"
+      },
       android: {
         ...config.expo?.android,
         package: "com.chess4d",
+        adaptiveIcon: {
+          foregroundImage: "./assets/images/adaptive-icon.png",
+          backgroundColor: "#000000"
+        }
       },
       ios: {
         ...config.expo?.ios,

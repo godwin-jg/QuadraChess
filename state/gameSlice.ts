@@ -549,7 +549,7 @@ const gameSlice = createSlice({
         // Update check status for all players
         const newCheckStatus = updateAllCheckStatus(
           state.boardState,
-          state.eliminatedPlayers,
+          state.eliminatedPlayers || [],
           state.hasMoved
         );
         
@@ -1363,7 +1363,7 @@ const gameSlice = createSlice({
       // ✅ CRITICAL FIX: Recalculate check status when syncing from server
       const recalculatedCheckStatus = updateAllCheckStatus(
         newState.boardState,
-        newState.eliminatedPlayers,
+        newState.eliminatedPlayers || [],
         newState.hasMoved
       );
       newState.checkStatus = recalculatedCheckStatus;

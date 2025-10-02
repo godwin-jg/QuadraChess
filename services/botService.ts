@@ -30,7 +30,7 @@ interface MoveOption {
   // Note: capturedPieceCode removed to avoid stale data in multiplayer
 }
 
-const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: number = 50): MoveOption[] => {
+const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: number = 20): MoveOption[] => {
   const allMoves: MoveOption[] = [];
   const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
 
@@ -46,11 +46,17 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
     }
   }
   
-  // Randomize piece order to remove positional bias
-  const shuffledPieces = botPieces.sort(() => Math.random() - 0.5);
+  // Prioritize pieces that are more likely to have good moves (captures first)
+  const prioritizedPieces = botPieces.sort((a, b) => {
+    // Prioritize by piece value and likelihood of captures
+    const pieceValues = { 'Q': 9, 'R': 5, 'B': 5, 'N': 3, 'P': 1, 'K': 0 };
+    const aValue = pieceValues[a.pieceCode[1] as keyof typeof pieceValues] || 0;
+    const bValue = pieceValues[b.pieceCode[1] as keyof typeof pieceValues] || 0;
+    return bValue - aValue; // Higher value pieces first
+  });
   
-  // Process pieces in randomized order
-  for (const { pieceCode, position } of shuffledPieces) {
+  // Process pieces in prioritized order with early termination
+  for (const { pieceCode, position } of prioritizedPieces) {
     const movesForPiece = getValidMoves(
       pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
     );
@@ -68,7 +74,7 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
       });
     });
     
-    // Stop if we've reached the maximum number of moves
+    // Early termination: Stop if we have enough moves for decision making
     if (allMoves.length >= maxMoves) {
       break;
     }
@@ -105,9 +111,16 @@ const makeBotMove = (botColor: string) => {
   // Set the lock
   botMoveInProgress = true;
   
+  // ⚡ PERFORMANCE FIX: Set a timeout to prevent bot from taking too long
+  const moveTimeout = setTimeout(() => {
+    console.warn(`🤖 BotService: Bot ${botColor} move timed out after 5 seconds, releasing lock`);
+    botMoveInProgress = false;
+  }, 5000); // 5 second timeout
+  
   const allLegalMoves = getAllLegalMoves(botColor, gameState);
 
   if (allLegalMoves.length === 0) {
+    clearTimeout(moveTimeout);
     botMoveInProgress = false; // Release the lock
     return;
   }
@@ -155,6 +168,7 @@ const makeBotMove = (botColor: string) => {
   
   if (!pieceCode || pieceCode[0] !== botColor) {
     console.error(`🤖 Bot ${botColor}: Move validation failed - piece not found or wrong color`);
+    clearTimeout(moveTimeout);
     botMoveInProgress = false;
     return;
   }
@@ -162,6 +176,7 @@ const makeBotMove = (botColor: string) => {
   // Check if it's still this bot's turn
   if (currentGameState.currentPlayerTurn !== botColor) {
     console.error(`🤖 Bot ${botColor}: Turn validation failed - not bot's turn anymore`);
+    clearTimeout(moveTimeout);
     botMoveInProgress = false;
     return;
   }
@@ -219,7 +234,8 @@ const makeBotMove = (botColor: string) => {
     captureAnimationService.triggerCaptureAnimation(capturedPiece, chosenMove.to.row, chosenMove.to.col, botColor);
   }
 
-  // Release the lock
+  // Release the lock and clear timeout
+  clearTimeout(moveTimeout);
   botMoveInProgress = false;
 };
 

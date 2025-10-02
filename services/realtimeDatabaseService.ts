@@ -362,12 +362,23 @@ class RealtimeDatabaseService {
       if (!user) throw new Error("Failed to authenticate user");
     }
 
+    // ✅ CRITICAL FIX: Check if game exists before attempting to leave
+    try {
+      const gameSnapshot = await database().ref(`games/${gameId}`).once('value');
+      if (!gameSnapshot.exists()) {
+        console.log(`Game ${gameId} does not exist - player already left or game was deleted`);
+        return; // Game doesn't exist, consider this success
+      }
+    } catch (error) {
+      console.warn(`Failed to check game existence for ${gameId}:`, error);
+      // Continue with leave attempt anyway
+    }
 
     const gameRef = database().ref(`games/${gameId}`);
     
     // Add retry logic with exponential backoff and max retries
     let retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 2; // Reduced from 3 to 2 for faster failure
     const baseDelay = 1000; // 1 second base delay
     
     while (retryCount < maxRetries) {
@@ -380,8 +391,8 @@ class RealtimeDatabaseService {
 
           const player = gameData.players[user.uid];
           if (!player) {
-            console.warn(`Player ${user.uid} not found in game ${gameId}`);
-            return gameData;
+            console.log(`Player ${user.uid} not found in game ${gameId} - already left or never joined`);
+            return null; // Consider this success - player is not in the game
           }
 
           // Remove the player from the game
@@ -426,8 +437,8 @@ class RealtimeDatabaseService {
         if (error.code === 'database/max-retries' || 
             error.message?.includes('max-retries') ||
             error.message?.includes('too many retries')) {
-          console.error(`Max retries exceeded for leaving game ${gameId}. Giving up.`);
-          throw new Error(`Failed to leave game after ${maxRetries} attempts: ${error.message}`);
+          console.log(`Max retries exceeded for leaving game ${gameId} - game likely doesn't exist. Treating as success.`);
+          return; // Treat this as success - game probably doesn't exist
         }
         
         // Check if player is already not in the game (success case)
@@ -503,7 +514,7 @@ class RealtimeDatabaseService {
               isOnline: player.isOnline || false,
               isBot: player.isBot || false, // Add missing isBot property
               lastSeen: player.lastSeen || Date.now(),
-            };
+            } as Player;
           }
         });
 

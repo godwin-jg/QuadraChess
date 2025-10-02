@@ -37,7 +37,7 @@ export default function PromotionModal({
       case "b":
         return "bg-blue-500";
       case "y":
-        return "bg-yellow-500";
+        return "bg-purple-500";
       case "g":
         return "bg-green-500";
       default:

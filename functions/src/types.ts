@@ -24,5 +24,6 @@ export interface Player {
   color: string;
   isHost: boolean;
   isOnline?: boolean;
+  isBot?: boolean;
   lastSeen?: number;
 }

@@ -42,7 +42,7 @@ const BackgroundPiece = ({ piece, size, style }: { piece: string, size: number, 
   };
 
   const path = piecePaths[piece] || piecePaths['bP']; // fallback to pawn
-  const color = piece[0] === 'r' ? '#ef4444' : piece[0] === 'b' ? '#3b82f6' : piece[0] === 'g' ? '#10b981' : '#eab308';
+  const color = piece[0] === 'r' ? '#ef4444' : piece[0] === 'b' ? '#3b82f6' : piece[0] === 'g' ? '#10b981' : '#7c3aed';
 
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48">
@@ -348,7 +348,7 @@ export default function HomeScreen() {
           // Fills bottom-right negative space
           { piece: 'bP', size: 40, style: { top: '80%', right: '20%', bubbleColor: 'rgba(6, 182, 212, 0.3)' } },
           // Anchors bottom-left corner
-          { piece: 'yR', size: 60, style: { top: '85%', left: '15%', bubbleColor: 'rgba(234, 179, 8, 0.3)' } },
+          { piece: 'yR', size: 60, style: { top: '85%', left: '15%', bubbleColor: 'rgba(124, 58, 237, 0.3)' } },
           // Creates depth - appears "behind" other pieces
           { piece: 'gB', size: 50, style: { top: '15%', right: '40%', bubbleColor: 'rgba(217, 70, 239, 0.3)' } },
           // Fills gap below buttons subtly

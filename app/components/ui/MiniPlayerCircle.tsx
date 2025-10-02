@@ -107,7 +107,7 @@ export default function MiniPlayerCircle({
       case "b":
         return "bg-blue-500";
       case "y":
-        return "bg-yellow-500";
+        return "bg-purple-500";
       case "g":
         return "bg-green-500";
       default:
@@ -145,7 +145,7 @@ export default function MiniPlayerCircle({
               : isCurrentTurn
               ? (player.color === 'r' ? 'rgba(239, 68, 68, 0.3)' : 
                  player.color === 'b' ? 'rgba(59, 130, 246, 0.3)' : 
-                 player.color === 'y' ? 'rgba(234, 179, 8, 0.3)' : 'rgba(16, 185, 129, 0.3)')
+                 player.color === 'y' ? 'rgba(124, 58, 237, 0.3)' : 'rgba(16, 185, 129, 0.3)')
               : 'rgba(156, 163, 175, 0.3)', // Gray glass for inactive
             borderWidth: 2,
             borderColor: isEliminated 

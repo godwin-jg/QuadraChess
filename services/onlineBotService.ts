@@ -31,7 +31,7 @@ class OnlineBotService {
   private isProcessingMove = false;
 
   // Get all legal moves for a bot
-  private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves: number = 50): MoveOption[] {
+  private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves: number = 20): MoveOption[] {
     const allMoves: MoveOption[] = [];
     const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
 
@@ -47,11 +47,17 @@ class OnlineBotService {
       }
     }
     
-    // Randomize piece order to remove positional bias
-    const shuffledPieces = botPieces.sort(() => Math.random() - 0.5);
+    // Prioritize pieces that are more likely to have good moves (captures first)
+    const prioritizedPieces = botPieces.sort((a, b) => {
+      // Prioritize by piece value and likelihood of captures
+      const pieceValues = { 'Q': 9, 'R': 5, 'B': 5, 'N': 3, 'P': 1, 'K': 0 };
+      const aValue = pieceValues[a.pieceCode[1] as keyof typeof pieceValues] || 0;
+      const bValue = pieceValues[b.pieceCode[1] as keyof typeof pieceValues] || 0;
+      return bValue - aValue; // Higher value pieces first
+    });
     
-    // Process pieces in randomized order
-    for (const { pieceCode, position } of shuffledPieces) {
+    // Process pieces in prioritized order with early termination
+    for (const { pieceCode, position } of prioritizedPieces) {
       const movesForPiece = getValidMoves(
         pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
       );
@@ -69,7 +75,7 @@ class OnlineBotService {
         });
       });
       
-      // Stop if we've reached the maximum number of moves
+      // Early termination: Stop if we have enough moves for decision making
       if (allMoves.length >= maxMoves) {
         break;
       }
@@ -134,10 +140,17 @@ class OnlineBotService {
 
     this.isProcessingMove = true;
 
+    // ⚡ PERFORMANCE FIX: Set a timeout to prevent bot from taking too long
+    const moveTimeout = setTimeout(() => {
+      console.warn(`🤖 OnlineBotService: Bot ${botColor} move timed out after 5 seconds, releasing lock`);
+      this.isProcessingMove = false;
+    }, 5000); // 5 second timeout
+
     try {
       const chosenMove = this.chooseBestMove(botColor, gameState);
       
       if (!chosenMove) {
+        clearTimeout(moveTimeout);
         return;
       }
 
@@ -145,18 +158,21 @@ class OnlineBotService {
       const pieceCode = gameState.boardState[chosenMove.from.row][chosenMove.from.col];
       if (!pieceCode || pieceCode[0] !== botColor) {
         console.error(`🤖 OnlineBotService: Move validation failed - piece not found or wrong color`);
+        clearTimeout(moveTimeout);
         return;
       }
       
       // Check if it's still this bot's turn
       if (gameState.currentPlayerTurn !== botColor) {
         console.error(`🤖 OnlineBotService: Turn validation failed - not bot's turn anymore`);
+        clearTimeout(moveTimeout);
         return;
       }
 
       // ✅ CRITICAL FIX: Check if bot is eliminated
       if (gameState.eliminatedPlayers.includes(botColor)) {
         console.log(`🤖 OnlineBotService: Bot ${botColor} is eliminated, skipping move`);
+        clearTimeout(moveTimeout);
         return;
       }
 
@@ -192,9 +208,17 @@ class OnlineBotService {
       } catch (error) {
       }
 
-      // Apply move directly to database
+      // Apply move directly to database with retry logic
       const gameRef = database().ref(`games/${gameId}`);
-      const result = await gameRef.transaction((gameData) => {
+      
+      // Add retry logic for transaction conflicts
+      let retryCount = 0;
+      const maxRetries = 3;
+      let result: any = null;
+      
+      while (retryCount < maxRetries) {
+        try {
+          result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
           console.warn(`🤖 OnlineBotService: Game ${gameId} not found`);
           return null;
@@ -241,11 +265,38 @@ class OnlineBotService {
         gameData.lastActivity = Date.now();
 
         return gameData;
-      });
+          });
 
-      if (!result.committed) {
-        console.error(`🤖 OnlineBotService: Bot ${botColor} move transaction failed`);
-      } else {
+          if (result.committed) {
+            // Success! Break out of retry loop
+            break;
+          } else {
+            throw new Error("Transaction failed to commit");
+          }
+        } catch (error: any) {
+          retryCount++;
+          console.warn(`🤖 OnlineBotService: Bot ${botColor} move attempt ${retryCount} failed:`, error.message);
+          
+          // Check for specific Firebase errors that should not be retried
+          if (error.code === 'database/max-retries' || 
+              error.message?.includes('max-retries') ||
+              error.message?.includes('too many retries')) {
+            console.error(`🤖 OnlineBotService: Max retries exceeded for bot ${botColor} move. Giving up.`);
+            throw error;
+          }
+          
+          if (retryCount >= maxRetries) {
+            console.error(`🤖 OnlineBotService: Bot ${botColor} move failed after ${maxRetries} attempts`);
+            throw error;
+          }
+          
+          // Wait before retrying with exponential backoff
+          const delay = 200 * Math.pow(2, retryCount - 1); // 200ms, 400ms, 800ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      if (result && result.committed) {
         // 🎯 Trigger capture animation if this move captures a piece
         const capturedPiece = gameState.boardState[chosenMove.to.row][chosenMove.to.col];
         if (capturedPiece && captureAnimationService.isAvailable()) {
@@ -256,6 +307,7 @@ class OnlineBotService {
     } catch (error) {
       console.error(`🤖 OnlineBotService: Error processing bot ${botColor} move:`, error);
     } finally {
+      clearTimeout(moveTimeout);
       this.isProcessingMove = false;
     }
   }
@@ -284,8 +336,8 @@ class OnlineBotService {
       clearTimeout(existingTimeout);
     }
 
-    // Schedule bot move with faster delay (0.3-0.8 seconds)
-    const delay = 300 + Math.random() * 500;
+    // Schedule bot move with moderate delay to prevent transaction conflicts (0.2-0.5 seconds)
+    const delay = 200 + Math.random() * 300;
 
     const timeout = setTimeout(() => {
       this.processBotMove(gameId, botColor, gameState);

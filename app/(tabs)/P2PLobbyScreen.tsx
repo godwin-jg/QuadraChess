@@ -12,7 +12,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { RootState } from "../../state/store";
 import { 
   resetGame, 
@@ -42,6 +42,7 @@ const P2PLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
   const router = useRouter();
   const { settings, updateProfile } = useSettings();
+  const insets = useSafeAreaInsets();
 
   // ✅ All state now comes from Redux
   const {
@@ -494,7 +495,7 @@ const P2PLobbyScreen: React.FC = () => {
                           : player.color === "b"
                             ? "bg-blue-500"
                             : player.color === "y"
-                              ? "bg-yellow-500"
+                              ? "bg-purple-500"
                               : player.color === "g"
                                 ? "bg-green-500"
                                 : "bg-gray-500"
@@ -521,7 +522,7 @@ const P2PLobbyScreen: React.FC = () => {
                   {['r', 'b', 'y', 'g'].map((color) => {
                     const isBot = botPlayers.includes(color);
                     const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
-                    const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-yellow-500' : 'bg-green-500';
+                    const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
                     
                     return (
                       <TouchableOpacity
@@ -621,7 +622,7 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Main menu
   return (
-    <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+    <SafeAreaView style={{ flex: 1, marginBottom: 80 }} className="bg-black p-6">
       {/* Subtle blueprint grid background */}
       <GridBackground />
       <View className="items-center mb-8">
@@ -708,24 +709,42 @@ const P2PLobbyScreen: React.FC = () => {
         </View>
 
         {discoveredGames.length === 0 ? (
-          <Text className="text-gray-400 text-center mt-8">
+          <Text className="text-gray-400 text-center mt-8 pb-4">
             No games available. Create one to get started!
           </Text>
         ) : (
-          <FlatList
-            data={discoveredGames
-              .slice()
-              .sort((a, b) => {
-                // Sort by timestamp (newest first), with createdAt as fallback
-                const timestampA = a.timestamp || a.createdAt || 0;
-                const timestampB = b.timestamp || b.createdAt || 0;
-                return timestampB - timestampA;
-              })}
-            renderItem={renderGameItem}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            style={{ width: '100%' }}
-          />
+          <View style={{ position: 'relative', width: '100%' }}>
+            <FlatList
+              data={discoveredGames
+                .slice()
+                .sort((a, b) => {
+                  // Sort by timestamp (newest first), with createdAt as fallback
+                  const timestampA = a.timestamp || a.createdAt || 0;
+                  const timestampB = b.timestamp || b.createdAt || 0;
+                  return timestampB - timestampA;
+                })}
+              renderItem={renderGameItem}
+              keyExtractor={(item) => item.id}
+              showsVerticalScrollIndicator={false}
+              style={{ 
+                width: '100%',
+                maxHeight: 300, // Constrain height to prevent going behind tab bar
+              }}
+              contentContainerStyle={{ paddingBottom: 20 }}
+            />
+            {/* Smooth fade-out gradient overlay */}
+            <LinearGradient
+              colors={['transparent', 'rgba(0, 0, 0, 0.8)', 'rgba(0, 0, 0, 1)']}
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 40,
+                pointerEvents: 'none',
+              }}
+            />
+          </View>
         )}
       </View>
     </SafeAreaView>

@@ -46,7 +46,7 @@ export const getCrestColor = (playerColor: string): string => {
     case "b":
       return "#2563EB"; // Blue
     case "y":
-      return "#EAB308"; // Yellow
+      return "#7C3AED"; // Purple
     case "g":
       return "#16A34A"; // Green
     default:

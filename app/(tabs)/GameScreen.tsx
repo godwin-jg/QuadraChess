@@ -392,7 +392,7 @@ export default function GameScreen() {
         onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
       } else {
         // For other modes (solo, p2p), use local bot service
-        const botThinkTime = 400 + Math.random() * 400; // 0.4 - 0.8 seconds
+        const botThinkTime = 200 + Math.random() * 200; // 0.2 - 0.4 seconds
 
         const timer = setTimeout(() => {
           botService.makeBotMove(currentPlayerTurn);

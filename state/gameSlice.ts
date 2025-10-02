@@ -667,8 +667,9 @@ const gameSlice = createSlice({
         }
 
         // Always advance to next player after a move
-        // Determine the next player in sequence
-        const currentIndex = turnOrder.indexOf(state.currentPlayerTurn as any);
+        // ✅ CRITICAL FIX: Use the player who made the move (not the eliminated player) for turn advancement
+        const playerWhoMoved = state.currentPlayerTurn;
+        const currentIndex = turnOrder.indexOf(playerWhoMoved as any);
         const nextIndex = (currentIndex + 1) % turnOrder.length;
         const nextPlayerInSequence = turnOrder[nextIndex];
 
@@ -680,6 +681,7 @@ const gameSlice = createSlice({
           nextActivePlayer = turnOrder[nextActiveIndex];
         }
 
+        console.log(`🔄 Turn advancement: ${playerWhoMoved} → ${nextActivePlayer} (eliminated: [${state.eliminatedPlayers.join(', ')}])`);
         state.currentPlayerTurn = nextActivePlayer;
 
         // Check if the entire game is over

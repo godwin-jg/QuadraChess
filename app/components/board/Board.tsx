@@ -400,9 +400,9 @@ export default function Board({ onCapture, playerData }: BoardProps) {
             </LinearGradient>
 
             <LinearGradient id="yGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="#FEF3C7" stopOpacity="0.9" />
-              <Stop offset="50%" stopColor="#EAB308" stopOpacity="1.0" />
-              <Stop offset="100%" stopColor="#92400E" stopOpacity="1.0" />
+              <Stop offset="0%" stopColor="#C4B5FD" stopOpacity="0.9" />
+              <Stop offset="50%" stopColor="#7C3AED" stopOpacity="1.0" />
+              <Stop offset="100%" stopColor="#4C1D95" stopOpacity="1.0" />
             </LinearGradient>
 
             <LinearGradient id="gGradient" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -433,7 +433,8 @@ export default function Board({ onCapture, playerData }: BoardProps) {
           width: boardSize,
           height: boardSize,
           borderRadius: 8,
-          overflow: 'hidden',
+          overflow: 'visible',
+          zIndex: 1,
         }}
       >
         {displayBoardState.map((row, rowIndex) => {

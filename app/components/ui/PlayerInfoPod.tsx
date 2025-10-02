@@ -110,7 +110,7 @@ export default function PlayerInfoPod({
       case "b":
         return "bg-blue-500";
       case "y":
-        return "bg-yellow-500";
+        return "bg-purple-500";
       case "g":
         return "bg-green-500";
       default:
@@ -132,7 +132,7 @@ export default function PlayerInfoPod({
       case "b":
         return "text-blue-600";
       case "y":
-        return "text-yellow-600";
+        return "text-purple-600";
       case "g":
         return "text-green-600";
       default:
@@ -156,7 +156,7 @@ export default function PlayerInfoPod({
   };
 
   return (
-    <Animated.View style={eliminationAnimatedStyle} className="items-center">
+    <Animated.View style={[eliminationAnimatedStyle, { zIndex: 9999 }]} className="items-center">
       {/* Avatar Container */}
       <Animated.View
         style={avatarAnimatedStyle}
@@ -186,7 +186,7 @@ export default function PlayerInfoPod({
                 backgroundColor: 'transparent',
                 shadowColor: getPlayerAccentColor(player.color) === 'bg-red-500' ? '#EF4444' :
                              getPlayerAccentColor(player.color) === 'bg-blue-500' ? '#3B82F6' :
-                             getPlayerAccentColor(player.color) === 'bg-yellow-500' ? '#EAB308' :
+                             getPlayerAccentColor(player.color) === 'bg-purple-500' ? '#7C3AED' :
                              getPlayerAccentColor(player.color) === 'bg-green-500' ? '#10B981' : '#6B7280',
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.8,

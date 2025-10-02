@@ -22,7 +22,7 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
       case "b":
         return "#2563EB"; // Blue
       case "y":
-        return "#EAB308"; // Yellow
+        return "#7C3AED"; // Purple
       case "g":
         return "#16A34A"; // Green
       default:
@@ -37,7 +37,7 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
       case "b":
         return "Blue";
       case "y":
-        return "Yellow";
+        return "Purple";
       case "g":
         return "Green";
       default:

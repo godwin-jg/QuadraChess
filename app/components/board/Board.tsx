@@ -89,6 +89,9 @@ export default function Board({ onCapture, playerData }: BoardProps) {
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
   const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
   const players = useSelector((state: RootState) => state.game.players);
+  
+  // Get last move for highlighting
+  const lastMove = useSelector((state: RootState) => state.game.lastMove);
 
   // Animation values for current player glow
   const glowOpacity = useSharedValue(0);
@@ -108,6 +111,9 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     row: number;
     col: number;
   }>>([]);
+
+  // Animation lock to prevent input during animations
+  const [isAnimating, setIsAnimating] = React.useState(false);
 
   // Reanimated shared values for the piece's X and Y position
   const piecePositionX = useSharedValue(0);
@@ -252,6 +258,11 @@ export default function Board({ onCapture, playerData }: BoardProps) {
 
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
+    // Animation lock - prevent input during animations
+    if (isAnimating) {
+      return;
+    }
+
     // Debounce rapid clicks
     const now = Date.now();
     if (now - lastClickTime.current < DEBOUNCE_DELAY) {
@@ -348,6 +359,9 @@ export default function Board({ onCapture, playerData }: BoardProps) {
         playerColor: pieceColor!,
       };
 
+      // Set animation lock to prevent input during animation
+      setIsAnimating(true);
+
       // 🚀 ANIMATION LOGIC - Animate the piece movement first
       animatePieceMove(
         selectedPiece.row,
@@ -425,6 +439,9 @@ export default function Board({ onCapture, playerData }: BoardProps) {
             // Single player mode
             dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
           }
+          
+          // Release animation lock after all move processing is complete
+          setIsAnimating(false);
         }
       );
     } else {
@@ -588,6 +605,8 @@ export default function Board({ onCapture, playerData }: BoardProps) {
                     isInteractable={true}
                     boardTheme={boardTheme}
                     playerData={playerData}
+                    isLastMoveFrom={lastMove?.from.row === rowIndex && lastMove?.from.col === colIndex}
+                    isLastMoveTo={lastMove?.to.row === rowIndex && lastMove?.to.col === colIndex}
                   />
                 );
               })}

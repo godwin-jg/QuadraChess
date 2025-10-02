@@ -84,6 +84,7 @@ export const baseInitialState: GameState = {
   history: [],
   historyIndex: 0,
   viewingHistoryIndex: null, // null = viewing live, number = viewing history
+  lastMove: null, // No last move initially
   // Multiplayer state
   players: [],
   isHost: false,
@@ -109,6 +110,7 @@ const initialState: GameState = {
   history: [], // Start with empty history - no initial snapshot
   historyIndex: 0, // This should be 0 for the initial state (not viewing history)
   viewingHistoryIndex: null, // Start viewing live state
+  lastMove: null, // No last move initially
   moveCache: {}, // Initialize move cache for performance optimization
   // Ensure multiplayer state is included
   players: baseInitialState.players,
@@ -488,6 +490,15 @@ const gameSlice = createSlice({
         // Move the piece (for all moves, including promotions)
         state.boardState[targetRow][targetCol] = pieceToMove;
         state.boardState[startRow][startCol] = null;
+
+        // Store the last move for highlighting
+        state.lastMove = {
+          from: { row: startRow, col: startCol },
+          to: { row: targetRow, col: targetCol },
+          pieceCode: pieceToMove,
+          playerColor: pieceColor!,
+          timestamp: Date.now(),
+        };
 
         // 🔊 Play move sound effect (includes haptic fallback if needed)
         try {

@@ -59,6 +59,14 @@ export interface GameState {
   history: GameState[];
   historyIndex: number;
   viewingHistoryIndex: number | null; // null = viewing live, number = viewing history
+  // Last move tracking for highlighting
+  lastMove: {
+    from: { row: number; col: number };
+    to: { row: number; col: number };
+    pieceCode: string;
+    playerColor: string;
+    timestamp: number;
+  } | null;
   // Multiplayer state
   players: Player[];
   isHost: boolean;

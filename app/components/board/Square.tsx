@@ -16,6 +16,8 @@ interface SquareProps {
   capturingPieceColor?: string;
   isEliminated?: boolean;
   isInteractable?: boolean;
+  isLastMoveFrom?: boolean;
+  isLastMoveTo?: boolean;
   onPress?: () => void;
   onHover?: () => void;
   onHoverOut?: () => void;
@@ -42,6 +44,8 @@ const Square = React.memo(function Square({
   capturingPieceColor,
   isEliminated = false,
   isInteractable = true,
+  isLastMoveFrom = false,
+  isLastMoveTo = false,
   onPress,
   onHover,
   onHoverOut,
@@ -145,7 +149,7 @@ const Square = React.memo(function Square({
     }
   };
 
-  // Get background color based on selection, capture, and piece color
+  // Get background color based on selection, capture, last move, and piece color
   const getBackgroundColor = () => {
     if (isSelected && piece) {
       const pieceColor = getPieceColor(piece);
@@ -167,6 +171,13 @@ const Square = React.memo(function Square({
     }
     if (moveType === "capture" && capturingPieceColor) {
       return getCaptureBackgroundColor(capturingPieceColor);
+    }
+    // Highlight last move squares with subtle, modern colors
+    if (isLastMoveFrom) {
+      return "#e0e7ff"; // indigo-100 - subtle blue tint for "from" square
+    }
+    if (isLastMoveTo) {
+      return "#c7d2fe"; // indigo-200 - slightly more visible blue for "to" square
     }
     // Use the board theme colors
     return color === "light"

@@ -567,7 +567,7 @@ export default function GameScreen() {
       <GridBackground />
 
       {/* Top HUD Panel - Toggle between Player Info and Utilities */}
-      <View style={{ paddingTop: 8, height: 120, overflow: 'visible' }}>
+      <View style={{ paddingTop: 8, height: 160, overflow: 'visible' }}>
         {isUtilityMode ? (
           <Animated.View 
             entering={SlideInRight.duration(300).springify()} 

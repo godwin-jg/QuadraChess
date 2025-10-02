@@ -553,6 +553,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
           connectionError: currentLocalState.connectionError,
           isEditingName: currentLocalState.isEditingName,
           tempName: currentLocalState.tempName,
+          lastMove: null, // No last move for fallback state
         };
         
         store.dispatch(setGameState(fallbackStateWithSelection));
@@ -680,6 +681,8 @@ class OnlineGameServiceImpl implements OnlineGameService {
             connectionError: currentLocalState.connectionError,
             isEditingName: currentLocalState.isEditingName,
             tempName: currentLocalState.tempName,
+            // Add last move for highlighting
+            lastMove: game.lastMove,
           };
           
           store.dispatch(setGameState(gameStateWithLocalSelection));
@@ -805,6 +808,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
           connectionError: currentLocalState.connectionError,
           isEditingName: currentLocalState.isEditingName,
           tempName: currentLocalState.tempName,
+          lastMove: null, // No last move for fallback state
         };
         
         // Apply the fallback state

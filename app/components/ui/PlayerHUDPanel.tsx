@@ -142,9 +142,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     paddingHorizontal: 24,
-    paddingVertical: 20,
+    paddingVertical: 16,
     marginHorizontal: 16,
-    marginVertical: 8,
+    marginVertical: 6,
   },
   topPanel: {
     borderTopWidth: 0,
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
   },
   playerInfo: {
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   playerName: {
     fontSize: 16,
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'SpaceMono-Regular',
     letterSpacing: 1.0,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   capturedPieces: {
     flexDirection: 'row',

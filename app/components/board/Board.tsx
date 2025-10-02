@@ -31,6 +31,7 @@ import networkService from "../../services/networkService";
 import { getBoardTheme } from "./BoardThemeConfig";
 import Square from "./Square";
 import Piece from "./Piece";
+import AnimatedCapture from "./AnimatedCapture";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -100,6 +101,14 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     col: number;
   } | null>(null);
 
+  // Animation state for capturing pieces
+  const [capturingPieces, setCapturingPieces] = React.useState<Array<{
+    key: string;
+    code: string;
+    row: number;
+    col: number;
+  }>>([]);
+
   // Reanimated shared values for the piece's X and Y position
   const piecePositionX = useSharedValue(0);
   const piecePositionY = useSharedValue(0);
@@ -163,6 +172,11 @@ export default function Board({ onCapture, playerData }: BoardProps) {
 
   // Get dispatch function
   const dispatch = useDispatch();
+
+  // Helper function to handle capture animation completion
+  const handleCaptureAnimationComplete = (key: string) => {
+    setCapturingPieces(prev => prev.filter(p => p.key !== key));
+  };
 
   // Helper function to animate piece movement
   const animatePieceMove = (
@@ -283,37 +297,48 @@ export default function Board({ onCapture, playerData }: BoardProps) {
       
       // Check if this move captures a piece
       const capturedPiece = displayBoardState[row][col];
-      if (capturedPiece && onCapture) {
-        // Calculate points for captured piece
-        const capturedPieceType = capturedPiece[1];
-        let points = 0;
-        switch (capturedPieceType) {
-          case "P": // Pawn
-            points = 1;
-            break;
-          case "N": // Knight
-            points = 3;
-            break;
-          case "B": // Bishop
-          case "R": // Rook
-            points = 5;
-            break;
-          case "Q": // Queen
-            points = 9;
-            break;
-          case "K": // King
-            points = 0; // Kings cannot be captured - should be checkmated instead
-            break;
-          default:
-            points = 0;
+      if (capturedPiece) {
+        // Trigger capture animation
+        const captureKey = `${row}-${col}-${Date.now()}`;
+        setCapturingPieces(prev => [...prev, { 
+          key: captureKey, 
+          code: capturedPiece, 
+          row, 
+          col 
+        }]);
+        
+        // Handle points calculation for floating points animation
+        if (onCapture) {
+          const capturedPieceType = capturedPiece[1];
+          let points = 0;
+          switch (capturedPieceType) {
+            case "P": // Pawn
+              points = 1;
+              break;
+            case "N": // Knight
+              points = 3;
+              break;
+            case "B": // Bishop
+            case "R": // Rook
+              points = 5;
+              break;
+            case "Q": // Queen
+              points = 9;
+              break;
+            case "K": // King
+              points = 0; // Kings cannot be captured - should be checkmated instead
+              break;
+            default:
+              points = 0;
+          }
+          
+          // Calculate screen coordinates for the capture square
+          const boardX = (col * squareSize) + (squareSize / 2);
+          const boardY = (row * squareSize) + (squareSize / 2);
+          
+          // Trigger floating points animation
+          onCapture(points, boardX, boardY, pieceColor!);
         }
-        
-        // Calculate screen coordinates for the capture square
-        const boardX = (col * squareSize) + (squareSize / 2);
-        const boardY = (row * squareSize) + (squareSize / 2);
-        
-        // Trigger floating points animation
-        onCapture(points, boardX, boardY, pieceColor!);
       }
 
       const moveData = {
@@ -534,11 +559,13 @@ export default function Board({ onCapture, playerData }: BoardProps) {
           return (
             <View key={rowIndex} style={{ flexDirection: "row" }}>
               {row.map((piece, colIndex) => {
+                // Check if this piece is currently moving
+                const isMoving = animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex;
                 const isLight = (rowIndex + colIndex) % 2 === 0;
                 return (
                   <Square
                     key={`${rowIndex}-${colIndex}`}
-                    piece={animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex ? null : piece}
+                    piece={isMoving ? null : piece}
                     color={isLight ? "light" : "dark"}
                     size={squareSize}
                     row={rowIndex}
@@ -575,6 +602,25 @@ export default function Board({ onCapture, playerData }: BoardProps) {
           <Piece piece={animatedPiece.code} size={squareSize} />
         </Animated.View>
       )}
+
+      {/* 🎯 Capture Animation Layer - Poof Effect */}
+      {capturingPieces.map(({ key, code, row, col }) => (
+        <View 
+          key={key} 
+          style={{ 
+            position: 'absolute', 
+            left: col * squareSize, 
+            top: row * squareSize, 
+            zIndex: 3 
+          }}
+        >
+          <AnimatedCapture 
+            pieceCode={code} 
+            size={squareSize} 
+            onAnimationComplete={() => handleCaptureAnimationComplete(key)} 
+          />
+        </View>
+      ))}
     </View>
   );
 }

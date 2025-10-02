@@ -205,7 +205,7 @@ const Square = React.memo(function Square({
           <View className="w-1/3 h-1/3 bg-gray-500/50 rounded-full" />
         )}
         {piece && (
-          <Piece piece={piece} size={size} isEliminated={isEliminated} />
+          <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} />
         )}
         {/* Check overlay */}
         {isInCheck && (

@@ -1,6 +1,11 @@
-import React from "react";
-import { View, Text, Animated } from "react-native";
+import React, { useEffect } from "react";
+import { Text } from "react-native";
 import Svg, { G, Path, Defs, LinearGradient, Stop } from "react-native-svg";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from "react-native-reanimated";
 import { getPieceAsset, getPieceColor } from "./PieceAssets";
 import { PIECE_CONFIG } from "./PieceConfig";
 import { useSettings } from "../../../context/SettingsContext";
@@ -27,6 +32,21 @@ const Piece = React.memo(function Piece({
   animationDelay = 0,
   previewStyle,
 }: PieceProps) {
+  // Selection animation
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withTiming(isSelected ? 1.05 : 1, {
+      duration: 150,
+    });
+  }, [isSelected]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value }],
+    };
+  });
+
   const getPieceSymbol = (piece: string) => {
     const pieceType = piece[1];
     switch (pieceType) {
@@ -76,7 +96,7 @@ const Piece = React.memo(function Piece({
   // Use preview style if provided, otherwise use settings
   const currentStyle = previewStyle || settings.pieces.style;
   const pieceStyle = previewStyle 
-    ? getPieceStyle({ ...settings, pieces: { ...settings.pieces, style: previewStyle } }, pieceColorCode)
+    ? getPieceStyle({ ...settings, pieces: { ...settings.pieces, style: previewStyle as any } }, pieceColorCode)
     : getPieceStyle(settings, pieceColorCode);
   const sizeMultiplier = getPieceSize(settings);
 
@@ -135,79 +155,50 @@ const Piece = React.memo(function Piece({
     };
   };
 
-  // Render SVG piece with user-selected styling
-  if (useSVG && pieceAsset) {
-    if (currentStyle === "wooden") {
-      // Wooden style for all pieces
-      return (
-        <View style={getContainerStyle()}>
+  // Render everything inside a single animated container
+  return (
+    <Animated.View style={[getContainerStyle(), animatedStyle]}>
+      {useSVG && pieceAsset ? (
+        // Condition for SVG pieces
+        currentStyle === "wooden" ? (
+          // Wooden Style
           <Svg
             width={size * PIECE_CONFIG.SVG.SIZE_MULTIPLIER * sizeMultiplier}
             height={size * PIECE_CONFIG.SVG.SIZE_MULTIPLIER * sizeMultiplier}
             viewBox={PIECE_CONFIG.SVG.VIEW_BOX}
           >
             <Defs>
-              <LinearGradient
-                id="woodGradient"
-                x1="0%"
-                y1="0%"
-                x2="100%"
-                y2="100%"
-              >
+              <LinearGradient id="woodGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                 <Stop offset="0%" stopColor="#D2B48C" />
                 <Stop offset="30%" stopColor="#CD853F" />
                 <Stop offset="70%" stopColor="#8B4513" />
                 <Stop offset="100%" stopColor="#654321" />
               </LinearGradient>
             </Defs>
-
-            {/* Wood base piece */}
-            <G
-              fill="url(#woodGradient)"
-              stroke={pieceStyle.stroke}
-              strokeWidth={pieceStyle.strokeWidth}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
+            <G fill="url(#woodGradient)" stroke={pieceStyle.stroke} strokeWidth={pieceStyle.strokeWidth} strokeLinecap="round" strokeLinejoin="round">
               <Path d={pieceAsset.path} />
             </G>
-
-            {/* Colored band around base */}
             <G fill={(pieceStyle as any).bandColor || "#06B6D4"}>
               <Path d="M 12.5,37 C 18,40.5 27,40.5 32.5,37 L 32.5,35 C 32.5,35 27,37.5 22.5,37.5 C 18,37.5 12.5,35 12.5,35 L 12.5,37" />
             </G>
           </Svg>
-        </View>
-      );
-    }
-
-    // All other styles (solid, white-bordered, black-bordered, accent-bordered)
-    return (
-      <View style={getContainerStyle()}>
-        <Svg
-          width={size * PIECE_CONFIG.SVG.SIZE_MULTIPLIER * sizeMultiplier}
-          height={size * PIECE_CONFIG.SVG.SIZE_MULTIPLIER * sizeMultiplier}
-          viewBox={PIECE_CONFIG.SVG.VIEW_BOX}
-        >
-          <G
-            fill={pieceStyle.fill}
-            stroke={pieceStyle.stroke}
-            strokeWidth={pieceStyle.strokeWidth}
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        ) : (
+          // All other SVG Styles
+          <Svg
+            width={size * PIECE_CONFIG.SVG.SIZE_MULTIPLIER * sizeMultiplier}
+            height={size * PIECE_CONFIG.SVG.SIZE_MULTIPLIER * sizeMultiplier}
+            viewBox={PIECE_CONFIG.SVG.VIEW_BOX}
           >
-            <Path d={pieceAsset.path} />
-          </G>
-        </Svg>
-      </View>
-    );
-  }
-
-  // Render Unicode piece with user-selected styling
-  return (
-    <View style={getContainerStyle()}>
-      <Text style={getTextStyle()}>{getPieceSymbol(piece)}</Text>
-    </View>
+            <G fill={pieceStyle.fill} stroke={pieceStyle.stroke} strokeWidth={pieceStyle.strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+              <Path d={pieceAsset.path} />
+            </G>
+          </Svg>
+        )
+      ) : (
+        // Fallback to Unicode piece
+        <Text style={getTextStyle()}>{getPieceSymbol(piece)}</Text>
+      )}
+    </Animated.View>
   );
 });
 

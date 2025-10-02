@@ -25,28 +25,26 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
   onComplete,
 }) => {
   const translateY = useSharedValue(0);
-  const opacity = useSharedValue(1);
-  const scale = useSharedValue(0.8);
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.5);
 
   useEffect(() => {
-    // Start animation sequence
+    // Smooth, coordinated animation sequence - contained within board
     translateY.value = withSequence(
-      withTiming(-60, { duration: 1500, easing: Easing.out(Easing.cubic) }),
-      withTiming(-80, { duration: 500, easing: Easing.in(Easing.cubic) }, () => {
+      withTiming(-50, { duration: 1800, easing: Easing.out(Easing.cubic) }, () => {
         // Call onComplete when animation finishes
         runOnJS(onComplete)();
       })
     );
     
     opacity.value = withSequence(
-      withTiming(1, { duration: 200 }),
-      withTiming(0, { duration: 1300, easing: Easing.out(Easing.cubic) })
+      withTiming(1, { duration: 300 }),
+      withTiming(0, { duration: 1500, easing: Easing.out(Easing.cubic) })
     );
     
     scale.value = withSequence(
-      withTiming(1.5, { duration: 200 }),
-      withTiming(1.2, { duration: 300 }),
-      withTiming(0.9, { duration: 1000, easing: Easing.out(Easing.cubic) })
+      withTiming(1.2, { duration: 300, easing: Easing.out(Easing.back(1.2)) }),
+      withTiming(1.0, { duration: 1500, easing: Easing.out(Easing.cubic) })
     );
   }, []);
 
@@ -95,12 +93,13 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
 const styles = StyleSheet.create({
   floatingText: {
     position: 'absolute',
-    fontSize: 36,
-    fontWeight: 'bold',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 6,
+    fontSize: 28,
+    fontWeight: '800',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
     zIndex: 1000,
     pointerEvents: 'none',
+    fontFamily: 'SpaceMono-Bold',
   },
 });
 

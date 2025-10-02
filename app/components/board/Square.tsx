@@ -186,7 +186,6 @@ const Square = React.memo(function Square({
   };
 
   const handlePress = () => {
-    console.log("Square: Pressed at", row, col, "piece:", piece);
     if (onPress) {
       onPress();
     }

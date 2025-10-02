@@ -380,28 +380,13 @@ export default function GameScreen() {
 
   // ✅ Bot Controller - triggers bot moves when it's a bot's turn
   useEffect(() => {
-    // Debug logging for bot controller
-    console.log(`🤖 Bot Controller Debug:`, {
-      currentPlayerTurn,
-      botPlayers,
-      gameStatus,
-      isGameStateReady,
-      gameMode,
-      isBotTurn: botPlayers.includes(currentPlayerTurn)
-    });
-    
-    // Check if the current player is a bot and the game is active
-    console.log(`🤖 GameScreen: Bot check - botPlayers:`, botPlayers, `currentPlayerTurn:`, currentPlayerTurn, `gameStatus:`, gameStatus, `isGameStateReady:`, isGameStateReady);
-    
     if (botPlayers.includes(currentPlayerTurn) && 
         (gameStatus === 'active' || gameStatus === 'promotion') && // ✅ CRITICAL FIX: Allow bots in promotion mode too
         isGameStateReady &&
         !eliminatedPlayers.includes(currentPlayerTurn)) { // ✅ CRITICAL FIX: Don't trigger bot moves for eliminated players
-      console.log(`🤖 GameScreen: Bot ${currentPlayerTurn} turn detected - scheduling bot move`);
       
       if (gameMode === 'online') {
         // For online games, use centralized bot service (single source of truth)
-        console.log(`🤖 GameScreen: Using centralized bot service for online game`);
         // Get current game state from Redux store
         const currentGameState = store.getState().game;
         onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
@@ -410,7 +395,6 @@ export default function GameScreen() {
         const botThinkTime = 400 + Math.random() * 400; // 0.4 - 0.8 seconds
 
         const timer = setTimeout(() => {
-          console.log(`🤖 GameScreen: Making bot move for ${currentPlayerTurn} (mode: ${gameMode})`);
           botService.makeBotMove(currentPlayerTurn);
         }, botThinkTime);
 
@@ -592,7 +576,12 @@ export default function GameScreen() {
 
       {/* Main Game Area with breathing space */}
       <View className="flex-1 justify-center items-center" style={{ paddingVertical: 16 }}>
-        <Board onCapture={triggerFloatingPoints} playerData={players} />
+        <Board 
+          onCapture={triggerFloatingPoints} 
+          playerData={players}
+          floatingPoints={floatingPoints}
+          onFloatingPointComplete={removeFloatingPoint}
+        />
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
@@ -692,18 +681,6 @@ export default function GameScreen() {
           dispatch(completePromotion({ pieceType }))
         }
       />
-
-      {/* Floating Points Effects Layer */}
-      {floatingPoints.map((point) => (
-        <FloatingPointsText
-          key={point.id}
-          points={point.points}
-          x={point.x}
-          y={point.y}
-          color={point.color}
-          onComplete={() => removeFloatingPoint(point.id)}
-        />
-      ))}
 
       {/* Simple Notifications Layer */}
       {notifications.map((notification) => (

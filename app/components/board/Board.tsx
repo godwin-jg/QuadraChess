@@ -32,6 +32,7 @@ import { getBoardTheme } from "./BoardThemeConfig";
 import Square from "./Square";
 import Piece from "./Piece";
 import AnimatedCapture from "./AnimatedCapture";
+import FloatingPointsText from "../ui/FloatingPointsText";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -47,9 +48,17 @@ interface BoardProps {
     isCurrentTurn: boolean;
     isEliminated: boolean;
   }>;
+  floatingPoints?: Array<{
+    id: string;
+    points: number;
+    x: number;
+    y: number;
+    color: string;
+  }>;
+  onFloatingPointComplete?: (id: string) => void;
 }
 
-export default function Board({ onCapture, playerData }: BoardProps) {
+export default function Board({ onCapture, playerData, floatingPoints, onFloatingPointComplete }: BoardProps) {
   const { width } = useWindowDimensions();
   // Memoized board dimensions - only recalculates when screen width changes
   const boardSize = React.useMemo(() => Math.min(width * 0.98, 600), [width]);
@@ -639,6 +648,18 @@ export default function Board({ onCapture, playerData }: BoardProps) {
             onAnimationComplete={() => handleCaptureAnimationComplete(key)} 
           />
         </View>
+      ))}
+      
+      {/* 💰 Floating Points Layer - Board Relative */}
+      {floatingPoints?.map((point) => (
+        <FloatingPointsText
+          key={point.id}
+          points={point.points}
+          x={point.x}
+          y={point.y}
+          color={point.color}
+          onComplete={() => onFloatingPointComplete?.(point.id)}
+        />
       ))}
     </View>
   );

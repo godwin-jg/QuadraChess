@@ -692,7 +692,6 @@ const gameSlice = createSlice({
           nextActivePlayer = turnOrder[nextActiveIndex];
         }
 
-        console.log(`🔄 Turn advancement: ${playerWhoMoved} → ${nextActivePlayer} (eliminated: [${state.eliminatedPlayers.join(', ')}])`);
         state.currentPlayerTurn = nextActivePlayer;
 
         // Check if the entire game is over

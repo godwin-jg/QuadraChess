@@ -11,10 +11,12 @@ import Animated, {
   withRepeat,
   withSequence,
   interpolate,
-  Easing
+  Easing,
+  runOnJS
 } from "react-native-reanimated";
 import Svg, { Defs, Filter, FeGaussianBlur, FeMerge, FeMergeNode, Path, LinearGradient, Stop } from "react-native-svg";
 import { useSettings } from "../../../context/SettingsContext";
+import notificationService from "../../../services/notificationService";
 
 import onlineGameService from "../../../services/onlineGameService";
 import p2pGameService from "../../../services/p2pGameService";
@@ -28,6 +30,7 @@ import { RootState } from "../../../state/store";
 import networkService from "../../services/networkService";
 import { getBoardTheme } from "./BoardThemeConfig";
 import Square from "./Square";
+import Piece from "./Piece";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -90,6 +93,17 @@ export default function Board({ onCapture, playerData }: BoardProps) {
   const glowOpacity = useSharedValue(0);
   const glowScale = useSharedValue(1);
   
+  // Animation state for piece movement
+  const [animatedPiece, setAnimatedPiece] = React.useState<{
+    code: string;
+    row: number;
+    col: number;
+  } | null>(null);
+
+  // Reanimated shared values for the piece's X and Y position
+  const piecePositionX = useSharedValue(0);
+  const piecePositionY = useSharedValue(0);
+  
   // Static constants for optimal performance
   const GRADIENT_MAP = {
     "r": "rGradient",
@@ -135,9 +149,57 @@ export default function Board({ onCapture, playerData }: BoardProps) {
     transform: [{ scale: glowScale.value }],
   }));
 
+  // ✅ Animated piece style for smooth movement
+  const animatedPieceStyle = useAnimatedStyle(() => {
+    return {
+      position: 'absolute',
+      transform: [
+        { translateX: piecePositionX.value },
+        { translateY: piecePositionY.value },
+      ],
+    };
+  });
+
 
   // Get dispatch function
   const dispatch = useDispatch();
+
+  // Helper function to animate piece movement
+  const animatePieceMove = (
+    fromRow: number, 
+    fromCol: number, 
+    toRow: number, 
+    toCol: number, 
+    pieceCode: string,
+    onComplete: () => void
+  ) => {
+    // Calculate pixel positions
+    const fromX = fromCol * squareSize;
+    const fromY = fromRow * squareSize;
+    const toX = toCol * squareSize;
+    const toY = toRow * squareSize;
+
+    // Set the initial position for our animated piece FIRST
+    piecePositionX.value = fromX;
+    piecePositionY.value = fromY;
+    
+    // Show the animated piece immediately
+    setAnimatedPiece({ code: pieceCode, row: fromRow, col: fromCol });
+    
+    // Use requestAnimationFrame to ensure the piece renders before starting animation
+    requestAnimationFrame(() => {
+      // Start the animation after the animated piece is rendered
+      piecePositionX.value = withTiming(toX, { duration: 250, easing: Easing.out(Easing.quad) });
+      piecePositionY.value = withTiming(toY, { duration: 250, easing: Easing.out(Easing.quad) }, (isFinished) => {
+        if (isFinished) {
+          // Hide the animated piece using runOnJS
+          runOnJS(setAnimatedPiece)(null);
+          // Call the completion callback using runOnJS
+          runOnJS(onComplete)();
+        }
+      });
+    });
+  };
 
   // Helper function to get move type for a square
   const getMoveType = (row: number, col: number): "move" | "capture" | null => {
@@ -261,85 +323,85 @@ export default function Board({ onCapture, playerData }: BoardProps) {
         playerColor: pieceColor!,
       };
 
-      // Handle different game modes
-      if (effectiveMode === "online") {
-        if (onlineGameService.isConnected && onlineGameService.currentGameId) {
-          // Online multiplayer mode
-          try {
-            await onlineGameService.makeMove(moveData);
-          } catch (error) {
-            console.error("Failed to make online move:", error);
-            // Check if it's a "Not your turn" error
-            if (error instanceof Error && error.message === "Not your turn") {
-              // 🔊 Play illegal move sound
-              try {
-                const soundService = require('../../services/soundService').default;
-                soundService.playIllegalMoveSound();
-              } catch (soundError) {
-                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
-              }
-              Alert.alert("Not your turn", "Please wait for your turn to make a move.");
+      // 🚀 ANIMATION LOGIC - Animate the piece movement first
+      animatePieceMove(
+        selectedPiece.row,
+        selectedPiece.col,
+        row,
+        col,
+        pieceToMove!,
+        () => {
+          // This callback runs AFTER the animation completes
+          // Handle different game modes
+          if (effectiveMode === "online") {
+            if (onlineGameService.isConnected && onlineGameService.currentGameId) {
+              // Online multiplayer mode
+              onlineGameService.makeMove(moveData).catch((error) => {
+                console.error("Failed to make online move:", error);
+                // Check if it's a "Not your turn" error
+                if (error instanceof Error && error.message === "Not your turn") {
+                  // 🔊 Play illegal move sound
+                  try {
+                    const soundService = require('../../services/soundService').default;
+                    soundService.playIllegalMoveSound();
+                  } catch (soundError) {
+                    console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
+                  }
+                  notificationService.show("Not your turn", "warning", 1500);
+                } else {
+                  // 🔊 Play illegal move sound for failed moves
+                  try {
+                    const soundService = require('../../services/soundService').default;
+                    soundService.playIllegalMoveSound();
+                  } catch (soundError) {
+                    console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
+                  }
+                  // FIX: Inform the user about the failed move
+                  notificationService.show("Move failed - check connection", "error", 2000);
+                }
+              });
             } else {
-              // 🔊 Play illegal move sound for failed moves
-              try {
-                const soundService = require('../../services/soundService').default;
-                soundService.playIllegalMoveSound();
-              } catch (soundError) {
-                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
-              }
-              // FIX: Inform the user about the failed move
-              Alert.alert(
-                "Move Failed",
-                "Your move could not be sent to the server. Please check your connection and try again."
+              console.log(
+                "Board: Online service not connected, falling back to local move"
               );
+              // Fallback to local move if online service is not connected
+              dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
             }
-          }
-        } else {
-          console.log(
-            "Board: Online service not connected, falling back to local move"
-          );
-          // Fallback to local move if online service is not connected
-          dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
-        }
-      } else if (effectiveMode === "p2p") {
-        console.log(
-          "Board: P2P mode - isConnected:",
-          p2pGameService.isConnected,
-          "currentGameId:",
-          p2pGameService.currentGameId
-        );
-        if (p2pGameService.isConnected && p2pGameService.currentGameId) {
-          // P2P multiplayer mode
-          try {
-            console.log("Board: Sending move to P2P service:", moveData);
-            await p2pGameService.makeMove(moveData);
-          } catch (error) {
-            console.error("Failed to make P2P move:", error);
-            // Check if it's a "Not your turn" error
-            if (error instanceof Error && error.message === "Not your turn") {
-              Alert.alert("Not your turn", "Please wait for your turn to make a move.");
+          } else if (effectiveMode === "p2p") {
+            console.log(
+              "Board: P2P mode - isConnected:",
+              p2pGameService.isConnected,
+              "currentGameId:",
+              p2pGameService.currentGameId
+            );
+            if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+              // P2P multiplayer mode
+              p2pGameService.makeMove(moveData).catch((error) => {
+                console.error("Failed to make P2P move:", error);
+                // Check if it's a "Not your turn" error
+                if (error instanceof Error && error.message === "Not your turn") {
+                  notificationService.show("Not your turn", "warning", 1500);
+                } else {
+                  // FIX: Inform the user about the failed move
+                  notificationService.show("Move failed - check connection", "error", 2000);
+                }
+              });
             } else {
-              // FIX: Inform the user about the failed move
-              Alert.alert(
-                "Move Failed",
-                "Your move could not be sent to the other player. Please check your connection and try again."
+              console.log(
+                "Board: P2P service not connected, falling back to local move"
               );
+              // Fallback to local move if P2P service is not connected
+              dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
             }
+          } else if (networkService.connected && networkService.roomId) {
+            // Local multiplayer mode
+            dispatch(sendMoveToServer({ row, col }));
+          } else {
+            // Single player mode
+            dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
           }
-        } else {
-          console.log(
-            "Board: P2P service not connected, falling back to local move"
-          );
-          // Fallback to local move if P2P service is not connected
-          dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
         }
-      } else if (networkService.connected && networkService.roomId) {
-        // Local multiplayer mode
-        dispatch(sendMoveToServer({ row, col }));
-      } else {
-        // Single player mode
-        dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
-      }
+      );
     } else {
       // If clicking on empty square and a piece is selected, deselect it
       if (!pieceCode && selectedPiece) {
@@ -476,7 +538,7 @@ export default function Board({ onCapture, playerData }: BoardProps) {
                 return (
                   <Square
                     key={`${rowIndex}-${colIndex}`}
-                    piece={piece}
+                    piece={animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex ? null : piece}
                     color={isLight ? "light" : "dark"}
                     size={squareSize}
                     row={rowIndex}
@@ -506,6 +568,13 @@ export default function Board({ onCapture, playerData }: BoardProps) {
           );
         })}
       </View>
+      
+      {/* 🚀 Animation Overlay Layer - Floating Piece */}
+      {animatedPiece && (
+        <Animated.View style={[animatedPieceStyle, { zIndex: 2 }]}>
+          <Piece piece={animatedPiece.code} size={squareSize} />
+        </Animated.View>
+      )}
     </View>
   );
 }

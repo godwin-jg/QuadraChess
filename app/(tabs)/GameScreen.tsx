@@ -28,6 +28,8 @@ import GameUtilityPanel from "../components/ui/GameUtilityPanel";
 import PromotionModal from "../components/ui/PromotionModal";
 import FloatingPointsText from "../components/ui/FloatingPointsText";
 import captureAnimationService from "../../services/captureAnimationService";
+import notificationService from "../../services/notificationService";
+import SimpleNotification from "../components/ui/SimpleNotification";
 import networkService from "../services/networkService";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
@@ -68,6 +70,13 @@ export default function GameScreen() {
     x: number;
     y: number;
     color: string;
+  }>>([]);
+
+  // Simple notifications state
+  const [notifications, setNotifications] = useState<Array<{
+    id: string;
+    message: string;
+    type: 'info' | 'warning' | 'error' | 'success';
   }>>([]);
 
   // Game utility mode state - toggles between player info and utilities
@@ -439,9 +448,13 @@ export default function GameScreen() {
     // Set up the capture animation callback
     captureAnimationService.setCaptureCallback(triggerFloatingPoints);
     
+    // Set up notification service callback
+    notificationService.setCallback(setNotifications);
+    
     // Cleanup on unmount
     return () => {
       captureAnimationService.clearCallback();
+      notificationService.clear();
     };
   }, []);
 
@@ -689,6 +702,16 @@ export default function GameScreen() {
           y={point.y}
           color={point.color}
           onComplete={() => removeFloatingPoint(point.id)}
+        />
+      ))}
+
+      {/* Simple Notifications Layer */}
+      {notifications.map((notification) => (
+        <SimpleNotification
+          key={notification.id}
+          message={notification.message}
+          type={notification.type}
+          onComplete={() => notificationService.remove(notification.id)}
         />
       ))}
     </SafeAreaView>

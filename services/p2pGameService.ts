@@ -2,7 +2,7 @@ import { getValidMoves, isKingInCheck } from "../functions/src/logic/gameLogic";
 import { initialBoardState } from "../state/boardState";
 import { applyNetworkMove, setGameState } from "../state/gameSlice";
 import { store } from "../state/store";
-import { GameState } from "../state/types";
+import { GameState, EnPassantTarget } from "../state/types";
 import p2pService from "./p2pService";
 
 export interface P2PGameService {
@@ -16,7 +16,10 @@ export interface P2PGameService {
     to: { row: number; col: number };
     pieceCode: string;
     playerColor: string;
+    isEnPassant?: boolean;
+    enPassantTarget?: EnPassantTarget | null; // ✅ Enhanced type safety
   }) => Promise<void>;
+  makePromotion: (pieceType: string) => Promise<void>;
   resignGame: () => Promise<void>;
   onGameUpdate: (callback: (game: any) => void) => () => void;
   onMoveUpdate: (callback: (move: any) => void) => () => void;
@@ -102,6 +105,8 @@ class P2PGameServiceImpl implements P2PGameService {
     to: { row: number; col: number };
     pieceCode: string;
     playerColor: string;
+    isEnPassant?: boolean;
+    enPassantTarget?: EnPassantTarget | null; // ✅ Enhanced type safety
   }): Promise<void> {
     if (!this.currentGameId || !this.isConnected) {
       throw new Error("Not connected to a game");
@@ -122,11 +127,69 @@ class P2PGameServiceImpl implements P2PGameService {
       throw new Error("Invalid move");
     }
 
+    // Store previous state to check for elimination
+    const previousState = store.getState().game;
+    const previousEliminatedPlayers = [...previousState.eliminatedPlayers];
+
     // ✅ Apply move locally first (optimistic UI)
     store.dispatch(applyNetworkMove(moveData));
 
+    // ✅ CRITICAL FIX: Check if elimination occurred and sync game state
+    const newState = store.getState().game;
+    const newEliminatedPlayers = [...newState.eliminatedPlayers];
+    
+    // Check if any players were eliminated
+    const eliminationOccurred = newEliminatedPlayers.length > previousEliminatedPlayers.length;
+    
+    // ✅ CRITICAL FIX: Also check if game ended (3 players eliminated)
+    const gameEnded = newEliminatedPlayers.length >= 3 && previousEliminatedPlayers.length < 3;
+    
+    if (eliminationOccurred || gameEnded) {
+      console.log("🎮 P2PGameService: Game state change detected! Syncing complete game state to all clients");
+      console.log("🎮 P2PGameService: Previous eliminated players:", previousEliminatedPlayers);
+      console.log("🎮 P2PGameService: New eliminated players:", newEliminatedPlayers);
+      console.log("🎮 P2PGameService: Just eliminated:", newState.justEliminated);
+      console.log("🎮 P2PGameService: Game ended:", gameEnded);
+      console.log("🎮 P2PGameService: Game status:", newState.gameStatus);
+      console.log("🎮 P2PGameService: Winner:", newState.winner);
+      console.log("🎮 P2PGameService: Game over state:", newState.gameOverState);
+      
+      // Sync the complete game state to all clients
+      p2pService.syncGameStateToClients();
+    }
+
     // ✅ Send move through P2P service
     p2pService.sendChessMove(moveData);
+  }
+
+  async makePromotion(pieceType: string): Promise<void> {
+    if (!this.currentGameId || !this.isConnected) {
+      throw new Error("Not connected to a game");
+    }
+
+    const gameState = store.getState().game;
+    if (!gameState.promotionState.isAwaiting || !gameState.promotionState.position) {
+      throw new Error("No pending promotion");
+    }
+
+    const { row, col } = gameState.promotionState.position;
+    const playerColor = gameState.promotionState.color!;
+
+    console.log(`🎯 P2PGame: Making promotion to ${pieceType} at (${row}, ${col}) for ${playerColor}`);
+
+    // ✅ Apply promotion locally first (optimistic UI)
+    const { completePromotion } = require("../state/gameSlice");
+    store.dispatch(completePromotion({ pieceType }));
+
+    // ✅ Send promotion through P2P service
+    p2pService.sendChessMove({
+      from: { row, col },
+      to: { row, col },
+      pieceCode: `${playerColor}P`,
+      playerColor: playerColor,
+      isPromotion: true,
+      promotionPieceType: pieceType,
+    });
   }
 
   async resignGame(): Promise<void> {

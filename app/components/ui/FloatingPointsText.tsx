@@ -8,6 +8,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
+import { ANIMATION_DURATIONS } from '../../../config/gameConfig';
 
 interface FloatingPointsTextProps {
   points: number;
@@ -24,33 +25,31 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
   color,
   onComplete,
 }) => {
-  const translateY = useSharedValue(0);
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.5);
 
   useEffect(() => {
-    // Smooth, coordinated animation sequence - contained within board
-    translateY.value = withSequence(
-      withTiming(-50, { duration: 1800, easing: Easing.out(Easing.cubic) }, () => {
+    // ✅ SYNCHRONIZED TIMING: Use centralized animation duration
+    // Floating points should be shorter and more responsive
+    const fadeInDuration = ANIMATION_DURATIONS.FADE_IN;
+    const fadeOutDuration = ANIMATION_DURATIONS.FADE_OUT;
+    const visibleDuration = 800; // Shorter visible time for better responsiveness
+    
+    // Simple fade in/out animation - no movement
+    opacity.value = withSequence(
+      withTiming(1, { duration: fadeInDuration }),
+      withTiming(1, { duration: visibleDuration }), // Stay visible for shorter time
+      withTiming(0, { duration: fadeOutDuration, easing: Easing.out(Easing.cubic) }, () => {
         // Call onComplete when animation finishes
         scheduleOnRN(onComplete);
       })
     );
     
-    opacity.value = withSequence(
-      withTiming(1, { duration: 300 }),
-      withTiming(0, { duration: 1500, easing: Easing.out(Easing.cubic) })
-    );
-    
-    scale.value = withSequence(
-      withTiming(1.2, { duration: 300, easing: Easing.out(Easing.back(1.2)) }),
-      withTiming(1.0, { duration: 1500, easing: Easing.out(Easing.cubic) })
-    );
+    scale.value = withTiming(1.3, { duration: fadeInDuration, easing: Easing.out(Easing.back(1.2)) }); // Bigger initial scale, no shrinking
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: translateY.value },
       { scale: scale.value },
     ],
     opacity: opacity.value,
@@ -93,10 +92,10 @@ const FloatingPointsText: React.FC<FloatingPointsTextProps> = ({
 const styles = StyleSheet.create({
   floatingText: {
     position: 'absolute',
-    fontSize: 28,
-    fontWeight: '800',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    fontSize: 36,
+    fontWeight: '900',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
     zIndex: 1000,
     pointerEvents: 'none',
     fontFamily: 'SpaceMono-Bold',

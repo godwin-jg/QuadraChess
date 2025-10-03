@@ -1074,7 +1074,7 @@ class P2PService {
   }
 
   // ✅ CRITICAL FIX: Sync complete game state when game starts
-  private syncGameStateToClients(): void {
+  public syncGameStateToClients(): void {
     if (!this.isHost) return;
 
     console.log("🎮 HOST: Syncing complete game state to all clients");
@@ -1531,12 +1531,49 @@ class P2PService {
       return;
     }
     
+    // ✅ Handle promotion moves specially
+    if (move.isPromotion && move.promotionPieceType) {
+      console.log("🎮 P2PService: Handling promotion move:", move.promotionPieceType);
+      const { completePromotion } = require("../state/gameSlice");
+      store.dispatch(completePromotion({ pieceType: move.promotionPieceType }));
+      return;
+    }
+    
     // ✅ Apply move directly to Redux - no heavy state sync needed
     console.log("🎮 P2PService: Applying received move to Redux");
     console.log("🎮 P2PService: Current Redux gameMode:", store.getState().game.gameMode);
     console.log("🎮 P2PService: Current Redux currentPlayerTurn:", store.getState().game.currentPlayerTurn);
+    
+    // Store previous state to check for elimination
+    const previousState = store.getState().game;
+    const previousEliminatedPlayers = [...previousState.eliminatedPlayers];
+    
     store.dispatch(applyNetworkMove(move));
     console.log("🎮 P2PService: After dispatch - currentPlayerTurn:", store.getState().game.currentPlayerTurn);
+    
+    // ✅ CRITICAL FIX: Check if elimination occurred and sync game state
+    const newState = store.getState().game;
+    const newEliminatedPlayers = [...newState.eliminatedPlayers];
+    
+    // Check if any players were eliminated
+    const eliminationOccurred = newEliminatedPlayers.length > previousEliminatedPlayers.length;
+    
+    // ✅ CRITICAL FIX: Also check if game ended (3 players eliminated)
+    const gameEnded = newEliminatedPlayers.length >= 3 && previousEliminatedPlayers.length < 3;
+    
+    if (eliminationOccurred || gameEnded) {
+      console.log("🎮 P2PService: Game state change detected! Syncing complete game state to all clients");
+      console.log("🎮 P2PService: Previous eliminated players:", previousEliminatedPlayers);
+      console.log("🎮 P2PService: New eliminated players:", newEliminatedPlayers);
+      console.log("🎮 P2PService: Just eliminated:", newState.justEliminated);
+      console.log("🎮 P2PService: Game ended:", gameEnded);
+      console.log("🎮 P2PService: Game status:", newState.gameStatus);
+      console.log("🎮 P2PService: Winner:", newState.winner);
+      console.log("🎮 P2PService: Game over state:", newState.gameOverState);
+      
+      // Sync the complete game state to all clients
+      this.syncGameStateToClients();
+    }
     
     // Note: Turn management is now handled by Redux applyNetworkMove reducer
   }

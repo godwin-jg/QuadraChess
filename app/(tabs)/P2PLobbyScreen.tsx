@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -37,12 +37,18 @@ import AnimatedButton from "../components/ui/AnimatedButton";
 import { hapticsService } from "../../services/hapticsService";
 
 const P2PLobbyScreen: React.FC = () => {
-  console.log("🎮 P2PLobbyScreen: Component mounted/rendered");
-  
   const dispatch = useDispatch();
   const router = useRouter();
   const { settings, updateProfile } = useSettings();
   const insets = useSafeAreaInsets();
+  
+  // Track if this screen is actually focused/visible
+  const [isFocused, setIsFocused] = useState(false);
+  
+  // Only log when actually focused
+  if (isFocused) {
+    console.log("🎮 P2PLobbyScreen: Component mounted/rendered");
+  }
 
   // ✅ All state now comes from Redux
   const {
@@ -59,22 +65,26 @@ const P2PLobbyScreen: React.FC = () => {
     botPlayers,
   } = useSelector((state: RootState) => state.game);
 
-  // Debug logging
-  console.log("🎮 P2PLobbyScreen: Current Redux state:", {
-    players: players.length,
-    isHost,
-    canStartGame,
-    currentGame: currentGame ? "present" : "null",
-    isLoading,
-    isConnected,
-    connectionError
-  });
+  // Debug logging - only when focused
+  if (isFocused) {
+    console.log("🎮 P2PLobbyScreen: Current Redux state:", {
+      players: players.length,
+      isHost,
+      canStartGame,
+      currentGame: currentGame ? "present" : "null",
+      isLoading,
+      isConnected,
+      connectionError
+    });
+  }
 
   // ✅ No more event listeners! All state comes from Redux
   // The P2P service now directly updates Redux state
   
-  // Handle navigation when game starts
+  // Handle navigation when game starts - only when focused
   useEffect(() => {
+    if (!isFocused) return; // Only run when screen is actually focused
+    
     console.log("🎮 UI: Navigation effect triggered - currentGame:", currentGame, "isHost:", isHost);
     if (currentGame && currentGame.status === 'playing' && !isHost) {
       console.log("🎮 UI: Game status is 'playing', navigating to game screen...");
@@ -91,16 +101,18 @@ const P2PLobbyScreen: React.FC = () => {
         isHost: isHost
       });
     }
-  }, [currentGame, isHost, router]);
+  }, [currentGame, isHost, router, isFocused]);
 
-  // Auto-discover games on mount
+  // Auto-discover games on mount - only when focused
   useEffect(() => {
+    if (!isFocused) return; // Only run when screen is actually focused
+    
     // Start real-time discovery - P2P service handles updates automatically
     p2pService.discoverGames().catch(error => {
       console.error("Error starting discovery:", error);
     });
 
-    // Cleanup: Stop discovery when component unmounts
+    // Cleanup: Stop discovery when component unmounts or loses focus
     return () => {
       console.log("🎮 P2PLobbyScreen: Cleaning up - stopping network discovery");
       try {
@@ -110,13 +122,15 @@ const P2PLobbyScreen: React.FC = () => {
         console.error("Error stopping discovery:", error);
       }
     };
-  }, []);
+  }, [isFocused]);
 
   // Handle discovery when screen gains/loses focus
   useFocusEffect(
     React.useCallback(() => {
-      // Screen is focused - restart discovery to ensure we see new games
+      // Screen is focused - set focus state and start discovery
+      setIsFocused(true);
       console.log("🎮 P2PLobbyScreen: Screen focused - starting network discovery");
+      
       try {
         p2pService.discoverGames().catch(error => {
           console.error("Error restarting discovery on focus:", error);
@@ -135,6 +149,7 @@ const P2PLobbyScreen: React.FC = () => {
       
       // Return cleanup function when screen loses focus
       return () => {
+        setIsFocused(false);
         console.log("🎮 P2PLobbyScreen: Screen lost focus - stopping network discovery and periodic refresh");
         clearInterval(refreshInterval);
         try {

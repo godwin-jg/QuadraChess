@@ -324,37 +324,52 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                   console.log('🔍 Sound switch toggled to:', value);
                   console.log('🔍 Current haptics setting:', settings.game.hapticsEnabled);
                   
-                  // Try VERY strong haptic patterns
-                  try {
-                    console.log('🎯 Trying TRIPLE Heavy haptics...');
-                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                    console.log('✅ Triple Heavy haptics successful');
-                  } catch (error) {
-                    console.log('❌ Triple Heavy haptics failed:', error);
+                  // ✅ CRITICAL FIX: Auto-save sound setting immediately for instant effect
+                  updateGame({ soundEnabled: value });
+                  
+                  // ✅ CRITICAL FIX: Only test haptics if haptics are enabled
+                  if (settings.game.hapticsEnabled) {
+                    // Try VERY strong haptic patterns
+                    try {
+                      console.log('🎯 Trying TRIPLE Heavy haptics...');
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      console.log('✅ Triple Heavy haptics successful');
+                    } catch (error) {
+                      console.log('❌ Triple Heavy haptics failed:', error);
+                    }
+                    
+                    setTimeout(async () => {
+                      try {
+                        console.log('🎯 Trying Notification haptic...');
+                        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        console.log('✅ Notification haptic successful');
+                      } catch (error) {
+                        console.log('❌ Notification haptic failed:', error);
+                      }
+                    }, 500);
+                    
+                    setTimeout(async () => {
+                      try {
+                        console.log('🎯 Trying Error notification haptic...');
+                        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                        console.log('✅ Error notification haptic successful');
+                      } catch (error) {
+                        console.log('❌ Error notification haptic failed:', error);
+                      }
+                    }, 1000);
+                  } else {
+                    console.log('🔇 Haptics disabled - skipping haptic test');
                   }
                   
-                  setTimeout(async () => {
-                    try {
-                      console.log('🎯 Trying Notification haptic...');
-                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      console.log('✅ Notification haptic successful');
-                    } catch (error) {
-                      console.log('❌ Notification haptic failed:', error);
-                    }
-                  }, 500);
-                  
-                  setTimeout(async () => {
-                    try {
-                      console.log('🎯 Trying Error notification haptic...');
-                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                      console.log('✅ Error notification haptic successful');
-                    } catch (error) {
-                      console.log('❌ Error notification haptic failed:', error);
-                    }
-                  }, 1000);
-                  updateGame({ soundEnabled: value });
+                  // ✅ CRITICAL FIX: Auto-save the setting immediately
+                  try {
+                    await saveSettings();
+                    console.log('✅ Sound setting auto-saved successfully');
+                  } catch (error) {
+                    console.error('❌ Failed to auto-save sound setting:', error);
+                  }
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.soundEnabled ? "#FFFFFF" : "#9CA3AF"}
@@ -368,6 +383,14 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                   await hapticsService.toggle();
                   soundService.playToggleSound();
                   updateGame({ animationsEnabled: value });
+                  
+                  // ✅ CRITICAL FIX: Auto-save animations setting immediately for instant effect
+                  try {
+                    await saveSettings();
+                    console.log('✅ Animations setting auto-saved successfully');
+                  } catch (error) {
+                    console.error('❌ Failed to auto-save animations setting:', error);
+                  }
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={
@@ -391,9 +414,17 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Text className="text-lg font-semibold text-gray-300 flex-1">Haptic Feedback</Text>
               <Switch
                 value={settings.game.hapticsEnabled}
-                onValueChange={(value) => {
+                onValueChange={async (value) => {
                   // Don't trigger haptic feedback when toggling haptics setting
                   updateGame({ hapticsEnabled: value });
+                  
+                  // ✅ CRITICAL FIX: Auto-save haptics setting immediately for instant effect
+                  try {
+                    await saveSettings();
+                    console.log('✅ Haptics setting auto-saved successfully');
+                  } catch (error) {
+                    console.error('❌ Failed to auto-save haptics setting:', error);
+                  }
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.hapticsEnabled ? "#FFFFFF" : "#9CA3AF"}

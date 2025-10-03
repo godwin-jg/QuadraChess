@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, View } from "react-native";
+import Animated from "react-native-reanimated";
 import { BoardTheme } from "./BoardThemeConfig";
 import Piece from "./Piece";
 import MiniPlayerCircle from "../ui/MiniPlayerCircle";
@@ -30,6 +31,7 @@ interface SquareProps {
     isCurrentTurn: boolean;
     isEliminated: boolean;
   }>;
+  boardRotation?: number;
 }
 
 const Square = React.memo(function Square({
@@ -51,6 +53,7 @@ const Square = React.memo(function Square({
   onHoverOut,
   boardTheme,
   playerData,
+  boardRotation = 0,
 }: SquareProps) {
   // Check if this is a corner square that should not be playable - memoized for performance
   const isCornerSquare = React.useMemo(() => 
@@ -81,35 +84,82 @@ const Square = React.memo(function Square({
         player = playerData.find(p => p.color === "r"); // Bottom-right = Red
       }
       
-      if (player) {
-        // Determine corner position
-        const isTopCorner = row === 1;
-        const isBottomCorner = row === 12;
-        const isLeftCorner = col === 1;
-        const isRightCorner = col === 12;
-        
-        return (
-          <View
-            style={{
-              width: size,
-              height: size,
-              backgroundColor: "transparent",
-              justifyContent: "center",
-              alignItems: "center",
-              paddingBottom: isTopCorner ? 8 : 0, // Add padding bottom for top corners
-              paddingTop: isBottomCorner ? 8 : 0, // Add padding top for bottom corners
-              paddingRight: isLeftCorner ? 8 : 0, // Add padding right for left corners
-              paddingLeft: isRightCorner ? 8 : 0, // Add padding left for right corners
-            }}
-          >
-            <MiniPlayerCircle
-              player={player}
-              isCurrentTurn={player.isCurrentTurn}
-              isEliminated={player.isEliminated}
-            />
-          </View>
-        );
-      }
+        if (player) {
+          // Determine corner position
+          const isTopCorner = row === 1;
+          const isBottomCorner = row === 12;
+          const isLeftCorner = col === 1;
+          const isRightCorner = col === 12;
+          
+          // Calculate adjusted padding based on board rotation
+          // When board rotates, we need to inverse the padding to maintain proper alignment
+          const getAdjustedPadding = () => {
+            switch (boardRotation) {
+              case 0: // Red player - no rotation, use original padding
+                return {
+                  paddingBottom: isTopCorner ? 28 : 0,
+                  paddingTop: isBottomCorner ? 4 : 0,
+                  paddingRight: isLeftCorner ? 8 : 0,
+                  paddingLeft: isRightCorner ? 8 : 0,
+                };
+              case 90: // Blue player - 90° clockwise
+                // Top becomes right, bottom becomes left, left becomes top, right becomes bottom
+                return {
+                  paddingBottom: isRightCorner ? 8 : 0, // Right corners become bottom
+                  paddingTop: isLeftCorner ? 8 : 0,     // Left corners become top
+                  paddingRight: isTopCorner ? 8 : 0,    // Top corners become right
+                  paddingLeft: isBottomCorner ? 8 : 0,  // Bottom corners become left
+                };
+              case 180: // Yellow player - 180°
+                // Top becomes bottom, bottom becomes top, left becomes right, right becomes left
+                return {
+                  paddingBottom: isBottomCorner ? 8 : 0, // Bottom corners stay bottom
+                  paddingTop: isTopCorner ? 8 : 0,       // Top corners become bottom
+                  paddingRight: isRightCorner ? 8 : 0,   // Right corners become left
+                  paddingLeft: isLeftCorner ? 8 : 0,     // Left corners become right
+                };
+              case 270: // Green player - 270° clockwise
+                // Top becomes left, bottom becomes right, left becomes bottom, right becomes top
+                return {
+                  paddingBottom: isLeftCorner ? 8 : 0,   // Left corners become bottom
+                  paddingTop: isRightCorner ? 8 : 0,     // Right corners become top
+                  paddingRight: isBottomCorner ? 8 : 0,  // Bottom corners become right
+                  paddingLeft: isTopCorner ? 8 : 0,      // Top corners become left
+                };
+              default:
+                return {
+                  paddingBottom: isTopCorner ? 8 : 0,
+                  paddingTop: isBottomCorner ? 8 : 0,
+                  paddingRight: isLeftCorner ? 28 : 0,
+                  paddingLeft: isRightCorner ? 3 : 0,
+                };
+            }
+          };
+          
+          const adjustedPadding = getAdjustedPadding();
+          
+          return (
+            <View
+              style={{
+                width: size,
+                height: size,
+                backgroundColor: "transparent",
+                justifyContent: "center",
+                alignItems: "center",
+                ...adjustedPadding,
+              }}
+            >
+              <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
+                <MiniPlayerCircle
+                  player={player}
+                  isCurrentTurn={player.isCurrentTurn}
+                  isEliminated={player.isEliminated}
+                  boardRotation={boardRotation}
+                />
+              </Animated.View>
+            </View>
+          );
+        }
     }
     
     // Render a transparent view that occupies space but is invisible,
@@ -215,7 +265,9 @@ const Square = React.memo(function Square({
           <View className="w-1/3 h-1/3 bg-gray-500/50 rounded-full" />
         )}
         {piece && (
-          <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} />
+          <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
+            <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} />
+          </Animated.View>
         )}
         {/* Check overlay */}
         {isInCheck && (

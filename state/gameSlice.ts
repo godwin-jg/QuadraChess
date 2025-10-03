@@ -1,4 +1,4 @@
-import { createSlice, PayloadAction } from "@reduxjs/toolkit";
+import { createSlice, PayloadAction, createSelector } from "@reduxjs/toolkit";
 import networkService, { Player } from "../app/services/networkService";
 import {
   getValidMoves,
@@ -7,6 +7,8 @@ import {
 } from "../functions/src/logic/gameLogic";
 import { MoveInfo } from "../types";
 import { initialBoardState } from "./boardState";
+import { PIECE_VALUES, GAME_BONUSES, TURN_ORDER } from "../config/gameConfig";
+import { EnPassantTarget } from "./types";
 import {
   getRookIdentifier,
   isCastlingMove,
@@ -18,6 +20,7 @@ import { GameState, Position, turnOrder } from "./types";
 interface MovePayload {
   from: Position;
   to: { row: number; col: number };
+  isPromotion?: boolean; // Optional flag to indicate if this move results in promotion
 }
 
 // Helper function to create a deep copy of the game state
@@ -26,10 +29,10 @@ export const createStateSnapshot = (state: GameState): GameState => {
     ...state,
     boardState: state.boardState.map((row) => [...row]),
     capturedPieces: {
-      r: [...state.capturedPieces.r],
-      b: [...state.capturedPieces.b],
-      y: [...state.capturedPieces.y],
-      g: [...state.capturedPieces.g],
+      r: [...(state.capturedPieces?.r || [])],
+      b: [...(state.capturedPieces?.b || [])],
+      y: [...(state.capturedPieces?.y || [])],
+      g: [...(state.capturedPieces?.g || [])],
     },
     checkStatus: { ...state.checkStatus },
     scores: { ...state.scores },
@@ -116,6 +119,355 @@ const initialState: GameState = {
   players: baseInitialState.players,
   isHost: baseInitialState.isHost,
   canStartGame: baseInitialState.canStartGame,
+};
+
+// ✅ Core game logic function - DRY principle implementation
+// This function contains all the shared logic for processing moves
+const _applyMoveLogic = (
+  state: GameState, 
+  move: { 
+    from: Position; 
+    to: Position; 
+    pieceCode: string; 
+    playerColor: string; 
+    capturedPiece: string | null; 
+    isCastling: boolean; 
+    isEnPassant: boolean; 
+    enPassantTarget?: EnPassantTarget | null; // ✅ Enhanced type safety
+  }
+) => {
+  const { from, to, pieceCode, playerColor, capturedPiece, isCastling, isEnPassant, enPassantTarget } = move;
+  const { row: startRow, col: startCol } = from;
+  const { row: targetRow, col: targetCol } = to;
+  const pieceType = pieceCode[1];
+
+  // Track if King or Rook has moved
+  if (pieceType === "K") {
+    state.hasMoved[`${playerColor}K` as keyof typeof state.hasMoved] = true;
+  } else if (pieceType === "R") {
+    const rookId = getRookIdentifier(playerColor, startRow, startCol);
+    if (rookId) {
+      state.hasMoved[rookId as keyof typeof state.hasMoved] = true;
+    }
+  }
+
+  // Handle castling - move both King and Rook
+  if (isCastling) {
+    const kingTargetRow = targetRow;
+    const kingTargetCol = targetCol;
+
+    // Determine rook positions based on castling direction
+    let rookStartRow: number, rookStartCol: number, rookTargetRow: number, rookTargetCol: number;
+
+    if (playerColor === "r") {
+      // Red - bottom row
+      if (targetCol > startCol) {
+        // Kingside castling
+        rookStartRow = 13;
+        rookStartCol = 10; // Right rook
+        rookTargetRow = 13;
+        rookTargetCol = 8;
+      } else {
+        // Queenside castling
+        rookStartRow = 13;
+        rookStartCol = 3; // Left rook
+        rookTargetRow = 13;
+        rookTargetCol = 6;
+      }
+    } else if (playerColor === "b") {
+      // Blue - left column
+      if (targetRow > startRow) {
+        // Kingside castling (down)
+        rookStartRow = 10;
+        rookStartCol = 0; // Bottom rook at (10, 0)
+        rookTargetRow = 8; // Rook moves to (8, 0)
+        rookTargetCol = 0;
+      } else {
+        // Queenside castling (up)
+        rookStartRow = 3;
+        rookStartCol = 0; // Top rook at (3, 0)
+        rookTargetRow = 6; // Rook moves to (6, 0)
+        rookTargetCol = 0;
+      }
+    } else if (playerColor === "y") {
+      // Yellow - top row
+      if (targetCol > startCol) {
+        // Kingside castling (right) - King moves from (0,6) to (0,8)
+        rookStartRow = 0;
+        rookStartCol = 10; // Right rook at (0, 10)
+        rookTargetRow = 0;
+        rookTargetCol = 7; // Rook moves to (0, 7)
+      } else {
+        // Queenside castling (left) - King moves from (0,6) to (0,4)
+        rookStartRow = 0;
+        rookStartCol = 3; // Left rook at (0, 3)
+        rookTargetRow = 0;
+        rookTargetCol = 5; // Rook moves to (0, 5)
+      }
+    } else if (playerColor === "g") {
+      // Green - right column
+      if (targetRow > startRow) {
+        // Kingside castling (down) - King moves from (6,13) to (8,13)
+        rookStartRow = 10;
+        rookStartCol = 13; // Bottom rook at (10, 13)
+        rookTargetRow = 7; // Rook moves to (7, 13)
+        rookTargetCol = 13;
+      } else {
+        // Queenside castling (up) - King moves from (6,13) to (4,13)
+        rookStartRow = 3;
+        rookStartCol = 13; // Top rook at (3, 13)
+        rookTargetRow = 5; // Rook moves to (5, 13)
+        rookTargetCol = 13;
+      }
+    } else {
+      // Default fallback (should not happen)
+      rookStartRow = 0;
+      rookStartCol = 0;
+      rookTargetRow = 0;
+      rookTargetCol = 0;
+    }
+
+    // Move the rook
+    const rookPiece = state.boardState[rookStartRow!][rookStartCol!];
+    state.boardState[rookTargetRow!][rookTargetCol!] = rookPiece;
+    state.boardState[rookStartRow!][rookStartCol!] = null;
+
+    // Mark the rook as moved
+    const rookId = getRookIdentifier(playerColor, rookStartRow!, rookStartCol!);
+    if (rookId) {
+      state.hasMoved[rookId as keyof typeof state.hasMoved] = true;
+    }
+  }
+
+  // Handle en passant capture
+  if (isEnPassant && enPassantTarget) {
+    const createdByColor = enPassantTarget.createdBy.charAt(0);
+    const { row: skippedRow, col: skippedCol } = enPassantTarget.position;
+
+    // Calculate captured pawn position based on movement direction
+    const capturedPos = (() => {
+      switch (createdByColor) {
+        case "r":
+          return { row: skippedRow - 1, col: skippedCol };
+        case "y":
+          return { row: skippedRow + 1, col: skippedCol };
+        case "b":
+          return { row: skippedRow, col: skippedCol + 1 };
+        case "g":
+          return { row: skippedRow, col: skippedCol - 1 };
+        default:
+          throw new Error(`Invalid piece color: ${createdByColor}`);
+      }
+    })();
+
+    // Remove captured pawn and update score
+    const capturedPawn = state.boardState[capturedPos.row][capturedPos.col];
+    if (capturedPawn) {
+      state.boardState[capturedPos.row][capturedPos.col] = null;
+      if (!state.capturedPieces[playerColor as keyof typeof state.capturedPieces]) {
+        state.capturedPieces[playerColor as keyof typeof state.capturedPieces] = [];
+      }
+      state.capturedPieces[playerColor as keyof typeof state.capturedPieces].push(capturedPawn);
+      state.scores[playerColor as keyof typeof state.scores] += 1;
+    }
+  }
+
+  // Handle regular capture (only for non-castling moves and non-en passant captures)
+  if (capturedPiece && !isCastling && !isEnPassant) {
+    // Prevent king capture - kings cannot be captured
+    if (capturedPiece[1] === "K") {
+      return; // Don't make the move if trying to capture a king
+    }
+
+    const capturingPlayer = playerColor;
+    if (!state.capturedPieces[capturingPlayer as keyof typeof state.capturedPieces]) {
+      state.capturedPieces[capturingPlayer as keyof typeof state.capturedPieces] = [];
+    }
+    state.capturedPieces[capturingPlayer as keyof typeof state.capturedPieces].push(capturedPiece);
+
+    // Add points for captured piece
+    const capturedPieceType = capturedPiece[1];
+    const points = PIECE_VALUES[capturedPieceType as keyof typeof PIECE_VALUES] || 0;
+    state.scores[capturingPlayer as keyof typeof state.scores] += points;
+  }
+
+  // Move the piece (for all moves, including promotions)
+  state.boardState[targetRow][targetCol] = pieceCode;
+  state.boardState[startRow][startCol] = null;
+
+  // Set enPassantTarget for two-square pawn moves
+  if (pieceType === "P") {
+    const isTwoSquareMove =
+      (Math.abs(targetRow - startRow) === 2 && targetCol === startCol) ||
+      (Math.abs(targetCol - startCol) === 2 && targetRow === startRow);
+
+    if (isTwoSquareMove) {
+      const skippedSquare = (() => {
+        switch (playerColor) {
+          case "r":
+            return { row: targetRow + 1, col: targetCol };
+          case "y":
+            return { row: targetRow - 1, col: targetCol };
+          case "b":
+            return { row: targetRow, col: targetCol - 1 };
+          case "g":
+            return { row: targetRow, col: targetCol + 1 };
+          default:
+            throw new Error(`Invalid piece color: ${playerColor}`);
+        }
+      })();
+
+      state.enPassantTargets.push({
+        position: skippedSquare,
+        createdBy: pieceCode,
+        createdByTurn: state.currentPlayerTurn,
+      });
+    }
+  }
+
+  // Clear selection
+  state.selectedPiece = null;
+  state.validMoves = [];
+
+  // Update check status for all players
+  const newCheckStatus = updateAllCheckStatus(
+    state.boardState,
+    state.eliminatedPlayers || [],
+    state.hasMoved
+  );
+  
+  state.checkStatus = newCheckStatus;
+
+  // Check if the current player is in check after their move
+  const currentPlayerInCheck =
+    state.checkStatus[state.currentPlayerTurn as keyof typeof state.checkStatus];
+
+  if (currentPlayerInCheck) {
+    // The current player is in check after their move - this is illegal
+    // Revert the move
+    state.boardState[startRow][startCol] = pieceCode;
+    state.boardState[targetRow][targetCol] = capturedPiece;
+    state.selectedPiece = { row: startRow, col: startCol };
+    state.validMoves = getValidMoves(
+      pieceCode,
+      { row: startRow, col: startCol },
+      state.boardState,
+      state.eliminatedPlayers,
+      state.hasMoved,
+      state.enPassantTargets
+    );
+    return; // Don't advance the turn
+  }
+
+  // Clear justEliminated flag from previous move (if any)
+  state.justEliminated = null;
+
+  // Check if any opponent is in checkmate/stalemate after this move
+  // We need to check all other players, not just the next one
+  const currentPlayer = state.currentPlayerTurn;
+  const otherPlayers = TURN_ORDER.filter(
+    (player) =>
+      player !== currentPlayer &&
+      !state.eliminatedPlayers.includes(player)
+  );
+
+  // Check each opponent for checkmate/stalemate
+  for (const opponent of otherPlayers) {
+    const opponentHasMoves = hasAnyLegalMoves(
+      opponent,
+      state.boardState,
+      state.eliminatedPlayers,
+      state.hasMoved,
+      state.enPassantTargets
+    );
+
+    if (!opponentHasMoves) {
+      // This opponent has no legal moves
+      const isInCheck = isKingInCheck(
+        opponent,
+        state.boardState,
+        state.eliminatedPlayers,
+        state.hasMoved
+      );
+
+      if (isInCheck) {
+        // Checkmate - eliminate the player
+        state.gameStatus = "checkmate";
+        state.eliminatedPlayers.push(opponent);
+        state.justEliminated = opponent;
+        state.scores[state.currentPlayerTurn as keyof typeof state.scores] += GAME_BONUSES.CHECKMATE;
+
+        // Set game over state for checkmate
+        state.gameOverState = {
+          isGameOver: true,
+          status: "checkmate",
+          eliminatedPlayer: opponent,
+        };
+      } else {
+        // Stalemate - eliminate the player
+        state.gameStatus = "stalemate";
+        state.eliminatedPlayers.push(opponent);
+        state.justEliminated = opponent;
+
+        // Award points for stalemating opponent: +10 for each player still in game
+        const remainingPlayers = TURN_ORDER.filter(
+          (player) => !state.eliminatedPlayers.includes(player)
+        );
+        const stalematePoints = remainingPlayers.length * GAME_BONUSES.STALEMATE_PER_PLAYER;
+        state.scores[state.currentPlayerTurn as keyof typeof state.scores] += stalematePoints;
+
+        // Set game over state for stalemate
+        state.gameOverState = {
+          isGameOver: true,
+          status: "stalemate",
+          eliminatedPlayer: opponent,
+        };
+      }
+      break; // Exit the loop after eliminating one player
+    }
+  }
+
+  // Always advance to next player after a move
+  // ✅ CRITICAL FIX: Use the player who made the move (not the eliminated player) for turn advancement
+  const playerWhoMoved = state.currentPlayerTurn;
+  const currentIndex = TURN_ORDER.indexOf(playerWhoMoved as any);
+  const nextIndex = (currentIndex + 1) % TURN_ORDER.length;
+  const nextPlayerInSequence = TURN_ORDER[nextIndex];
+
+  // Find the next active player (skip eliminated players)
+  let nextActivePlayer = nextPlayerInSequence;
+  while (state.eliminatedPlayers.includes(nextActivePlayer)) {
+    const activeIndex = TURN_ORDER.indexOf(nextActivePlayer as any);
+    const nextActiveIndex = (activeIndex + 1) % TURN_ORDER.length;
+    nextActivePlayer = TURN_ORDER[nextActiveIndex];
+  }
+
+  state.currentPlayerTurn = nextActivePlayer;
+
+  // Check if the entire game is over
+  if (state.eliminatedPlayers.length === 3) {
+    // Find the one player who is NOT in the eliminatedPlayers array
+    const winner = TURN_ORDER.find(
+      (player) => !state.eliminatedPlayers.includes(player)
+    );
+
+    if (winner) {
+      state.winner = winner;
+      state.gameStatus = "finished";
+      state.gameOverState = {
+        isGameOver: true,
+        status: "finished",
+        eliminatedPlayer: null,
+      };
+    }
+
+    // Clear justEliminated flag after a delay to allow UI to react
+    // We'll clear it in the next move instead
+  } else {
+    // ✅ CRITICAL FIX: Reset game status to active after elimination (unless game is finished)
+    // This allows the game to continue with remaining players
+    state.gameStatus = "active";
+  }
 };
 
 const gameSlice = createSlice({
@@ -216,528 +568,118 @@ const gameSlice = createSlice({
       // Clear move cache when board state changes
       state.moveCache = {};
 
-      const { from, to } = action.payload;
+      const { from, to, isPromotion } = action.payload;
       const { row: startRow, col: startCol } = from;
       const { row: targetRow, col: targetCol } = to;
 
       // Get the piece to move from the board state
       const pieceToMove = state.boardState[startRow][startCol];
       
-      if (pieceToMove) {
-        // Check if en passant opportunities should expire
-        // Remove targets that were created by the current player (full round has passed)
-        state.enPassantTargets = state.enPassantTargets.filter(
-          (target) => target.createdByTurn !== state.currentPlayerTurn
-        );
+      if (!pieceToMove) return;
 
-        const capturedPiece = state.boardState[targetRow][targetCol];
-        const pieceColor = pieceToMove?.charAt(0);
-        const pieceType = pieceToMove?.[1];
+      // Check if en passant opportunities should expire
+      // Remove targets that were created by the current player (full round has passed)
+      state.enPassantTargets = state.enPassantTargets.filter(
+        (target) => target.createdByTurn !== state.currentPlayerTurn
+      );
 
-        // Enforce player turn - only current player can make moves
-        // Skip turn validation ONLY in solo mode for testing purposes
-        // For P2P mode, let the P2P service handle move validation and sending
+      const capturedPiece = state.boardState[targetRow][targetCol];
+      const pieceColor = pieceToMove.charAt(0);
+      const pieceType = pieceToMove[1];
 
-        if (
-          state.gameMode !== "solo" &&
-          state.gameMode !== "p2p" &&
-          state.gameMode !== "online" && // OPTIMIZATION: Allow online mode for local-first approach
-          pieceColor !== state.currentPlayerTurn
-        ) {
+      // Enforce player turn - only current player can make moves
+      if (
+        state.gameMode !== "solo" &&
+        state.gameMode !== "p2p" &&
+        state.gameMode !== "online" &&
+        pieceColor !== state.currentPlayerTurn
+      ) {
+        return; // Don't make the move
+      }
+
+      // For P2P mode, validate turn and send move through P2P service
+      if (state.gameMode === "p2p") {
+        if (pieceColor !== state.currentPlayerTurn) {
           return; // Don't make the move
         }
-
-        // For P2P mode, validate turn and send move through P2P service
-        if (state.gameMode === "p2p") {
-          // ✅ CRITICAL: Validate turn in P2P mode
-          if (pieceColor !== state.currentPlayerTurn) {
-            return; // Don't make the move
-          }
-          
-          // Import the P2P service dynamically to avoid circular imports
-          const p2pGameService = require("../services/p2pGameService").default;
-          const moveData = {
-            from: { row: startRow, col: startCol },
-            to: { row: targetRow, col: targetCol },
-            pieceCode: pieceToMove,
-            playerColor: pieceColor,
-          };
-          
-          // Send move through P2P service (this will handle validation and synchronization)
-          p2pGameService.makeMove(moveData).catch((error: any) => {
-            console.error("P2P move failed:", error);
-          });
-          
-          // Don't apply the move locally - let the P2P service handle it
-          return;
-        }
-
-        // Track if King or Rook has moved
-        if (pieceType === "K") {
-          state.hasMoved[`${pieceColor}K` as keyof typeof state.hasMoved] =
-            true;
-        } else if (pieceType === "R") {
-          const rookId = getRookIdentifier(pieceColor!, startRow, startCol);
-          if (rookId) {
-            state.hasMoved[rookId as keyof typeof state.hasMoved] = true;
-          }
-        }
-
-        // Check if this is a castling move
-        const isCastling = isCastlingMove(
-          pieceToMove!,
-          startRow,
-          startCol,
-          targetRow,
-          targetCol
-        );
-
-        if (isCastling) {
-          // 🔊 Play castle sound effect (includes haptic fallback if needed)
-          try {
-            const soundService = require('../services/soundService').default;
-            soundService.playCastleSound();
-          } catch (error) {
-            console.log('🔊 SoundService: Failed to play castle sound:', error);
-          }
-          
-          // Handle castling - move both King and Rook
-          const kingTargetRow = targetRow;
-          const kingTargetCol = targetCol;
-
-          // Determine rook positions based on castling direction
-          let rookStartRow, rookStartCol, rookTargetRow, rookTargetCol;
-
-          if (pieceColor === "r") {
-            // Red - bottom row
-            if (targetCol > startCol) {
-              // Kingside castling
-              rookStartRow = 13;
-              rookStartCol = 10; // Right rook
-              rookTargetRow = 13;
-              rookTargetCol = 8;
-            } else {
-              // Queenside castling
-              rookStartRow = 13;
-              rookStartCol = 3; // Left rook
-              rookTargetRow = 13;
-              rookTargetCol = 6;
-            }
-          } else if (pieceColor === "b") {
-            // Blue - left column
-            if (targetRow > startRow) {
-              // Kingside castling (down)
-              rookStartRow = 10;
-              rookStartCol = 0; // Bottom rook at (10, 0)
-              rookTargetRow = 8; // Rook moves to (8, 0)
-              rookTargetCol = 0;
-            } else {
-              // Queenside castling (up)
-              rookStartRow = 3;
-              rookStartCol = 0; // Top rook at (3, 0)
-              rookTargetRow = 6; // Rook moves to (6, 0)
-              rookTargetCol = 0;
-            }
-          } else if (pieceColor === "y") {
-            // Yellow - top row
-            if (targetCol > startCol) {
-              // Kingside castling (right) - King moves from (0,6) to (0,8)
-              rookStartRow = 0;
-              rookStartCol = 10; // Right rook at (0, 10)
-              rookTargetRow = 0;
-              rookTargetCol = 7; // Rook moves to (0, 7)
-            } else {
-              // Queenside castling (left) - King moves from (0,6) to (0,4)
-              rookStartRow = 0;
-              rookStartCol = 3; // Left rook at (0, 3)
-              rookTargetRow = 0;
-              rookTargetCol = 5; // Rook moves to (0, 5)
-            }
-          } else if (pieceColor === "g") {
-            // Green - right column
-            if (targetRow > startRow) {
-              // Kingside castling (down) - King moves from (6,13) to (8,13)
-              rookStartRow = 10;
-              rookStartCol = 13; // Bottom rook at (10, 13)
-              rookTargetRow = 7; // Rook moves to (7, 13)
-              rookTargetCol = 13;
-            } else {
-              // Queenside castling (up) - King moves from (6,13) to (4,13)
-              rookStartRow = 3;
-              rookStartCol = 13; // Top rook at (3, 13)
-              rookTargetRow = 5; // Rook moves to (5, 13)
-              rookTargetCol = 13;
-            }
-          }
-
-          // Move the rook
-          const rookPiece = state.boardState[rookStartRow!][rookStartCol!];
-          state.boardState[rookTargetRow!][rookTargetCol!] = rookPiece;
-          state.boardState[rookStartRow!][rookStartCol!] = null;
-
-          // Mark the rook as moved
-          const rookId = getRookIdentifier(
-            pieceColor!,
-            rookStartRow!,
-            rookStartCol!
-          );
-          if (rookId) {
-            state.hasMoved[rookId as keyof typeof state.hasMoved] = true;
-          }
-        }
-
-        // A. Handle en passant capture FIRST (before clearing enPassantTargets)
-        const enPassantTarget = state.enPassantTargets.find(
-          (target) =>
-            target.position.row === targetRow &&
-            target.position.col === targetCol &&
-            pieceType === "P" &&
-            pieceToMove !== target.createdBy // Prevent the pawn that created the target from capturing it
-        );
-
-        if (enPassantTarget) {
-          const createdByColor = enPassantTarget.createdBy.charAt(0);
-          const { row: skippedRow, col: skippedCol } = enPassantTarget.position;
-
-          // Calculate captured pawn position based on movement direction
-          const capturedPos = (() => {
-            switch (createdByColor) {
-              case "r":
-                return { row: skippedRow - 1, col: skippedCol };
-              case "y":
-                return { row: skippedRow + 1, col: skippedCol };
-              case "b":
-                return { row: skippedRow, col: skippedCol + 1 };
-              case "g":
-                return { row: skippedRow, col: skippedCol - 1 };
-              default:
-                throw new Error(`Invalid piece color: ${createdByColor}`);
-            }
-          })();
-
-          // Remove captured pawn and update score
-          const capturedPawn =
-            state.boardState[capturedPos.row][capturedPos.col];
-          if (capturedPawn) {
-            state.boardState[capturedPos.row][capturedPos.col] = null;
-            state.capturedPieces[
-              pieceColor as keyof typeof state.capturedPieces
-            ].push(capturedPawn);
-            state.scores[pieceColor as keyof typeof state.scores] += 1;
-          }
-        }
-
-        // B. Handle regular capture (only for non-castling moves and non-en passant captures)
-        if (capturedPiece && !isCastling && !enPassantTarget) {
-          // Prevent king capture - kings cannot be captured
-          if (capturedPiece[1] === "K") {
-            return; // Don't make the move if trying to capture a king
-          }
-
-          const capturingPlayer = pieceToMove?.charAt(0);
-          state.capturedPieces[
-            capturingPlayer as keyof typeof state.capturedPieces
-          ].push(capturedPiece);
-
-          // Add points for captured piece
-          const capturedPieceType = capturedPiece[1];
-          let points = 0;
-          switch (capturedPieceType) {
-            case "P": // Pawn
-              points = 1;
-              break;
-            case "N": // Knight
-              points = 3;
-              break;
-            case "B": // Bishop
-            case "R": // Rook
-              points = 5;
-              break;
-            case "Q": // Queen
-              points = 9;
-              break;
-            case "K": // King
-              points = 0; // Kings cannot be captured - should be checkmated instead
-              break;
-            default:
-              points = 0;
-          }
-          state.scores[capturingPlayer as keyof typeof state.scores] += points;
-        }
-
-        // Check if this is a pawn promotion using the move's isPromotion flag
-        const isPawn = pieceToMove?.endsWith("P");
-        let isPromotion = false;
-
-        if (isPawn) {
-          // Get valid moves for this pawn to check if the move is a promotion
-          const validMoves = getValidMoves(
-            pieceToMove!,
-            { row: startRow, col: startCol },
-            state.boardState,
-            state.eliminatedPlayers,
-            state.hasMoved,
-            state.enPassantTargets
-          );
-
-          // Find the specific move to check its isPromotion flag
-          const move = validMoves.find(
-            (move) => move.row === targetRow && move.col === targetCol
-          );
-          isPromotion = move?.isPromotion || false;
-        }
-
-        // Move the piece (for all moves, including promotions)
-        state.boardState[targetRow][targetCol] = pieceToMove;
-        state.boardState[startRow][startCol] = null;
-
-        // Store the last move for highlighting
-        state.lastMove = {
+        
+        // Import the P2P service dynamically to avoid circular imports
+        const p2pGameService = require("../services/p2pGameService").default;
+        const moveData = {
           from: { row: startRow, col: startCol },
           to: { row: targetRow, col: targetCol },
           pieceCode: pieceToMove,
-          playerColor: pieceColor!,
-          timestamp: Date.now(),
+          playerColor: pieceColor,
         };
-
-        // 🔊 Play move sound effect (includes haptic fallback if needed)
-        try {
-          const soundService = require('../services/soundService').default;
-          if (capturedPiece) {
-            soundService.playCaptureSound();
-          } else {
-            soundService.playMoveSound();
-          }
-        } catch (error) {
-          console.log('🔊 SoundService: Failed to play move sound:', error);
-        }
-
-        if (isPromotion) {
-          // Pause the game for promotion selection
-          state.promotionState = {
-            isAwaiting: true,
-            position: { row: targetRow, col: targetCol },
-            color: pieceColor!,
-          };
-          state.gameStatus = "promotion";
-          // Don't advance the turn yet - wait for promotion completion
-        }
-
-        // C. Set enPassantTarget for two-square pawn moves
-        if (pieceType === "P") {
-          const isTwoSquareMove =
-            (Math.abs(targetRow - startRow) === 2 && targetCol === startCol) ||
-            (Math.abs(targetCol - startCol) === 2 && targetRow === startRow);
-
-          if (isTwoSquareMove) {
-            const skippedSquare = (() => {
-              switch (pieceColor) {
-                case "r":
-                  return { row: targetRow + 1, col: targetCol };
-                case "y":
-                  return { row: targetRow - 1, col: targetCol };
-                case "b":
-                  return { row: targetRow, col: targetCol - 1 };
-                case "g":
-                  return { row: targetRow, col: targetCol + 1 };
-                default:
-                  throw new Error(`Invalid piece color: ${pieceColor}`);
-              }
-            })();
-
-            state.enPassantTargets.push({
-              position: skippedSquare,
-              createdBy: pieceToMove!,
-              createdByTurn: state.currentPlayerTurn,
-            });
-          }
-        }
-
-        // Clear selection
-        state.selectedPiece = null;
-        state.validMoves = [];
-
-        // Update check status for all players
-        const newCheckStatus = updateAllCheckStatus(
-          state.boardState,
-          state.eliminatedPlayers || [],
-          state.hasMoved
-        );
         
-        state.checkStatus = newCheckStatus;
+        // Send move through P2P service (this will handle validation and synchronization)
+        p2pGameService.makeMove(moveData).catch((error: any) => {
+          console.error("P2P move failed:", error);
+        });
+        
+        // Don't apply the move locally - let the P2P service handle it
+        return;
+      }
 
-        // Check if the current player is in check after their move
-        const currentPlayerInCheck =
-          state.checkStatus[
-            state.currentPlayerTurn as keyof typeof state.checkStatus
-          ];
+      // ✅ Gather all information about the move
+      const isCastling = isCastlingMove(pieceToMove, startRow, startCol, targetRow, targetCol);
+      const enPassantTarget = state.enPassantTargets.find(
+        (target) =>
+          target.position.row === targetRow &&
+          target.position.col === targetCol &&
+          pieceType === "P" &&
+          pieceToMove !== target.createdBy
+      );
 
-        if (currentPlayerInCheck) {
-          // The current player is in check after their move - this is illegal
-          // Revert the move
-          state.boardState[startRow][startCol] = pieceToMove;
-          state.boardState[targetRow][targetCol] = capturedPiece;
-          state.selectedPiece = { row: startRow, col: startCol };
-          state.validMoves = getValidMoves(
-            pieceToMove!,
-            { row: startRow, col: startCol },
-            state.boardState,
-            state.eliminatedPlayers,
-            state.hasMoved,
-            state.enPassantTargets
-          );
-          return; // Don't advance the turn
+      // ✅ Call the core logic function
+      _applyMoveLogic(state, {
+        from,
+        to,
+        pieceCode: pieceToMove,
+        playerColor: pieceColor,
+        capturedPiece,
+        isCastling,
+        isEnPassant: !!enPassantTarget,
+        enPassantTarget,
+      });
+
+      // ✅ Update the lastMove and history (this is unique to making a new move)
+      state.lastMove = {
+        from: { row: startRow, col: startCol },
+        to: { row: targetRow, col: targetCol },
+        pieceCode: pieceToMove,
+        playerColor: pieceColor,
+        timestamp: Date.now(),
+        capturedPiece: capturedPiece,
+      };
+
+      if (isPromotion) {
+        // Pause the game for promotion selection
+        state.promotionState = {
+          isAwaiting: true,
+          position: { row: targetRow, col: targetCol },
+          color: pieceColor,
+        };
+        state.gameStatus = "promotion";
+        // Don't advance the turn yet - wait for promotion completion
+      }
+
+      // Save current state to history (only if not in promotion mode)
+      if (state.gameStatus !== "promotion") {
+        // Remove any future history if we're not at the end
+        if (state.historyIndex < state.history.length - 1) {
+          state.history = state.history.slice(0, state.historyIndex + 1);
         }
 
-        // Clear justEliminated flag from previous move (if any)
-        state.justEliminated = null;
-
-        // Check if any opponent is in checkmate/stalemate after this move
-        // We need to check all other players, not just the next one
-        const currentPlayer = state.currentPlayerTurn;
-        const otherPlayers = turnOrder.filter(
-          (player) =>
-            player !== currentPlayer &&
-            !state.eliminatedPlayers.includes(player)
-        );
-
-        // Check each opponent for checkmate/stalemate
-        for (const opponent of otherPlayers) {
-          const opponentHasMoves = hasAnyLegalMoves(
-            opponent,
-            state.boardState,
-            state.eliminatedPlayers,
-            state.hasMoved,
-            state.enPassantTargets
-          );
-
-          if (!opponentHasMoves) {
-            // This opponent has no legal moves
-            const isInCheck = isKingInCheck(
-              opponent,
-              state.boardState,
-              state.eliminatedPlayers,
-              state.hasMoved
-            );
-
-            if (isInCheck) {
-              // Checkmate - eliminate the player
-              state.gameStatus = "checkmate";
-              state.eliminatedPlayers.push(opponent);
-              state.justEliminated = opponent;
-              state.scores[
-                state.currentPlayerTurn as keyof typeof state.scores
-              ] += 20;
-
-              // 🔊 Play checkmate sound effect (includes haptic fallback if needed)
-              try {
-                const soundService = require('../services/soundService').default;
-                soundService.playCheckmateSound();
-              } catch (error) {
-                console.log('🔊 SoundService: Failed to play checkmate sound:', error);
-              }
-
-              // Set game over state for checkmate
-              state.gameOverState = {
-                isGameOver: true,
-                status: "checkmate",
-                eliminatedPlayer: opponent,
-              };
-            } else {
-              // Stalemate - eliminate the player
-              state.gameStatus = "stalemate";
-              state.eliminatedPlayers.push(opponent);
-              state.justEliminated = opponent;
-
-              // Award points for stalemating opponent: +10 for each player still in game
-              const remainingPlayers = ['r', 'b', 'y', 'g'].filter(
-                (player) => !state.eliminatedPlayers.includes(player)
-              );
-              const stalematePoints = remainingPlayers.length * 10;
-              state.scores[
-                state.currentPlayerTurn as keyof typeof state.scores
-              ] += stalematePoints;
-
-              // 🔊 Play stalemate sound effect (includes haptic fallback if needed)
-              try {
-                const soundService = require('../services/soundService').default;
-                soundService.playSound('stalemate');
-              } catch (error) {
-                console.log('🔊 SoundService: Failed to play stalemate sound:', error);
-              }
-
-              // Set game over state for stalemate
-              state.gameOverState = {
-                isGameOver: true,
-                status: "stalemate",
-                eliminatedPlayer: opponent,
-              };
-            }
-            break; // Exit the loop after eliminating one player
-          }
-        }
-
-        // Always advance to next player after a move
-        // ✅ CRITICAL FIX: Use the player who made the move (not the eliminated player) for turn advancement
-        const playerWhoMoved = state.currentPlayerTurn;
-        const currentIndex = turnOrder.indexOf(playerWhoMoved as any);
-        const nextIndex = (currentIndex + 1) % turnOrder.length;
-        const nextPlayerInSequence = turnOrder[nextIndex];
-
-        // Find the next active player (skip eliminated players)
-        let nextActivePlayer = nextPlayerInSequence;
-        while (state.eliminatedPlayers.includes(nextActivePlayer)) {
-          const activeIndex = turnOrder.indexOf(nextActivePlayer as any);
-          const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
-          nextActivePlayer = turnOrder[nextActiveIndex];
-        }
-
-        state.currentPlayerTurn = nextActivePlayer;
-
-        // Check if the entire game is over
-        if (state.eliminatedPlayers.length === 3) {
-          // Find the one player who is NOT in the eliminatedPlayers array
-          const winner = turnOrder.find(
-            (player) => !state.eliminatedPlayers.includes(player)
-          );
-
-          if (winner) {
-            state.winner = winner;
-            state.gameStatus = "finished";
-            state.gameOverState = {
-              isGameOver: true,
-              status: "finished",
-              eliminatedPlayer: null,
-            };
-          }
-
-          // Clear justEliminated flag after a delay to allow UI to react
-          // We'll clear it in the next move instead
-        } else {
-          // ✅ CRITICAL FIX: Reset game status to active after elimination (unless game is finished)
-          // This allows the game to continue with remaining players
-          state.gameStatus = "active";
-        }
-
-        // Save current state to history (only if not in promotion mode)
-        if (state.gameStatus !== "promotion") {
-          // Remove any future history if we're not at the end
-          if (state.historyIndex < state.history.length - 1) {
-            state.history = state.history.slice(0, state.historyIndex + 1);
-          }
-
-          // Add current state to history
-          state.history.push(createStateSnapshot(state));
-          state.historyIndex = state.history.length - 1;
-        }
-
-        // Note: In multiplayer mode, moves are sent to server via sendMoveToServer action
-        // and applied locally via applyNetworkMove when server confirms them
+        // Add current state to history
+        state.history.push(createStateSnapshot(state));
+        state.historyIndex = state.history.length - 1;
       }
     },
     resetGame: (state) => {
-      // Preserve the current game mode before resetting
+      // Preserve the current game mode and bot configuration before resetting
       const currentGameMode = state.gameMode;
+      const currentBotPlayers = state.botPlayers;
       
       // ✅ CRITICAL FIX: Completely clear all state properties first
       // Delete all existing properties to ensure no stale data persists
@@ -756,9 +698,11 @@ const gameSlice = createSlice({
       // Restore the game mode after reset
       state.gameMode = currentGameMode;
       
-      // Set bots based on game mode - simple and automatic!
+      // Set bots based on game mode and preserve user configuration
       if (currentGameMode === "single") {
-        state.botPlayers = ['b', 'y', 'g']; // Single player always has bots
+        // For single player mode, preserve the bot configuration set by the user
+        // If no configuration was set, use default (Red is human, others are bots)
+        state.botPlayers = currentBotPlayers.length > 0 ? currentBotPlayers : ['b', 'y', 'g'];
       } else if (currentGameMode === "p2p" || currentGameMode === "online") {
         // P2P and Online modes: preserve existing bot configuration (set by host in lobby)
         // The botPlayers array is already set by the host, don't clear it
@@ -791,13 +735,7 @@ const gameSlice = createSlice({
       if (state.promotionState.isAwaiting && state.promotionState.position) {
         const { pieceType } = action.payload;
         
-        // 🔊 Play promote sound effect (includes haptic fallback if needed)
-        try {
-          const soundService = require('../services/soundService').default;
-          soundService.playPromoteSound();
-        } catch (error) {
-          console.log('🔊 SoundService: Failed to play promote sound:', error);
-        }
+        // ✅ Sound effects moved to UI layer (Board.tsx useEffect)
         
         const { row, col } = state.promotionState.position;
         const pieceColor = state.promotionState.color!;
@@ -954,11 +892,13 @@ const gameSlice = createSlice({
         to: { row: number; col: number };
         pieceCode: string;
         playerColor: string;
+        isEnPassant?: boolean;
+        enPassantTarget?: EnPassantTarget | null; // ✅ Enhanced type safety
       }>
     ) => {
-      const { from, to, pieceCode, playerColor } = action.payload;
+      const { from, to, pieceCode, playerColor, isEnPassant = false, enPassantTarget } = action.payload;
 
-      // ✅ CRITICAL FIX: Handle resignation messages
+      // ✅ Handle resignation messages
       if (pieceCode === "RESIGN") {
         // Add player to eliminated players
         if (!state.eliminatedPlayers.includes(playerColor)) {
@@ -1024,333 +964,43 @@ const gameSlice = createSlice({
         return; // Exit early for resignation
       }
 
-      // Apply the move to the board
+      // ✅ Gather all information about the move
       const { row: fromRow, col: fromCol } = from;
       const { row: toRow, col: toCol } = to;
-
-      // Check if trying to capture a king - prevent king capture
       const capturedPiece = state.boardState[toRow][toCol];
+      
+      // Check if trying to capture a king - prevent king capture
       if (capturedPiece && capturedPiece[1] === "K") {
         return; // Don't apply the move if trying to capture a king
       }
 
-      // ✅ CRITICAL: Track piece captures for P2P mode
-      if (capturedPiece && state.gameMode === "p2p") {
-        console.log(`applyNetworkMove: P2P capture - ${playerColor} captured ${capturedPiece}`);
-        const capturedColor = capturedPiece[0] as keyof typeof state.capturedPieces;
-        state.capturedPieces[capturedColor].push(capturedPiece);
-        
-        // ✅ CRITICAL FIX: Add points for captured piece in P2P mode
-        const capturedPieceType = capturedPiece[1];
-        let points = 0;
-        switch (capturedPieceType) {
-          case "P": // Pawn
-            points = 1;
-            break;
-          case "N": // Knight
-            points = 3;
-            break;
-          case "B": // Bishop
-          case "R": // Rook
-            points = 5;
-            break;
-          case "Q": // Queen
-            points = 9;
-            break;
-          case "K": // King
-            points = 20; // Special bonus for king capture
-            break;
-          default:
-            points = 0;
-        }
-        state.scores[playerColor as keyof typeof state.scores] += points;
-        console.log(`applyNetworkMove: P2P scoring - ${playerColor} gets ${points} points for capturing ${capturedPiece}`);
-      }
+      const isCastling = isCastlingMove(pieceCode, fromRow, fromCol, toRow, toCol);
 
-      // Move the piece
-      state.boardState[toRow][toCol] = pieceCode;
-      state.boardState[fromRow][fromCol] = null;
-
-      // 🔊 Play move sound effect (only for network moves, not solo/single mode)
-      if (state.gameMode !== "solo" && state.gameMode !== "single") {
-        try {
-          const soundService = require('../services/soundService').default;
-          if (capturedPiece) {
-            soundService.playCaptureSound();
-          } else {
-            soundService.playMoveSound();
-          }
-        } catch (error) {
-          console.log('🔊 SoundService: Failed to play move sound:', error);
-        }
-      }
-
-      // Check if this is a castling move
-      const isCastling = isCastlingMove(
+      // ✅ Call the same core logic function
+      _applyMoveLogic(state, {
+        from,
+        to,
         pieceCode,
-        fromRow,
-        fromCol,
-        toRow,
-        toCol
-      );
+        playerColor,
+        capturedPiece,
+        isCastling,
+        isEnPassant,
+        enPassantTarget,
+      });
 
-      if (isCastling) {
-        // 🔊 Play castle sound effect (includes haptic fallback if needed)
-        try {
-          const soundService = require('../services/soundService').default;
-          soundService.playCastleSound();
-        } catch (error) {
-          console.log('🔊 SoundService: Failed to play castle sound:', error);
-        }
-        
-        // Handle castling - move both King and Rook
-        const kingTargetRow = toRow;
-        const kingTargetCol = toCol;
+      // ✅ Update lastMove and history
+      state.lastMove = {
+        from: { row: fromRow, col: fromCol },
+        to: { row: toRow, col: toCol },
+        pieceCode,
+        playerColor,
+        timestamp: Date.now(),
+        capturedPiece,
+      };
 
-        // Determine rook positions based on castling direction
-        let rookStartRow: number, rookStartCol: number, rookTargetRow: number, rookTargetCol: number;
-
-        if (playerColor === "r") {
-          // Red - bottom row
-          if (toCol > fromCol) {
-            // Kingside castling
-            rookStartRow = 13;
-            rookStartCol = 10; // Right rook
-            rookTargetRow = 13;
-            rookTargetCol = 8;
-          } else {
-            // Queenside castling
-            rookStartRow = 13;
-            rookStartCol = 3; // Left rook
-            rookTargetRow = 13;
-            rookTargetCol = 6;
-          }
-        } else if (playerColor === "b") {
-          // Blue - left column
-          if (toRow > fromRow) {
-            // Kingside castling (down)
-            rookStartRow = 10;
-            rookStartCol = 0; // Bottom rook at (10, 0)
-            rookTargetRow = 8; // Rook moves to (8, 0)
-            rookTargetCol = 0;
-          } else {
-            // Queenside castling (up)
-            rookStartRow = 3;
-            rookStartCol = 0; // Top rook at (3, 0)
-            rookTargetRow = 6; // Rook moves to (6, 0)
-            rookTargetCol = 0;
-          }
-        } else if (playerColor === "y") {
-          // Yellow - top row
-          if (toCol > fromCol) {
-            // Kingside castling (right) - King moves from (0,6) to (0,8)
-            rookStartRow = 0;
-            rookStartCol = 10; // Right rook at (0, 10)
-            rookTargetRow = 0;
-            rookTargetCol = 7; // Rook moves to (0, 7)
-          } else {
-            // Queenside castling (left) - King moves from (0,6) to (0,4)
-            rookStartRow = 0;
-            rookStartCol = 3; // Left rook at (0, 3)
-            rookTargetRow = 0;
-            rookTargetCol = 5; // Rook moves to (0, 5)
-          }
-        } else if (playerColor === "g") {
-          // Green - right column
-          if (toRow > fromRow) {
-            // Kingside castling (down) - King moves from (6,13) to (8,13)
-            rookStartRow = 10;
-            rookStartCol = 13; // Bottom rook at (10, 13)
-            rookTargetRow = 7; // Rook moves to (7, 13)
-            rookTargetCol = 13;
-          } else {
-            // Queenside castling (up) - King moves from (6,13) to (4,13)
-            rookStartRow = 3;
-            rookStartCol = 13; // Top rook at (3, 13)
-            rookTargetRow = 5; // Rook moves to (5, 13)
-            rookTargetCol = 13;
-          }
-        } else {
-          // Default fallback (should not happen)
-          rookStartRow = 0;
-          rookStartCol = 0;
-          rookTargetRow = 0;
-          rookTargetCol = 0;
-        }
-
-        // Move the rook
-        const rookPiece = state.boardState[rookStartRow][rookStartCol];
-        state.boardState[rookTargetRow][rookTargetCol] = rookPiece;
-        state.boardState[rookStartRow][rookStartCol] = null;
-
-        // Update hasMoved for the rook
-        const rookId = getRookIdentifier(playerColor, rookStartRow, rookStartCol);
-        if (rookId) {
-          state.hasMoved[rookId as keyof typeof state.hasMoved] = true;
-        }
-      }
-
-      // Note: For online mode, turn management is handled by the server
-
-      // Clear selection
-      state.selectedPiece = null;
-      state.validMoves = [];
-
-        // Update check status
-        const newCheckStatus = updateAllCheckStatus(
-          state.boardState,
-          state.eliminatedPlayers,
-          state.hasMoved
-        );
-        
-        // 🔊 Play check sound if any player is now in check
-        const wasInCheck = Object.values(state.checkStatus).some(status => status);
-        const isNowInCheck = Object.values(newCheckStatus).some(status => status);
-        
-        if (!wasInCheck && isNowInCheck) {
-          try {
-            const soundService = require('../services/soundService').default;
-            soundService.playCheckSound();
-          } catch (error) {
-            console.log('🔊 SoundService: Failed to play check sound:', error);
-          }
-        }
-        
-        state.checkStatus = newCheckStatus;
-
-      // ✅ CRITICAL: Add complete game logic for P2P mode (same as single player)
-      if (state.gameMode === "p2p") {
-        console.log("applyNetworkMove: P2P mode - checking for checkmate/stalemate");
-        
-        // Check for checkmate/stalemate after the move
-        const turnOrder = ['r', 'b', 'y', 'g'];
-        const otherPlayers = turnOrder.filter(
-          (player) =>
-            player !== playerColor &&
-            !state.eliminatedPlayers.includes(player)
-        );
-
-        // Check each opponent for checkmate/stalemate
-        for (const opponent of otherPlayers) {
-          const opponentHasMoves = hasAnyLegalMoves(
-            opponent,
-            state.boardState,
-            state.eliminatedPlayers,
-            state.hasMoved,
-            state.enPassantTargets
-          );
-
-          if (!opponentHasMoves) {
-            // This opponent has no legal moves
-            const isInCheck = isKingInCheck(
-              opponent,
-              state.boardState,
-              state.eliminatedPlayers,
-              state.hasMoved
-            );
-
-            if (isInCheck) {
-              // Checkmate - eliminate the player
-              console.log(`applyNetworkMove: P2P checkmate - eliminating ${opponent}`);
-              state.gameStatus = "checkmate";
-              state.eliminatedPlayers.push(opponent);
-              state.justEliminated = opponent;
-              state.scores[
-                playerColor as keyof typeof state.scores
-              ] += 10;
-
-              // 🔊 Play checkmate sound effect (includes haptic fallback if needed)
-              try {
-                const soundService = require('../services/soundService').default;
-                soundService.playCheckmateSound();
-              } catch (error) {
-                console.log('🔊 SoundService: Failed to play checkmate sound:', error);
-              }
-
-              // Set game over state for checkmate
-              state.gameOverState = {
-                isGameOver: true,
-                status: "checkmate",
-                eliminatedPlayer: opponent,
-              };
-            } else {
-              // Stalemate - eliminate the player
-              console.log(`applyNetworkMove: P2P stalemate - eliminating ${opponent}`);
-              state.gameStatus = "stalemate";
-              state.eliminatedPlayers.push(opponent);
-              state.justEliminated = opponent;
-
-              // 🔊 Play stalemate sound effect (includes haptic fallback if needed)
-              try {
-                const soundService = require('../services/soundService').default;
-                soundService.playSound('stalemate');
-              } catch (error) {
-                console.log('🔊 SoundService: Failed to play stalemate sound:', error);
-              }
-
-              // Set game over state for stalemate
-              state.gameOverState = {
-                isGameOver: true,
-                status: "stalemate",
-                eliminatedPlayer: opponent,
-              };
-            }
-            break; // Exit the loop after eliminating one player
-          }
-        }
-
-        // Check if the entire game is over (only one player left)
-        if (state.eliminatedPlayers.length === 3) {
-          // Find the one player who is NOT in the eliminatedPlayers array
-          const winner = turnOrder.find(
-            (color) => !state.eliminatedPlayers.includes(color)
-          );
-
-          if (winner) {
-            console.log(`applyNetworkMove: P2P game over - winner: ${winner}`);
-            state.winner = winner;
-            state.gameStatus = "finished";
-            state.gameOverState = {
-              isGameOver: true,
-              status: "finished",
-              eliminatedPlayer: null,
-            };
-          }
-        }
-      }
-
-      // ✅ CRITICAL: Handle turn advancement for P2P and online modes (after elimination check)
-      if (state.gameMode === "p2p" || state.gameMode === "online") {
-        console.log(`applyNetworkMove: ${state.gameMode} mode - advancing turn after elimination check`);
-        
-        // ✅ CRITICAL: Set game status to active when first move is made
-        if (state.gameStatus === "waiting") {
-          console.log(`applyNetworkMove: ${state.gameMode} mode - setting game status to active`);
-          state.gameStatus = "active";
-        }
-        
-        // Only advance turn if game is not over and this is not a resignation
-        if (state.gameStatus !== "finished" && pieceCode !== "RESIGN") {
-          const turnOrder = ['r', 'b', 'y', 'g'];
-          // ✅ CRITICAL FIX: Use playerColor (player who made the move) to determine next turn
-          // This is correct because we want to advance from the player who just moved
-          const currentIndex = turnOrder.indexOf(playerColor);
-          const nextIndex = (currentIndex + 1) % turnOrder.length;
-          const nextPlayerInSequence = turnOrder[nextIndex];
-
-          // Find the next active player (skip eliminated players)
-          let nextActivePlayer = nextPlayerInSequence;
-          while (state.eliminatedPlayers.includes(nextActivePlayer)) {
-            const activeIndex = turnOrder.indexOf(nextActivePlayer);
-            const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
-            nextActivePlayer = turnOrder[nextActiveIndex];
-          }
-
-          state.currentPlayerTurn = nextActivePlayer;
-          console.log(`applyNetworkMove: ${state.gameMode} turn advanced from ${playerColor} to ${nextActivePlayer}`);
-        } else {
-          console.log(`applyNetworkMove: ${state.gameMode} game over or resignation, no turn advancement needed`);
-        }
+      // ✅ Set game status to active when first move is made (network-specific)
+      if ((state.gameMode === "p2p" || state.gameMode === "online") && state.gameStatus === "waiting") {
+        state.gameStatus = "active";
       }
 
       // Save to history
@@ -1537,44 +1187,55 @@ export const {
   clearJustEliminated,
 } = gameSlice.actions;
 
-// Selectors for UI components to choose between live and historical state
-export const selectDisplayBoardState = (state: { game: GameState }) => {
-  const game = state.game;
-  if (game.viewingHistoryIndex !== null && game.history.length > 0) {
-    const historicalState = game.history[game.viewingHistoryIndex];
-    return historicalState ? historicalState.boardState : game.boardState;
-  }
-  return game.boardState;
-};
+// ✅ Input selectors: simple functions to get parts of the state
+const selectGame = (state: { game: GameState }) => state.game;
+const selectViewingHistoryIndex = (state: { game: GameState }) => state.game.viewingHistoryIndex;
+const selectHistory = (state: { game: GameState }) => state.game.history;
 
-export const selectDisplayGameState = (state: { game: GameState }) => {
-  const game = state.game;
-  if (game.viewingHistoryIndex !== null && game.history.length > 0) {
-    const historicalState = game.history[game.viewingHistoryIndex];
-    if (historicalState) {
-      return {
-        ...game,
-        boardState: historicalState.boardState,
-        currentPlayerTurn: historicalState.currentPlayerTurn,
-        gameStatus: historicalState.gameStatus,
-        capturedPieces: historicalState.capturedPieces,
-        checkStatus: historicalState.checkStatus,
-        winner: historicalState.winner,
-        eliminatedPlayers: historicalState.eliminatedPlayers,
-        justEliminated: historicalState.justEliminated,
-        scores: historicalState.scores,
-        promotionState: historicalState.promotionState,
-        hasMoved: historicalState.hasMoved,
-        enPassantTargets: historicalState.enPassantTargets,
-        gameOverState: historicalState.gameOverState,
-      };
+// ✅ Memoized selectors for UI components to choose between live and historical state
+export const selectDisplayBoardState = createSelector(
+  [selectGame, selectViewingHistoryIndex, selectHistory],
+  (game, viewingHistoryIndex, history) => {
+    if (viewingHistoryIndex !== null && history.length > 0) {
+      const historicalState = history[viewingHistoryIndex];
+      return historicalState ? historicalState.boardState : game.boardState;
     }
+    return game.boardState;
   }
-  return game;
-};
+);
 
-export const selectIsViewingHistory = (state: { game: GameState }) => {
-  return state.game.viewingHistoryIndex !== null;
-};
+export const selectDisplayGameState = createSelector(
+  [selectGame, selectViewingHistoryIndex, selectHistory],
+  (game, viewingHistoryIndex, history) => {
+    if (viewingHistoryIndex !== null && history.length > 0) {
+      const historicalState = history[viewingHistoryIndex];
+      if (historicalState) {
+        // This object is now only created when its inputs change
+        return {
+          ...game,
+          boardState: historicalState.boardState,
+          currentPlayerTurn: historicalState.currentPlayerTurn,
+          gameStatus: historicalState.gameStatus,
+          capturedPieces: historicalState.capturedPieces,
+          checkStatus: historicalState.checkStatus,
+          winner: historicalState.winner,
+          eliminatedPlayers: historicalState.eliminatedPlayers,
+          justEliminated: historicalState.justEliminated,
+          scores: historicalState.scores,
+          promotionState: historicalState.promotionState,
+          hasMoved: historicalState.hasMoved,
+          enPassantTargets: historicalState.enPassantTargets,
+          gameOverState: historicalState.gameOverState,
+        };
+      }
+    }
+    return game;
+  }
+);
+
+export const selectIsViewingHistory = createSelector(
+  [selectViewingHistoryIndex],
+  (viewingHistoryIndex) => viewingHistoryIndex !== null
+);
 
 export default gameSlice.reducer;

@@ -54,8 +54,8 @@ export default function PlayerInfoPod({
         true
       );
     } else if (!isCurrentTurn && !isEliminated) {
-      // Scale down and remove glow when becoming inactive
-      scale.value = withSpring(1, { damping: 12, stiffness: 200 });
+      // Keep the scale big, just remove glow when becoming inactive
+      // scale.value = withSpring(1, { damping: 12, stiffness: 200 }); // REMOVED - don't shrink back
       glowOpacity.value = withTiming(0, { duration: 300 });
     }
 

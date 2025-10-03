@@ -17,12 +17,14 @@ interface MiniPlayerCircleProps {
   };
   isCurrentTurn: boolean;
   isEliminated?: boolean;
+  boardRotation?: number;
 }
 
 export default function MiniPlayerCircle({
   player,
   isCurrentTurn,
   isEliminated = false,
+  boardRotation = 0,
 }: MiniPlayerCircleProps) {
   // Animation values
   const scale = useSharedValue(1);
@@ -50,8 +52,8 @@ export default function MiniPlayerCircle({
         true
       );
     } else if (!isCurrentTurn && !isEliminated) {
-      // Scale down and remove glow when becoming inactive
-      scale.value = withSpring(1, { damping: 12, stiffness: 200 });
+      // Keep the scale big, just remove glow when becoming inactive
+      // scale.value = withSpring(1, { damping: 12, stiffness: 200 }); // REMOVED - don't shrink back
       glowOpacity.value = withTiming(0, { duration: 300 });
     }
 
@@ -130,8 +132,52 @@ export default function MiniPlayerCircle({
     }
   };
 
+  // Calculate adjusted padding based on board rotation
+  const getAdjustedPadding = () => {
+    const basePadding = 4;
+    switch (boardRotation) {
+      case 0: // Red player - no rotation, use original padding
+        return {
+          paddingTop: basePadding,
+          paddingBottom: basePadding,
+          paddingLeft: basePadding,
+          paddingRight: basePadding,
+        };
+      case 90: // Blue player - 90° clockwise
+        return {
+          paddingTop: basePadding + 2, // Slightly more top padding
+          paddingBottom: basePadding - 1, // Slightly less bottom padding
+          paddingLeft: basePadding + 2, // Slightly more left padding
+          paddingRight: basePadding - 1, // Slightly less right padding
+        };
+      case 180: // Yellow player - 180°
+        return {
+          paddingTop: basePadding + 2, // Slightly more top padding
+          paddingBottom: basePadding - 1, // Slightly less bottom padding
+          paddingLeft: basePadding,
+          paddingRight: basePadding,
+        };
+      case 270: // Green player - 270° clockwise
+        return {
+          paddingTop: basePadding + 2, // Slightly more top padding
+          paddingBottom: basePadding - 1, // Slightly less bottom padding
+          paddingLeft: basePadding - 1, // Slightly less left padding
+          paddingRight: basePadding + 2, // Slightly more right padding
+        };
+      default:
+        return {
+          paddingTop: basePadding,
+          paddingBottom: basePadding,
+          paddingLeft: basePadding,
+          paddingRight: basePadding,
+        };
+    }
+  };
+
+  const adjustedPadding = getAdjustedPadding();
+
   return (
-    <Animated.View style={[eliminationAnimatedStyle, { padding: 4 }]} className="items-center justify-center">
+    <Animated.View style={[eliminationAnimatedStyle, adjustedPadding]} className="items-center justify-center">
       {/* Avatar Container - Glass Effect */}
       <Animated.View
         style={[
@@ -173,6 +219,7 @@ export default function MiniPlayerCircle({
             height: 40,
             opacity: isEliminated ? 0.5 : 1,
             zIndex: 1,
+            padding: 8,
           }}
           resizeMode="contain"
         />

@@ -61,7 +61,14 @@ export interface UserSettings {
 
 const DEFAULT_SETTINGS: UserSettings = {
   profile: {
-    name: generateRandomName(),
+    name: (() => {
+      try {
+        return generateRandomName();
+      } catch (error) {
+        console.warn("Failed to generate random name, using fallback:", error);
+        return "Player";
+      }
+    })(),
   },
   board: {
     theme: "brown",

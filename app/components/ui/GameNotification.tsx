@@ -19,7 +19,7 @@ export default function GameNotification({
     if (isVisible && message) {
       // 🔊 Play notification sound
       try {
-        const soundService = require('../../services/soundService').default;
+        const soundService = require('../../../services/soundService').default;
         soundService.playNotifySound();
       } catch (error) {
         console.log('🔊 SoundService: Failed to play notification sound:', error);

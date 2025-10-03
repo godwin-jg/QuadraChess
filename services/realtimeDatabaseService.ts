@@ -14,11 +14,13 @@ export interface RealtimeGame {
   maxPlayers: number;
   currentPlayerTurn: string;
   winner: string | null;
+  joinCode?: string; // 4-digit join code for easy sharing
   lastMove: {
     from: { row: number; col: number };
     to: { row: number; col: number };
     pieceCode: string;
     playerColor: string;
+    playerId: string;
     timestamp: number;
     moveNumber?: number;
   } | null;
@@ -39,6 +41,11 @@ class RealtimeDatabaseService {
   private currentUser: any = null;
   private gameUnsubscribe: (() => void) | null = null;
   private movesUnsubscribe: (() => void) | null = null;
+
+  // Generate a 4-digit join code
+  private generateJoinCode(): string {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+  }
   
   // OPTIMIZATION: Move batching for reduced network calls
   private moveBatch: any[] = [];
@@ -242,6 +249,7 @@ class RealtimeDatabaseService {
       maxPlayers: 4,
       currentPlayerTurn: "r",
       winner: null,
+      joinCode: this.generateJoinCode(), // Generate 4-digit join code
       lastMove: null,
       lastActivity: Date.now(),
     };
@@ -571,6 +579,94 @@ class RealtimeDatabaseService {
     };
   }
 
+  // Make a promotion move in online game
+  async makePromotion(
+    gameId: string,
+    promotionData: {
+      position: { row: number; col: number };
+      pieceType: string;
+      playerColor: string;
+    }
+  ): Promise<void> {
+    const gameRef = database().ref(`games/${gameId}`);
+    const user = this.getCurrentUser();
+    
+    if (!user) {
+      throw new Error("User not authenticated");
+    }
+
+    console.log(`🎯 OnlineGame: Processing promotion to ${promotionData.pieceType} at (${promotionData.position.row}, ${promotionData.position.col})`);
+
+    try {
+      const result = await gameRef.transaction((gameData) => {
+        if (gameData === null) {
+          console.warn(`Promotion failed: Game ${gameId} not found`);
+          return null;
+        }
+
+        // Validate player turn
+        if (gameData.gameState.currentPlayerTurn !== promotionData.playerColor) {
+          console.warn(`Promotion validation failed: player=${promotionData.playerColor}, currentTurn=${gameData.gameState.currentPlayerTurn}`);
+          return gameData;
+        }
+
+        // Validate promotion position
+        const { row, col } = promotionData.position;
+        if (row < 0 || row >= 14 || col < 0 || col >= 14) {
+          console.warn(`Invalid promotion coordinates: (${row}, ${col})`);
+          return gameData;
+        }
+
+        // Apply promotion to board state
+        const boardState = gameData.gameState.boardState;
+        const pieceCode = boardState[row][col];
+        
+        // Validate that there's a pawn to promote
+        if (!pieceCode || pieceCode[0] !== promotionData.playerColor || pieceCode[1] !== 'P') {
+          console.warn(`Invalid promotion: piece=${pieceCode}, playerColor=${promotionData.playerColor}`);
+          return gameData;
+        }
+
+        // Replace pawn with promoted piece
+        boardState[row][col] = `${promotionData.playerColor}${promotionData.pieceType}`;
+
+        // Clear promotion state
+        gameData.gameState.promotionState = { isAwaiting: false, position: null, color: null };
+        gameData.gameState.gameStatus = "active";
+
+        // Update turn
+        const currentTurn = gameData.gameState.currentPlayerTurn;
+        const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
+        gameData.gameState.currentPlayerTurn = nextPlayer;
+        gameData.currentPlayerTurn = nextPlayer;
+
+        // Update move history
+        gameData.lastMove = {
+          from: { row: -1, col: -1 }, // Special promotion move
+          to: promotionData.position,
+          pieceCode: `${promotionData.playerColor}${promotionData.pieceType}`,
+          playerColor: promotionData.playerColor,
+          playerId: user.uid,
+          timestamp: Date.now(),
+        };
+        gameData.lastActivity = Date.now();
+
+        return gameData;
+      });
+
+      if (!result.committed) {
+        console.error("Promotion transaction failed:", result);
+        throw new Error(`Promotion transaction failed: Transaction not committed`);
+      }
+
+      console.log(`🎯 OnlineGame: Successfully promoted to ${promotionData.pieceType}`);
+
+    } catch (error) {
+      console.error("Failed to make promotion:", error);
+      throw error;
+    }
+  }
+
   // Ultra-fast move processing (optimized for real-time)
   async makeMove(
     gameId: string,
@@ -596,6 +692,7 @@ class RealtimeDatabaseService {
         // Quick player validation
         const player = gameData.players[user.uid];
         if (!player || player.color !== gameData.gameState.currentPlayerTurn) {
+          console.warn(`Move validation failed: player=${player?.color}, currentTurn=${gameData.gameState.currentPlayerTurn}`);
           return gameData; // Skip move silently (no logging for speed)
         }
 
@@ -603,37 +700,383 @@ class RealtimeDatabaseService {
         const boardState = gameData.gameState.boardState;
         const piece = boardState[moveData.from.row][moveData.from.col];
         
+        // Validate that the piece exists and belongs to the current player
+        if (!piece || piece[0] !== moveData.playerColor) {
+          console.warn(`Invalid piece move: piece=${piece}, playerColor=${moveData.playerColor}`);
+          return gameData;
+        }
+        
+        // Validate move coordinates are within bounds
+        if (moveData.from.row < 0 || moveData.from.row >= 14 || 
+            moveData.from.col < 0 || moveData.from.col >= 14 ||
+            moveData.to.row < 0 || moveData.to.row >= 14 || 
+            moveData.to.col < 0 || moveData.to.col >= 14) {
+          console.warn(`Invalid move coordinates: from=(${moveData.from.row},${moveData.from.col}), to=(${moveData.to.row},${moveData.to.col})`);
+          return gameData;
+        }
+        
         // ✅ CRITICAL FIX: Check if this is a capture move
         const capturedPiece = boardState[moveData.to.row][moveData.to.col];
         if (capturedPiece && capturedPiece[1] === "K") {
           // Prevent king capture
+          console.warn(`King capture prevented: trying to capture ${capturedPiece}`);
           return gameData;
         }
         
-        boardState[moveData.from.row][moveData.from.col] = "";
-        boardState[moveData.to.row][moveData.to.col] = piece;
+        // ✅ CRITICAL FIX: Update scores for captures
+        if (capturedPiece && capturedPiece[0] !== moveData.playerColor) {
+          const capturedPieceType = capturedPiece[1];
+          let points = 0;
+          switch (capturedPieceType) {
+            case "P": // Pawn
+              points = 1;
+              break;
+            case "N": // Knight
+              points = 3;
+              break;
+            case "B": // Bishop
+            case "R": // Rook
+              points = 5;
+              break;
+            case "Q": // Queen
+              points = 9;
+              break;
+            case "K": // King
+              points = 20; // Special bonus for king capture
+              break;
+            default:
+              points = 0;
+          }
+          
+          // Update scores in game state
+          if (!gameData.gameState.scores) {
+            gameData.gameState.scores = { r: 0, b: 0, y: 0, g: 0 };
+          }
+          gameData.gameState.scores[moveData.playerColor as keyof typeof gameData.gameState.scores] += points;
+          
+          // Update captured pieces
+          if (!gameData.gameState.capturedPieces) {
+            gameData.gameState.capturedPieces = { r: [], b: [], y: [], g: [] };
+          }
+          const capturedColor = capturedPiece[0] as keyof typeof gameData.gameState.capturedPieces;
+          if (!gameData.gameState.capturedPieces[capturedColor]) {
+            gameData.gameState.capturedPieces[capturedColor] = [];
+          }
+          gameData.gameState.capturedPieces[capturedColor].push(capturedPiece);
+          
+          console.log(`🎯 OnlineGame: ${moveData.playerColor} captured ${capturedPiece} for ${points} points`);
+        }
+        
+        // ✅ CRITICAL FIX: Check if this is a castling move
+        const isCastling = (() => {
+          const pieceType = piece[1];
+          if (pieceType !== "K") return false;
+          
+          const rowDiff = Math.abs(moveData.to.row - moveData.from.row);
+          const colDiff = Math.abs(moveData.to.col - moveData.from.col);
+          
+          return (rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2);
+        })();
+        
+        console.log(`🔍 DEBUG Server makeMove: Checking castling for piece=${piece}, from=(${moveData.from.row},${moveData.from.col}), to=(${moveData.to.row},${moveData.to.col}), isCastling=${isCastling}`);
+        
+        if (isCastling) {
+          // Handle castling - move both King and Rook
+          const playerColor = piece[0];
+          const kingTargetRow = moveData.to.row;
+          const kingTargetCol = moveData.to.col;
+          
+          console.log(`🔍 DEBUG Server makeMove: CASTLING DETECTED for ${playerColor}K!`);
+          
+          // Determine rook positions based on castling direction
+          let rookStartRow: number = 0, rookStartCol: number = 0, rookTargetRow: number = 0, rookTargetCol: number = 0;
+          
+          if (playerColor === "r") {
+            // Red - bottom row (row 13)
+            if (kingTargetCol === 9) {
+              // Kingside castling (right)
+              rookStartRow = 13; rookStartCol = 10; // rR2
+              rookTargetRow = 13; rookTargetCol = 8;
+            } else {
+              // Queenside castling (left)
+              rookStartRow = 13; rookStartCol = 3; // rR1
+              rookTargetRow = 13; rookTargetCol = 5;
+            }
+          } else if (playerColor === "y") {
+            // Yellow - top row (row 0)
+            if (kingTargetCol === 4) {
+              // Kingside castling (right)
+              rookStartRow = 0; rookStartCol = 5; // yR2
+              rookTargetRow = 0; rookTargetCol = 3;
+            } else {
+              // Queenside castling (left)
+              rookStartRow = 0; rookStartCol = 10; // yR1
+              rookTargetRow = 0; rookTargetCol = 8;
+            }
+          } else if (playerColor === "b") {
+            // Blue - left column (col 0)
+            if (kingTargetRow === 4) {
+              // Kingside castling (up)
+              rookStartRow = 5; rookStartCol = 0; // bR2
+              rookTargetRow = 3; rookTargetCol = 0;
+            } else {
+              // Queenside castling (down)
+              rookStartRow = 10; rookStartCol = 0; // bR1
+              rookTargetRow = 8; rookTargetCol = 0;
+            }
+          } else if (playerColor === "g") {
+            // Green - right column (col 13)
+            if (kingTargetRow === 9) {
+              // Kingside castling (up)
+              rookStartRow = 8; rookStartCol = 13; // gR2
+              rookTargetRow = 10; rookTargetCol = 13;
+            } else {
+              // Queenside castling (down)
+              rookStartRow = 3; rookStartCol = 13; // gR1
+              rookTargetRow = 5; rookTargetCol = 13;
+            }
+          }
+          
+          // Move the king
+          boardState[moveData.from.row][moveData.from.col] = "";
+          boardState[kingTargetRow][kingTargetCol] = piece;
+          
+          // Move the rook
+          const rookPiece = boardState[rookStartRow][rookStartCol];
+          boardState[rookStartRow][rookStartCol] = "";
+          boardState[rookTargetRow][rookTargetCol] = rookPiece;
+          
+          console.log(`🔍 DEBUG Server makeMove: Moved rook from (${rookStartRow},${rookStartCol}) to (${rookTargetRow},${rookTargetCol})`);
+          
+          // Update hasMoved flags
+          if (!gameData.gameState.hasMoved) {
+            gameData.gameState.hasMoved = {
+              rK: false, rR1: false, rR2: false,
+              bK: false, bR1: false, bR2: false,
+              yK: false, yR1: false, yR2: false,
+              gK: false, gR1: false, gR2: false,
+            };
+          }
+          
+          // Mark king and rook as moved
+          gameData.gameState.hasMoved[`${playerColor}K`] = true;
+          if (playerColor === "r") {
+            gameData.gameState.hasMoved[kingTargetCol === 9 ? "rR2" : "rR1"] = true;
+          } else if (playerColor === "y") {
+            gameData.gameState.hasMoved[kingTargetCol === 4 ? "yR2" : "yR1"] = true;
+          } else if (playerColor === "b") {
+            gameData.gameState.hasMoved[kingTargetRow === 4 ? "bR2" : "bR1"] = true;
+          } else if (playerColor === "g") {
+            gameData.gameState.hasMoved[kingTargetRow === 9 ? "gR2" : "gR1"] = true;
+          }
+          
+          console.log(`🔍 DEBUG Server makeMove: Updated hasMoved flags for ${playerColor}K and rook`);
+        } else {
+          // Normal move - just move the piece
+          boardState[moveData.from.row][moveData.from.col] = "";
+          boardState[moveData.to.row][moveData.to.col] = piece;
+          
+          // Update hasMoved flag for king and rook
+          if (!gameData.gameState.hasMoved) {
+            gameData.gameState.hasMoved = {
+              rK: false, rR1: false, rR2: false,
+              bK: false, bR1: false, bR2: false,
+              yK: false, yR1: false, yR2: false,
+              gK: false, gR1: false, gR2: false,
+            };
+          }
+          
+          const pieceType = piece[1];
+          const playerColor = piece[0];
+          
+          if (pieceType === "K") {
+            gameData.gameState.hasMoved[`${playerColor}K`] = true;
+          } else if (pieceType === "R") {
+            // Determine which rook moved based on position
+            if (playerColor === "r") {
+              if (moveData.from.row === 13 && moveData.from.col === 3) gameData.gameState.hasMoved.rR1 = true;
+              if (moveData.from.row === 13 && moveData.from.col === 10) gameData.gameState.hasMoved.rR2 = true;
+            } else if (playerColor === "y") {
+              if (moveData.from.row === 0 && moveData.from.col === 3) gameData.gameState.hasMoved.yR1 = true;
+              if (moveData.from.row === 0 && moveData.from.col === 10) gameData.gameState.hasMoved.yR2 = true;
+            } else if (playerColor === "b") {
+              if (moveData.from.row === 3 && moveData.from.col === 0) gameData.gameState.hasMoved.bR1 = true;
+              if (moveData.from.row === 10 && moveData.from.col === 0) gameData.gameState.hasMoved.bR2 = true;
+            } else if (playerColor === "g") {
+              if (moveData.from.row === 3 && moveData.from.col === 13) gameData.gameState.hasMoved.gR1 = true;
+              if (moveData.from.row === 10 && moveData.from.col === 13) gameData.gameState.hasMoved.gR2 = true;
+            }
+          }
+        }
 
-        // Update turn in both places for consistency
-        const currentTurn = gameData.gameState.currentPlayerTurn;
-        const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
-        gameData.gameState.currentPlayerTurn = nextPlayer;
-        gameData.currentPlayerTurn = nextPlayer; // Also update top-level turn
+        // ✅ CRITICAL FIX: Check if this is a promotion move
+        const isPawn = piece?.endsWith("P");
+        let isPromotion = false;
+        
+        console.log(`🔍 DEBUG Server makeMove: Checking promotion for piece=${piece}, to=(${moveData.to.row},${moveData.to.col})`);
+        
+        if (isPawn) {
+          // Check if pawn reached promotion rank
+          const { row, col } = moveData.to;
+          const playerColor = piece[0];
+          
+          console.log(`🔍 DEBUG Server makeMove: Pawn ${playerColor}P at (${row},${col})`);
+          
+          // Promotion ranks: 
+          // 1. NEW UNIVERSAL RULE: Opposing player's first rank
+          //    - Yellow's first rank (row 0, cols 3-10): Red, Blue, Green pawns promote here
+          //    - Red's first rank (row 13, cols 3-10): Yellow, Blue, Green pawns promote here  
+          //    - Blue's first rank (col 0, rows 3-10): Red, Yellow, Green pawns promote here
+          //    - Green's first rank (col 13, rows 3-10): Red, Yellow, Blue pawns promote here
+          // 2. TRADITIONAL RULE: Specific promotion ranks
+          //    - Red pawns promote on row 6
+          //    - Yellow pawns promote on row 7
+          //    - Blue pawns promote on col 7
+          //    - Green pawns promote on col 6
+          
+          const isUniversalPromotion = (
+            (playerColor === 'r' && row === 0 && col >= 3 && col <= 10) || // Red pawn reaches Yellow's back rank
+            (playerColor === 'y' && row === 13 && col >= 3 && col <= 10) || // Yellow pawn reaches Red's back rank
+            (playerColor === 'b' && col === 13 && row >= 3 && row <= 10) || // Blue pawn reaches Green's back rank
+            (playerColor === 'g' && col === 0 && row >= 3 && row <= 10) // Green pawn reaches Blue's back rank
+          );
+          
+          const isTraditionalPromotion = (
+            (playerColor === 'r' && row === 6) || // Red pawns promote on row 6
+            (playerColor === 'y' && row === 7) || // Yellow pawns promote on row 7
+            (playerColor === 'b' && col === 7) || // Blue pawns promote on col 7
+            (playerColor === 'g' && col === 6) // Green pawns promote on col 6
+          );
+          
+          if (isUniversalPromotion || isTraditionalPromotion) {
+            isPromotion = true;
+            console.log(`🔍 DEBUG Server makeMove: PROMOTION DETECTED for ${playerColor}P at (${row},${col})!`);
+            console.log(`🔍 DEBUG Server makeMove: Universal=${isUniversalPromotion}, Traditional=${isTraditionalPromotion}`);
+          }
+        }
+
+        if (isPromotion) {
+          // Set promotion state and pause game
+          gameData.gameState.promotionState = {
+            isAwaiting: true,
+            position: moveData.to,
+            color: moveData.playerColor,
+          };
+          gameData.gameState.gameStatus = "promotion";
+          console.log(`🔍 DEBUG Server makeMove: Set promotion state:`, gameData.gameState.promotionState);
+          console.log(`🔍 DEBUG Server makeMove: Set game status to:`, gameData.gameState.gameStatus);
+          // Don't advance turn yet - wait for promotion completion
+        } else {
+          // ✅ CRITICAL FIX: Check for elimination after move
+          const eliminationResult = this.checkForElimination(
+            gameData.gameState.boardState,
+            gameData.gameState.currentPlayerTurn,
+            gameData.gameState.eliminatedPlayers || [],
+            gameData.gameState.hasMoved || {},
+            gameData.gameState.enPassantTargets || []
+          );
+          
+          if (eliminationResult.eliminatedPlayer) {
+            console.log(`🎯 OnlineGame: Player ${eliminationResult.eliminatedPlayer} eliminated by ${eliminationResult.reason}`);
+            
+            // Initialize eliminatedPlayers array if it doesn't exist
+            if (!gameData.gameState.eliminatedPlayers) {
+              gameData.gameState.eliminatedPlayers = [];
+            }
+            
+            // Add eliminated player to the list
+            if (!gameData.gameState.eliminatedPlayers.includes(eliminationResult.eliminatedPlayer)) {
+              gameData.gameState.eliminatedPlayers.push(eliminationResult.eliminatedPlayer);
+              gameData.gameState.justEliminated = eliminationResult.eliminatedPlayer;
+            }
+            
+            // Award points to the player who made the move
+            if (eliminationResult.reason === 'checkmate') {
+              gameData.gameState.scores[moveData.playerColor as keyof typeof gameData.gameState.scores] += 50; // CHECKMATE bonus
+            } else if (eliminationResult.reason === 'stalemate') {
+              // Award points for stalemating opponent: +10 for each player still in game
+              const remainingPlayers = ['r', 'b', 'y', 'g'].filter(
+                (player) => !gameData.gameState.eliminatedPlayers.includes(player)
+              );
+              const stalematePoints = remainingPlayers.length * 10;
+              gameData.gameState.scores[moveData.playerColor as keyof typeof gameData.gameState.scores] += stalematePoints;
+            }
+            
+            // Check if game is over (3 players eliminated)
+            if (gameData.gameState.eliminatedPlayers.length >= 3) {
+              const turnOrder = ['r', 'b', 'y', 'g'];
+              const winner = turnOrder.find(
+                (color) => !gameData.gameState.eliminatedPlayers.includes(color)
+              );
+              
+              if (winner) {
+                gameData.gameState.winner = winner;
+                gameData.gameState.gameStatus = 'finished';
+                gameData.gameState.gameOverState = {
+                  isGameOver: true,
+                  status: 'finished',
+                  eliminatedPlayer: null,
+                };
+              }
+            } else {
+              // Reset game status to active after elimination (unless game is finished)
+              gameData.gameState.gameStatus = 'active';
+            }
+          }
+          
+          // Update turn in both places for consistency
+          const currentTurn = gameData.gameState.currentPlayerTurn;
+          const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
+          gameData.gameState.currentPlayerTurn = nextPlayer;
+          gameData.currentPlayerTurn = nextPlayer; // Also update top-level turn
+        }
         
         gameData.lastMove = {
           from: moveData.from,
           to: moveData.to,
-          piece: moveData.pieceCode,
-          player: user.uid,
+          pieceCode: moveData.pieceCode,
+          playerColor: moveData.playerColor,
+          playerId: user.uid,
           timestamp: Date.now(),
         };
         gameData.lastActivity = Date.now();
         
+        // ✅ CRITICAL FIX: Update move history
+        if (!gameData.gameState.history) {
+          gameData.gameState.history = [];
+        }
+        if (!gameData.gameState.historyIndex) {
+          gameData.gameState.historyIndex = 0;
+        }
+        
+        // Create a snapshot of the current game state for history
+        const historySnapshot = {
+          boardState: gameData.gameState.boardState,
+          currentPlayerTurn: gameData.gameState.currentPlayerTurn,
+          gameStatus: gameData.gameState.gameStatus,
+          scores: gameData.gameState.scores,
+          capturedPieces: gameData.gameState.capturedPieces,
+          eliminatedPlayers: gameData.gameState.eliminatedPlayers,
+          winner: gameData.gameState.winner,
+          justEliminated: gameData.gameState.justEliminated,
+          checkStatus: gameData.gameState.checkStatus,
+          promotionState: gameData.gameState.promotionState,
+          hasMoved: gameData.gameState.hasMoved,
+          enPassantTargets: gameData.gameState.enPassantTargets,
+          gameOverState: gameData.gameState.gameOverState,
+          lastMove: gameData.lastMove,
+        };
+        
+        // Add to history
+        gameData.gameState.history.push(historySnapshot);
+        gameData.gameState.historyIndex = gameData.gameState.history.length - 1;
 
         return gameData;
       });
 
       if (!result.committed) {
-        throw new Error("Move transaction failed");
+        console.error("Move transaction failed:", result);
+        throw new Error(`Move transaction failed: Transaction not committed`);
       }
       
     } catch (error) {
@@ -729,7 +1172,7 @@ class RealtimeDatabaseService {
           };
 
           // Check if the entire game is over
-          if (gameData.gameState.eliminatedPlayers.length === 3) {
+          if (gameData.gameState.eliminatedPlayers && gameData.gameState.eliminatedPlayers.length === 3) {
             const turnOrder = ["r", "b", "y", "g"];
             const winner = turnOrder.find(
               (color) => !gameData.gameState.eliminatedPlayers.includes(color)
@@ -753,7 +1196,7 @@ class RealtimeDatabaseService {
 
             // Find the next active player (skip eliminated players)
             let nextActivePlayer = nextPlayerInSequence;
-            while (gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
+            while (gameData.gameState.eliminatedPlayers && gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
               const activeIndex = turnOrder.indexOf(nextActivePlayer);
               const nextActiveIndex = (activeIndex + 1) % 4;
               nextActivePlayer = turnOrder[nextActiveIndex];
@@ -992,6 +1435,173 @@ class RealtimeDatabaseService {
     return nextPlayer;
   }
 
+  // ✅ CRITICAL FIX: Check for elimination after a move
+  private checkForElimination(
+    boardState: string[][],
+    currentPlayerTurn: string,
+    eliminatedPlayers: string[],
+    hasMoved: any,
+    enPassantTargets: any[]
+  ): { eliminatedPlayer: string | null; reason: string | null } {
+    try {
+      // Import game logic functions
+      const { hasAnyLegalMoves, isKingInCheck } = require('../functions/src/logic/gameLogic');
+      
+      // Check each opponent for checkmate/stalemate
+      const turnOrder = ['r', 'b', 'y', 'g'];
+      const otherPlayers = turnOrder.filter(
+        (player) => player !== currentPlayerTurn && !eliminatedPlayers.includes(player)
+      );
+      
+      for (const opponent of otherPlayers) {
+        const opponentHasMoves = hasAnyLegalMoves(
+          opponent,
+          boardState,
+          eliminatedPlayers,
+          hasMoved,
+          enPassantTargets
+        );
+        
+        if (!opponentHasMoves) {
+          // This opponent has no legal moves
+          const isInCheck = isKingInCheck(
+            opponent,
+            boardState,
+            eliminatedPlayers,
+            hasMoved
+          );
+          
+          if (isInCheck) {
+            // Checkmate - eliminate the player
+            return { eliminatedPlayer: opponent, reason: 'checkmate' };
+          } else {
+            // Stalemate - eliminate the player
+            return { eliminatedPlayer: opponent, reason: 'stalemate' };
+          }
+        }
+      }
+      
+      return { eliminatedPlayer: null, reason: null };
+    } catch (error) {
+      console.error('Error checking for elimination:', error);
+      return { eliminatedPlayer: null, reason: null };
+    }
+  }
+
+  // Create a rematch game with the same players and bots
+  async createRematchGame(currentGameId: string): Promise<string> {
+    const currentGameRef = database().ref(`games/${currentGameId}`);
+    
+    try {
+      const snapshot = await currentGameRef.once("value");
+      if (!snapshot.exists()) {
+        throw new Error("Current game not found");
+      }
+      
+      const currentGame = snapshot.val();
+      const players = Object.values(currentGame.players || {});
+      
+      // Create new game with same host
+      const newGameId = database().ref().push().key;
+      if (!newGameId) throw new Error("Failed to generate game ID");
+      const newGameRef = database().ref(`games/${newGameId}`);
+      
+      // Import initial board state
+      const { initialBoardState } = require("../state/boardState");
+      const flattenedBoardState = initialBoardState.map((row: any) =>
+        row.map((cell: any) => (cell === null ? "" : cell))
+      );
+      
+      // Prepare new game data
+      const newGameData = {
+        id: newGameId,
+        hostId: currentGame.hostId,
+        hostName: currentGame.hostName,
+        status: "waiting",
+        createdAt: Date.now(),
+        players: {},
+        joinCode: this.generateJoinCode(), // Generate new 4-digit join code for rematch
+        gameState: {
+          boardState: flattenedBoardState,
+          currentPlayerTurn: "r",
+          gameStatus: "waiting",
+          scores: { r: 0, b: 0, y: 0, g: 0 },
+          capturedPieces: { r: [], b: [], y: [], g: [] },
+          eliminatedPlayers: [],
+          justEliminated: null,
+          winner: null,
+          checkStatus: { r: false, b: false, y: false, g: false },
+          promotionState: { isAwaiting: false, position: null, color: null },
+          hasMoved: {
+            rK: false, rR1: false, rR2: false,
+            bK: false, bR1: false, bR2: false,
+            yK: false, yR1: false, yR2: false,
+            gK: false, gR1: false, gR2: false,
+          },
+          enPassantTargets: [],
+          gameOverState: {
+            isGameOver: false,
+            status: null,
+            eliminatedPlayer: null,
+          },
+          history: [],
+          historyIndex: 0,
+        }
+      };
+      
+      // Add all players from the previous game (including bots)
+      const playersToAdd: any = {};
+      for (const player of players) {
+        const playerData = player as any;
+        playersToAdd[playerData.id] = {
+          id: playerData.id,
+          name: playerData.name,
+          color: playerData.color,
+          isHost: playerData.isHost,
+          isOnline: true,
+          isBot: playerData.isBot || false,
+          lastSeen: Date.now(),
+        };
+      }
+      
+      newGameData.players = playersToAdd;
+      
+      // Create the new game
+      await newGameRef.set(newGameData);
+      
+      console.log(`🎯 RealtimeDatabaseService: Created rematch game ${newGameId} with ${players.length} players`);
+      return newGameId;
+      
+    } catch (error) {
+      console.error('Error creating rematch game:', error);
+      throw error;
+    }
+  }
+
+  // Clear justEliminated flag from server
+  async clearJustEliminated(gameId: string): Promise<void> {
+    const gameRef = database().ref(`games/${gameId}`);
+    
+    try {
+      await gameRef.transaction((gameData) => {
+        if (gameData === null) {
+          console.warn(`RealtimeDatabaseService: Game ${gameId} not found when clearing justEliminated`);
+          return null;
+        }
+        
+        // Clear the justEliminated flag
+        gameData.gameState.justEliminated = null;
+        
+        return gameData;
+      });
+      
+      console.log(`🎯 RealtimeDatabaseService: Cleared justEliminated flag for game ${gameId}`);
+    } catch (error) {
+      console.error('Error clearing justEliminated flag:', error);
+      throw error;
+    }
+  }
+
   // Add bots to a game with specific colors
   private async addBotsToGame(gameId: string, botColors: string[]): Promise<void> {
     try {
@@ -1031,6 +1641,49 @@ class RealtimeDatabaseService {
       await gameRef.update(botUpdates);
     } catch (error) {
       console.error("Error adding bots to game:", error);
+      throw error;
+    }
+  }
+
+  // Update bot configuration for a game (host only)
+  async updateBotConfiguration(gameId: string, botColors: string[]): Promise<void> {
+    try {
+      const gameRef = database().ref(`games/${gameId}`);
+      const snapshot = await gameRef.once("value");
+      
+      if (!snapshot.exists()) {
+        throw new Error("Game not found");
+      }
+
+      const gameData = snapshot.val();
+      const currentPlayers = gameData.players || {};
+      
+      // Remove existing bots
+      const updates: any = {};
+      Object.keys(currentPlayers).forEach(playerId => {
+        if (currentPlayers[playerId].isBot) {
+          updates[`players/${playerId}`] = null; // Remove bot
+        }
+      });
+
+      // Add new bots for specified colors
+      for (const botColor of botColors) {
+        const botId = `bot_${botColor}_${Date.now()}`;
+        updates[`players/${botId}`] = {
+          id: botId,
+          name: `Bot ${botColor.toUpperCase()}`,
+          color: botColor,
+          isHost: false,
+          isOnline: true,
+          isBot: true,
+          lastSeen: Date.now(),
+        };
+      }
+
+      await gameRef.update(updates);
+      console.log(`🤖 Updated bot configuration for game ${gameId}:`, botColors);
+    } catch (error) {
+      console.error("Error updating bot configuration:", error);
       throw error;
     }
   }

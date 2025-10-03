@@ -1,6 +1,6 @@
 import { Text, View } from "@/components/Themed";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { ActivityIndicator } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import { useSettings } from "../../context/SettingsContext";
@@ -18,6 +18,8 @@ import {
 import { botService } from "../../services/botService";
 import { onlineBotService } from "../../services/onlineBotService";
 import p2pService from "../../services/p2pService";
+import realtimeDatabaseService from "../../services/realtimeDatabaseService";
+import { BOT_CONFIG } from "../../config/gameConfig";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
 import GameNotification from "../components/ui/GameNotification";
@@ -27,7 +29,6 @@ import PlayerHUDPanel from "../components/ui/PlayerHUDPanel";
 import GameUtilityPanel from "../components/ui/GameUtilityPanel";
 import PromotionModal from "../components/ui/PromotionModal";
 import FloatingPointsText from "../components/ui/FloatingPointsText";
-import captureAnimationService from "../../services/captureAnimationService";
 import notificationService from "../../services/notificationService";
 import SimpleNotification from "../components/ui/SimpleNotification";
 import networkService from "../services/networkService";
@@ -72,6 +73,12 @@ export default function GameScreen() {
     color: string;
   }>>([]);
 
+  // Bot turn tracking to prevent multiple rapid triggers
+  const lastProcessedTurn = useRef<string | null>(null);
+  
+  // ✅ CRITICAL FIX: Store initial mode to prevent unwanted mode switching
+  const initialModeRef = useRef<string | null>(null);
+
   // Simple notifications state
   const [notifications, setNotifications] = useState<Array<{
     id: string;
@@ -81,6 +88,9 @@ export default function GameScreen() {
 
   // Game utility mode state - toggles between player info and utilities
   const [isUtilityMode, setIsUtilityMode] = useState(false);
+  
+  // Board rotation state - rotates board for each player's perspective
+  const [boardRotation, setBoardRotation] = useState(0);
   
   // Animation values for the toggle button
   const toggleScale = useSharedValue(1);
@@ -98,17 +108,39 @@ export default function GameScreen() {
 
   // Master connection management - single useEffect to prevent race conditions
   useEffect(() => {
+    console.log("🔍 DEBUG GameScreen: useEffect running - mode:", mode, "gameId:", gameId);
+    console.trace("🔍 DEBUG GameScreen: useEffect call stack");
+    
     // This function will be returned by the effect to clean up everything
     let cleanupFunction = () => {};
 
+    // ✅ CRITICAL FIX: Prevent mode switching during gameplay
+    // Store the initial mode on first run to prevent unwanted changes
+    // BUT allow mode changes when explicitly navigating to a different mode
+    if (initialModeRef.current === null && mode) {
+      initialModeRef.current = mode;
+      console.log("🔒 GameScreen: Locking initial mode to:", mode);
+    } else if (mode && initialModeRef.current && mode !== initialModeRef.current) {
+      // Allow mode change if explicitly navigating to a different mode
+      console.log("🔄 GameScreen: Mode change detected, updating locked mode from", initialModeRef.current, "to", mode);
+      initialModeRef.current = mode;
+    }
+    
+    // Use the locked initial mode, fallback to current mode, then to "solo"
+    const stableMode = initialModeRef.current || mode || "solo";
+    
     // Determine the effective mode based on settings
-    const effectiveMode = settings.developer.soloMode
+    // Use current settings value to avoid dependency issues
+    const currentSettings = settings;
+    const effectiveMode = currentSettings.developer.soloMode
       ? "solo"
-      : (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
+      : (stableMode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
     
     console.log("🔧 GameScreen Debug:", {
       "settings.developer.soloMode": settings.developer.soloMode,
       "route mode": mode,
+      "stableMode": stableMode,
+      "lockedMode": initialModeRef.current,
       "effectiveMode": effectiveMode,
       "settings object": settings.developer,
       "full settings": settings
@@ -212,10 +244,20 @@ export default function GameScreen() {
           });
 
           cleanupFunction = () => {
-            console.log("GameScreen: Cleaning up online game connection");
+            console.log("🔍 DEBUG GameScreen: Cleaning up online game connection - currentGameId:", gameId);
+            console.trace("🔍 DEBUG GameScreen: cleanupFunction call stack");
             unsubscribeGame();
             unsubscribeMoves();
-            onlineGameService.disconnect();
+            
+            // ✅ CRITICAL FIX: Only disconnect if we're actually changing modes or unmounting
+            // Don't disconnect if we're just changing gameId within online mode
+            const isStillOnlineMode = mode === "online";
+            if (!isStillOnlineMode) {
+              console.log("🔍 DEBUG GameScreen: Mode changed from online, disconnecting");
+              onlineGameService.disconnect();
+            } else {
+              console.log("🔍 DEBUG GameScreen: Still in online mode, skipping disconnect");
+            }
           };
         } catch (error) {
           console.error("Failed to connect to online game:", error);
@@ -248,7 +290,15 @@ export default function GameScreen() {
             console.log("GameScreen: Cleaning up P2P game connection");
             unsubscribeGame();
             unsubscribeMoves();
-            p2pGameService.disconnect();
+            
+            // ✅ CRITICAL FIX: Only disconnect if we're actually changing modes or unmounting
+            const isStillP2PMode = mode === "p2p";
+            if (!isStillP2PMode) {
+              console.log("🔍 DEBUG GameScreen: Mode changed from P2P, disconnecting");
+              p2pGameService.disconnect();
+            } else {
+              console.log("🔍 DEBUG GameScreen: Still in P2P mode, skipping disconnect");
+            }
           };
         } catch (error) {
           console.error("Failed to connect to P2P game:", error);
@@ -310,10 +360,18 @@ export default function GameScreen() {
     // connections and listeners are ALWAYS torn down before the
     // next mode's effect runs.
     return () => {
-      console.log("GameScreen: Cleaning up connections for previous mode...");
+      console.log("🔍 DEBUG GameScreen: Cleaning up connections for previous mode...");
+      console.log("🔍 DEBUG GameScreen: Current mode:", mode, "gameId:", gameId);
+      console.trace("🔍 DEBUG GameScreen: useEffect cleanup call stack");
+      
+      // ✅ CRITICAL FIX: Always run cleanup to ensure proper connection management
+      // The cleanup function is designed to be safe to call multiple times
       cleanupFunction();
     };
-  }, [mode, gameId, settings.developer.soloMode, dispatch]);
+  }, [mode, gameId]); // Removed settings.developer.soloMode and dispatch to prevent unnecessary re-runs
+
+  // ✅ CRITICAL FIX: Removed conflicting useEffect that was overriding mode setup
+  // The main useEffect already handles all mode setup correctly
 
   // Get granular pieces of state - only re-render when specific data changes
   const history = useSelector((state: RootState) => state.game.history);
@@ -380,20 +438,63 @@ export default function GameScreen() {
 
   // ✅ Bot Controller - triggers bot moves when it's a bot's turn
   useEffect(() => {
+    // ✅ CRITICAL FIX: Reset lastProcessedTurn when currentPlayerTurn changes
+    // This ensures bots can make moves after eliminations and turn changes
+    if (lastProcessedTurn.current !== currentPlayerTurn) {
+      console.log(`🤖 GameScreen Bot Controller: Turn changed from ${lastProcessedTurn.current} to ${currentPlayerTurn}, resetting lastProcessedTurn`);
+      lastProcessedTurn.current = null;
+    }
+    
+    // ✅ CRITICAL FIX: Prevent multiple rapid bot triggers for the same turn
+    if (lastProcessedTurn.current === currentPlayerTurn) {
+      console.log(`🤖 GameScreen Bot Controller: Already processed turn for ${currentPlayerTurn}, skipping`);
+      return;
+    }
+    
+    // Get the effective mode for bot decisions
+    const currentSettings = settings;
+    const stableMode = initialModeRef.current || mode || "solo";
+    const effectiveGameMode = currentSettings.developer.soloMode
+      ? "solo"
+      : (stableMode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
+    
+    console.log(`🤖 GameScreen Bot Controller:`, {
+      currentPlayerTurn,
+      lastProcessedTurn: lastProcessedTurn.current,
+      isBot: botPlayers.includes(currentPlayerTurn),
+      gameStatus,
+      gameMode,
+      effectiveGameMode,
+      isGameStateReady,
+      eliminatedPlayers: eliminatedPlayers,
+      isEliminated: eliminatedPlayers.includes(currentPlayerTurn),
+      promotionState: promotionState.isAwaiting,
+      shouldTriggerBot: botPlayers.includes(currentPlayerTurn) && 
+        (gameStatus === 'active' || gameStatus === 'promotion') && 
+        isGameStateReady &&
+        !eliminatedPlayers.includes(currentPlayerTurn) && 
+        !promotionState.isAwaiting
+    });
+    
     if (botPlayers.includes(currentPlayerTurn) && 
         (gameStatus === 'active' || gameStatus === 'promotion') && // ✅ CRITICAL FIX: Allow bots in promotion mode too
         isGameStateReady &&
-        !eliminatedPlayers.includes(currentPlayerTurn)) { // ✅ CRITICAL FIX: Don't trigger bot moves for eliminated players
+        !eliminatedPlayers.includes(currentPlayerTurn) && // ✅ CRITICAL FIX: Don't trigger bot moves for eliminated players
+        !promotionState.isAwaiting) { // ✅ CRITICAL FIX: Don't trigger bot moves when promotion modal is open
       
-      if (gameMode === 'online') {
-        // For online games, use centralized bot service (single source of truth)
-        // Get current game state from Redux store
+      // Mark this turn as processed
+      lastProcessedTurn.current = currentPlayerTurn;
+      
+      // ✅ UNIFIED BOT TIMING: Use consistent timing for all game modes
+      // This ensures piece animations (250ms) have time to complete before the next bot move
+      const botThinkTime = BOT_CONFIG.MOVE_DELAY;
+      
+      if (effectiveGameMode === 'online') {
+        // For online games, use centralized bot service
         const currentGameState = store.getState().game;
         onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
       } else {
-        // For other modes (solo, p2p), use local bot service
-        const botThinkTime = 200 + Math.random() * 200; // 0.2 - 0.4 seconds
-
+        // For local modes (solo, p2p, single), use local bot service with same timing
         const timer = setTimeout(() => {
           botService.makeBotMove(currentPlayerTurn);
         }, botThinkTime);
@@ -401,7 +502,7 @@ export default function GameScreen() {
         return () => clearTimeout(timer);
       }
     }
-  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId, eliminatedPlayers]);
+  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId, eliminatedPlayers, promotionState.isAwaiting]);
 
   // Cleanup bot moves when game ends or changes
   useEffect(() => {
@@ -427,17 +528,57 @@ export default function GameScreen() {
     }
   }, [promotionState, botPlayers, gameMode]);
 
-  // ✅ Setup capture animation service callback for bot captures
+  // ✅ Helper function to get current player color
+  const getCurrentPlayerColor = (): string | null => {
+    if (isOnlineMode && onlineGameService.currentPlayer) {
+      return onlineGameService.currentPlayer.color;
+    }
+    if (isP2PMode && p2pGameService.currentPlayer) {
+      return p2pGameService.currentPlayer.color;
+    }
+    // For local games, return null (no specific player)
+    return null;
+  };
+
+  // ✅ Board rotation logic - rotate board for each player's perspective
   useEffect(() => {
-    // Set up the capture animation callback
-    captureAnimationService.setCaptureCallback(triggerFloatingPoints);
+    const currentPlayerColor = getCurrentPlayerColor();
     
+    if (currentPlayerColor) {
+      // Rotate board so each player sees their pieces at the bottom (red position)
+      let rotation = 0;
+      switch (currentPlayerColor) {
+        case 'r': // Red - default position (0 degrees)
+          rotation = 0;
+          break;
+        case 'b': // Blue - rotate 90 degrees clockwise
+          rotation = -90;
+          break;
+        case 'y': // Yellow - rotate 180 degrees
+          rotation = -180;
+          break;
+        case 'g': // Green - rotate 270 degrees clockwise (or -90 degrees)
+          rotation = -270;
+          break;
+        default:
+          rotation = 0;
+      }
+      
+      console.log(`🎮 GameScreen: Rotating board for ${currentPlayerColor} player to ${rotation} degrees`);
+      setBoardRotation(rotation);
+    } else {
+      // For local games, keep default rotation
+      setBoardRotation(0);
+    }
+  }, [isOnlineMode, isP2PMode, onlineGameService.currentPlayer?.color, p2pGameService.currentPlayer?.color]);
+
+  // ✅ Setup notification service callback
+  useEffect(() => {
     // Set up notification service callback
     notificationService.setCallback(setNotifications);
     
     // Cleanup on unmount
     return () => {
-      captureAnimationService.clearCallback();
       notificationService.clear();
     };
   }, []);
@@ -458,6 +599,28 @@ export default function GameScreen() {
     }
   };
 
+  // Clear justEliminated after notification is shown
+  useEffect(() => {
+    if (justEliminated) {
+      const timer = setTimeout(async () => {
+        // Clear from local Redux state
+        dispatch(clearJustEliminated());
+        
+        // ✅ CRITICAL FIX: Also clear from server for online games
+        if (gameMode === 'online' && gameId) {
+          try {
+            await realtimeDatabaseService.clearJustEliminated(gameId);
+            console.log(`🎯 GameScreen: Cleared justEliminated flag from server for game ${gameId}`);
+          } catch (error) {
+            console.error('Error clearing justEliminated from server:', error);
+          }
+        }
+      }, 3000); // Clear after notification duration
+      
+      return () => clearTimeout(timer);
+    }
+  }, [justEliminated, dispatch, gameMode, gameId]);
+
   // Function to trigger floating points animation
   const triggerFloatingPoints = (points: number, boardX: number, boardY: number, playerColor: string) => {
     const id = `floating-${Date.now()}-${Math.random()}`;
@@ -465,11 +628,34 @@ export default function GameScreen() {
     const offsetX = (Math.random() - 0.5) * 20;
     const offsetY = (Math.random() - 0.5) * 10;
     
+    // Ensure floating points stay within screen bounds
+    const safeAreaTop = insets.top;
+    const safeAreaBottom = insets.bottom;
+    const safeAreaLeft = insets.left;
+    const safeAreaRight = insets.right;
+    const { width, height } = require('react-native').Dimensions.get('window');
+    
+    // Clamp X position to stay within screen bounds
+    const clampedX = Math.max(safeAreaLeft + 10, Math.min(width - safeAreaRight - 10, boardX + offsetX));
+    
+    // Clamp Y position to stay within safe area bounds
+    const clampedY = Math.max(safeAreaTop + 50, Math.min(height - safeAreaBottom - 100, boardY + offsetY));
+    
+    // Debug logging for coordinate calculations
+    console.log(`🎯 Floating Points Debug:`, {
+      original: { boardX, boardY },
+      offset: { offsetX, offsetY },
+      screen: { width, height },
+      safeArea: { top: safeAreaTop, bottom: safeAreaBottom, left: safeAreaLeft, right: safeAreaRight },
+      clamped: { x: clampedX, y: clampedY },
+      points
+    });
+    
     const newFloatingPoint = {
       id,
       points,
-      x: boardX + offsetX,
-      y: boardY + offsetY,
+      x: clampedX,
+      y: clampedY,
       color: playerColor,
     };
     
@@ -483,48 +669,52 @@ export default function GameScreen() {
 
   // Determine notification message
   const getNotificationMessage = () => {
-    if (gameStatus === "checkmate" && justEliminated) {
-      return `Checkmate! ${getPlayerName(justEliminated)} has been eliminated!`;
-    }
-    if (gameStatus === "stalemate" && justEliminated) {
-      return `Stalemate! ${getPlayerName(justEliminated)} has been eliminated!`;
+    if (justEliminated) {
+      if (gameStatus === "checkmate") {
+        return `Checkmate! ${getPlayerName(justEliminated)} has been eliminated!`;
+      }
+      if (gameStatus === "stalemate") {
+        return `Stalemate! ${getPlayerName(justEliminated)} has been eliminated!`;
+      }
+      // Show notification for any elimination (resignation, timeout, etc.)
+      return `${getPlayerName(justEliminated)} has been eliminated!`;
     }
     return "";
   };
 
-  // Create player data for the pods
+  // Create player data for the pods with safety checks
   const players = [
     {
       name: getPlayerName("r"),
       color: "r",
-      score: scores.r,
-      capturedPieces: capturedPieces.r,
+      score: scores?.r || 0,
+      capturedPieces: capturedPieces?.r || [],
       isCurrentTurn: currentPlayerTurn === "r",
-      isEliminated: eliminatedPlayers.includes("r"),
+      isEliminated: eliminatedPlayers?.includes("r") || false,
     },
     {
       name: getPlayerName("b"),
       color: "b",
-      score: scores.b,
-      capturedPieces: capturedPieces.b,
+      score: scores?.b || 0,
+      capturedPieces: capturedPieces?.b || [],
       isCurrentTurn: currentPlayerTurn === "b",
-      isEliminated: eliminatedPlayers.includes("b"),
+      isEliminated: eliminatedPlayers?.includes("b") || false,
     },
     {
       name: getPlayerName("y"),
       color: "y",
-      score: scores.y,
-      capturedPieces: capturedPieces.y,
+      score: scores?.y || 0,
+      capturedPieces: capturedPieces?.y || [],
       isCurrentTurn: currentPlayerTurn === "y",
-      isEliminated: eliminatedPlayers.includes("y"),
+      isEliminated: eliminatedPlayers?.includes("y") || false,
     },
     {
       name: getPlayerName("g"),
       color: "g",
-      score: scores.g,
-      capturedPieces: capturedPieces.g,
+      score: scores?.g || 0,
+      capturedPieces: capturedPieces?.g || [],
       isCurrentTurn: currentPlayerTurn === "g",
-      isEliminated: eliminatedPlayers.includes("g"),
+      isEliminated: eliminatedPlayers?.includes("g") || false,
     },
   ];
 
@@ -562,12 +752,12 @@ export default function GameScreen() {
           </Animated.View>
         ) : (
           <Animated.View 
-            entering={SlideInLeft.duration(300).springify()} 
+            entering={SlideInLeft.duration(300)} 
             exiting={SlideOutRight.duration(200)}
             style={{ position: 'absolute', width: '100%' }}
           >
             <PlayerHUDPanel 
-              players={[players[2], players[3]]}
+              players={players.length >= 4 ? [players[2], players[3]] : []}
               panelType="top"
             />
           </Animated.View>
@@ -576,12 +766,24 @@ export default function GameScreen() {
 
       {/* Main Game Area with breathing space */}
       <View className="flex-1 justify-center items-center" style={{ paddingVertical: 16 }}>
-        <Board 
-          onCapture={triggerFloatingPoints} 
-          playerData={players}
-          floatingPoints={floatingPoints}
-          onFloatingPointComplete={removeFloatingPoint}
-        />
+        <Animated.View
+          style={{
+            transform: [{ rotate: `${boardRotation}deg` }],
+            // Adjust padding to compensate for board rotation
+            paddingTop: boardRotation === 90 ? 8 : boardRotation === 180 ? 16 : boardRotation === 270 ? 8 : 0,
+            paddingBottom: boardRotation === 90 ? 8 : boardRotation === 180 ? 0 : boardRotation === 270 ? 8 : 16,
+            paddingLeft: boardRotation === 90 ? 16 : boardRotation === 180 ? 8 : boardRotation === 270 ? 0 : 8,
+            paddingRight: boardRotation === 90 ? 0 : boardRotation === 180 ? 8 : boardRotation === 270 ? 16 : 8,
+          }}
+        >
+          <Board 
+            onCapture={triggerFloatingPoints} 
+            playerData={players}
+            floatingPoints={floatingPoints}
+            onFloatingPointComplete={removeFloatingPoint}
+            boardRotation={boardRotation}
+          />
+        </Animated.View>
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
@@ -602,9 +804,14 @@ export default function GameScreen() {
         zIndex: 20 
       }]}>
         <TouchableOpacity
-          onPress={() => {
-            // 🔊 Add haptic feedback for tactile response
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onPress={async () => {
+            // ✅ CRITICAL FIX: Use sound service to respect haptics settings
+            try {
+              const soundService = require('../../services/soundService').default;
+              await soundService.playSound('button');
+            } catch (error) {
+              console.log('🔊 Failed to play button sound:', error);
+            }
             
             // Animate the toggle
             toggleScale.value = withSpring(0.9, { damping: 15, stiffness: 200 }, () => {
@@ -646,7 +853,7 @@ export default function GameScreen() {
       <GameNotification
         message={getNotificationMessage()}
         isVisible={
-          (gameStatus === "checkmate" || gameStatus === "stalemate") && !winner
+          justEliminated !== null && !winner
         }
         duration={3000}
       />
@@ -665,7 +872,29 @@ export default function GameScreen() {
             name: p.name,
             isEliminated: p.isEliminated
           }))}
-          onReset={() => dispatch(resetGame())}
+          onReset={async () => {
+            try {
+              // ✅ CRITICAL FIX: For online games, create a rematch with same players and bots
+              if (gameMode === 'online' && gameId) {
+                console.log(`🎮 GameScreen: Creating rematch game for ${gameId}`);
+                
+                // Create rematch game with same players and bots
+                const newGameId = await realtimeDatabaseService.createRematchGame(gameId);
+                
+                // Navigate to the new game
+                router.push(`/(tabs)/GameScreen?gameId=${newGameId}&mode=online`);
+                
+                console.log(`🎮 GameScreen: Navigated to rematch game ${newGameId}`);
+              } else {
+                // For local games, just reset the game
+                dispatch(resetGame());
+              }
+            } catch (error) {
+              console.error('Error creating rematch:', error);
+              // Fallback to regular reset
+              dispatch(resetGame());
+            }
+          }}
           onDismiss={() => {
             // Clear the game over state to dismiss the modal
             dispatch(clearGameOver());
@@ -673,13 +902,34 @@ export default function GameScreen() {
         />
       )}
 
-      {/* Promotion Modal */}
+      {/* Promotion Modal - Only show to the player who needs to promote in multiplayer games */}
       <PromotionModal
-        visible={promotionState.isAwaiting}
+        visible={promotionState.isAwaiting && 
+                (getCurrentPlayerColor() === null || // Local games - show to all players
+                 promotionState.color === getCurrentPlayerColor())} // Multiplayer - show only to promoting player
         playerColor={promotionState.color || ""}
-        onSelectPiece={(pieceType) =>
-          dispatch(completePromotion({ pieceType }))
-        }
+        onSelectPiece={async (pieceType) => {
+          if (isOnlineMode && onlineGameService.isConnected) {
+            try {
+              await onlineGameService.makePromotion(pieceType);
+            } catch (error) {
+              console.error("Failed to make online promotion:", error);
+              // Fallback to local promotion if online fails
+              dispatch(completePromotion({ pieceType }));
+            }
+          } else if (isP2PMode && p2pGameService.isConnected) {
+            try {
+              await p2pGameService.makePromotion(pieceType);
+            } catch (error) {
+              console.error("Failed to make P2P promotion:", error);
+              // Fallback to local promotion if P2P fails
+              dispatch(completePromotion({ pieceType }));
+            }
+          } else {
+            // Local mode - use Redux action
+            dispatch(completePromotion({ pieceType }));
+          }
+        }}
       />
 
       {/* Simple Notifications Layer */}

@@ -8,6 +8,13 @@ export const turnOrder = ["r", "b", "y", "g"] as const;
 // Re-export shared types
 export { MoveInfo, Position };
 
+// ✅ Enhanced type safety for en passant targets
+export interface EnPassantTarget {
+  position: Position;
+  createdBy: string;
+  createdByTurn: string;
+}
+
 export interface GameState {
   boardState: (string | null)[][];
   currentPlayerTurn: string;
@@ -46,11 +53,7 @@ export interface GameState {
     gR1: boolean;
     gR2: boolean; // Green
   };
-  enPassantTargets: {
-    position: Position;
-    createdBy: string;
-    createdByTurn: string;
-  }[]; // Will store multiple skipped squares and which pawns created them
+  enPassantTargets: EnPassantTarget[]; // Will store multiple skipped squares and which pawns created them
   gameOverState: {
     isGameOver: boolean;
     status: "checkmate" | "stalemate" | "finished" | null;
@@ -65,7 +68,9 @@ export interface GameState {
     to: { row: number; col: number };
     pieceCode: string;
     playerColor: string;
+    playerId?: string;
     timestamp: number;
+    capturedPiece?: string | null; // The piece that was captured (if any)
   } | null;
   // Multiplayer state
   players: Player[];

@@ -53,6 +53,7 @@ const OnlineLobbyScreen: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState("Initializing...");
   const [refreshKey, setRefreshKey] = useState(0);
   const [botPlayers, setBotPlayers] = useState<string[]>([]);
+  const [currentGame, setCurrentGame] = useState<RealtimeGame | null>(null);
 
   // Initialize Firebase auth (optimized)
   useEffect(() => {
@@ -123,6 +124,32 @@ const OnlineLobbyScreen: React.FC = () => {
       currentGameId,
       (game) => {
         if (game) {
+          // Store current game data for join code display
+          setCurrentGame(game);
+          
+          // ✅ CRITICAL FIX: Update players in Redux state when they join/leave
+          const playersArray = Object.values(game.players || {});
+          
+          // Update Redux players state
+          dispatch(setPlayers(playersArray));
+          
+          // Update host status
+          const user = realtimeDatabaseService.getCurrentUser();
+          const isHost = user ? game.hostId === user.uid : false;
+          dispatch(setIsHost(isHost));
+          
+          // Update can start game status
+          const canStartGame = playersArray.length >= 2 && game.status === "waiting";
+          dispatch(setCanStartGame(canStartGame));
+          
+          // Sync bot players from game data
+          const botPlayersFromGame = playersArray
+            .filter((player: any) => player.isBot === true)
+            .map((player: any) => player.color);
+          setBotPlayers(botPlayersFromGame);
+          
+          console.log(`🔍 OnlineLobbyScreen: Updated players (${playersArray.length}):`, playersArray.map(p => p.name));
+          
           // Check if game status changed to playing
           if (game.status === "playing") {
             router.push(
@@ -132,6 +159,7 @@ const OnlineLobbyScreen: React.FC = () => {
         } else {
           // Game was deleted
           setCurrentGameId(null);
+          setCurrentGame(null);
           dispatch(setPlayers([]));
           dispatch(setIsHost(false));
           dispatch(setCanStartGame(false));
@@ -178,7 +206,7 @@ const OnlineLobbyScreen: React.FC = () => {
       
       const gameId = await realtimeDatabaseService.createGame(
         settings.profile.name.trim(),
-        botPlayers
+        [] // Start with no bots - will be configured in waiting room
       );
       setCurrentGameId(gameId);
       
@@ -314,14 +342,29 @@ const OnlineLobbyScreen: React.FC = () => {
     setRefreshKey(prev => prev + 1);
   };
 
-  // Toggle bot status for a player color
-  const toggleBotPlayer = (color: string) => {
+  // Toggle bot status for a player color (host only)
+  const toggleBotPlayer = async (color: string) => {
+    if (!isHost || !currentGameId) {
+      console.log(`🤖 OnlineLobbyScreen: Not host or no game, ignoring bot toggle`);
+      return;
+    }
     
     const newBotPlayers = botPlayers.includes(color)
       ? botPlayers.filter(c => c !== color)
       : [...botPlayers, color];
     
     setBotPlayers(newBotPlayers);
+    
+    // Update bot configuration in database
+    try {
+      await realtimeDatabaseService.updateBotConfiguration(currentGameId, newBotPlayers);
+      console.log(`🤖 OnlineLobbyScreen: Host updated bot configuration:`, newBotPlayers);
+    } catch (error) {
+      console.error("Error updating bot configuration:", error);
+      // Revert local state on error
+      setBotPlayers(botPlayers);
+      Alert.alert("Error", "Failed to update bot configuration");
+    }
   };
 
   const cleanupCorruptedGames = async () => {
@@ -383,6 +426,9 @@ const OnlineLobbyScreen: React.FC = () => {
             <Text className="text-gray-300 text-sm">
               {playerCount}/{item.maxPlayers} players
             </Text>
+            <Text className="text-gray-500 text-xs mt-1">
+              Join Code: {item.joinCode || item.id.substring(0, 8)}
+            </Text>
           </View>
           <View className="items-end">
             <Text className="text-green-400 text-sm">Available</Text>
@@ -442,8 +488,13 @@ const OnlineLobbyScreen: React.FC = () => {
           <Text className="text-white text-xl font-bold mb-4 text-center">
             Waiting for Players
           </Text>
+          
+          <Text className="text-gray-300 text-sm mb-4 text-center">
+            Join Code: <Text className="text-white font-bold">{currentGame?.joinCode || 'Loading...'}</Text>
+          </Text>
 
           <View className="space-y-3 w-full">
+            <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
             {players && players.length > 0 ? (
               players.map((player, index) => (
                 <View
@@ -453,23 +504,68 @@ const OnlineLobbyScreen: React.FC = () => {
                   <Text className="text-white text-lg">
                     {player.name} {player.isHost && "(Host)"}
                   </Text>
-                  <View
-                    className={`w-3 h-3 rounded-full ${
-                      player.color === "r"
-                        ? "bg-red-500"
-                        : player.color === "b"
-                          ? "bg-blue-500"
-                          : player.color === "y"
-                            ? "bg-purple-500"
-                            : player.color === "g"
-                              ? "bg-green-500"
-                              : "bg-gray-500"
-                    }`}
-                  />
+                  <View className="flex-row items-center">
+                    <View
+                      className={`w-3 h-3 rounded-full mr-2 ${
+                        player.color === "r"
+                          ? "bg-red-500"
+                          : player.color === "b"
+                            ? "bg-blue-500"
+                            : player.color === "y"
+                              ? "bg-purple-500"
+                              : player.color === "g"
+                                ? "bg-green-500"
+                                : "bg-gray-500"
+                      }`}
+                    />
+                    <Text className="text-gray-400 text-sm">
+                      {player.connectionState || 'connected'}
+                    </Text>
+                  </View>
                 </View>
               ))
             ) : (
               <Text className="text-gray-400 text-center">No players yet</Text>
+            )}
+            
+            {/* Bot Configuration Section (Host Only) */}
+            {isHost && (
+              <View className="mt-4 pt-4 border-t border-white/20">
+                <Text className="text-white text-lg font-semibold mb-3 text-center">Bot Configuration</Text>
+                <Text className="text-gray-400 text-sm mb-3 text-center">
+                  Tap to toggle bot players (host controls all bots)
+                </Text>
+                <View className="flex-row justify-around">
+                  {['r', 'b', 'y', 'g'].map((color) => {
+                    const isBot = botPlayers.includes(color);
+                    const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
+                    const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
+                    
+                    return (
+                      <TouchableOpacity
+                        key={color}
+                        className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
+                          isBot ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'
+                        }`}
+                        onPress={() => {
+                          hapticsService.selection();
+                          toggleBotPlayer(color);
+                        }}
+                      >
+                        <View className="items-center">
+                          <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
+                          <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : 'text-gray-300'}`}>
+                            {colorName}
+                          </Text>
+                          <Text className={`text-xs ${isBot ? 'text-green-300' : 'text-gray-400'}`}>
+                            {isBot ? '🤖 Bot' : '👤 Human'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
             )}
           </View>
         </View>
@@ -572,56 +668,12 @@ const OnlineLobbyScreen: React.FC = () => {
         )}
       </View>
 
-      {/* Bot Configuration Section */}
-      <View className="mb-6">
-        <View className="bg-gray-800 rounded-lg p-4 mb-4">
-          <Text className="text-white text-lg font-semibold mb-3 text-center">Bot Configuration</Text>
-          <Text className="text-gray-400 text-sm mb-3 text-center">
-            Tap to toggle bot players (synchronized across all devices)
-          </Text>
-          <View className="flex-row justify-around">
-            {['r', 'b', 'y', 'g'].map((color) => {
-              const isBot = botPlayers.includes(color);
-              const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
-              const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
-              
-              return (
-                <TouchableOpacity
-                  key={color}
-                  className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
-                    isBot ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'
-                  }`}
-                  onPress={() => {
-                    // ✅ Add haptic feedback for buttons that don't play sounds
-                    try {
-                      const { hapticsService } = require('../../services/hapticsService');
-                      hapticsService.buttonPress();
-                    } catch (error) {
-                    }
-                    toggleBotPlayer(color);
-                  }}
-                >
-                  <View className="items-center">
-                    <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
-                    <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : 'text-gray-300'}`}>
-                      {colorName}
-                    </Text>
-                    <Text className={`text-xs ${isBot ? 'text-green-300' : 'text-gray-400'}`}>
-                      {isBot ? '🤖 Bot' : '👤 Human'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      </View>
 
       <View className="mb-8">
         <AnimatedButton
           icon="🌐"
           title="Create Game"
-          subtitle={isLoading ? "Creating..." : `Start an online game${botPlayers.length > 0 ? ` with ${botPlayers.length} bot${botPlayers.length > 1 ? 's' : ''}` : ''}`}
+          subtitle={isLoading ? "Creating..." : "Start an online game"}
           gradientColors={['#ffffff', '#f0f0f0']}
           textColor="black"
           subtitleColor="gray-600"

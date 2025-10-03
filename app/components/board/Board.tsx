@@ -11,12 +11,14 @@ import Animated, {
   withRepeat,
   withSequence,
   interpolate,
-  Easing
+  Easing,
+  cancelAnimation
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import Svg, { Defs, Filter, FeGaussianBlur, FeMerge, FeMergeNode, Path, LinearGradient, Stop } from "react-native-svg";
 import { useSettings } from "../../../context/SettingsContext";
 import notificationService from "../../../services/notificationService";
+import { ANIMATION_DURATIONS } from "../../../config/gameConfig";
 
 import onlineGameService from "../../../services/onlineGameService";
 import p2pGameService from "../../../services/p2pGameService";
@@ -56,9 +58,10 @@ interface BoardProps {
     color: string;
   }>;
   onFloatingPointComplete?: (id: string) => void;
+  boardRotation?: number;
 }
 
-export default function Board({ onCapture, playerData, floatingPoints, onFloatingPointComplete }: BoardProps) {
+export default function Board({ onCapture, playerData, floatingPoints, onFloatingPointComplete, boardRotation = 0 }: BoardProps) {
   const { width } = useWindowDimensions();
   // Memoized board dimensions - only recalculates when screen width changes
   const boardSize = React.useMemo(() => Math.min(width * 0.98, 600), [width]);
@@ -85,7 +88,9 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
     return validMoves;
   }, [viewingHistoryIndex, history, validMoves]);
   const checkStatus = useSelector((state: RootState) => state.game.checkStatus);
+  const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
+  const enPassantTargets = useSelector((state: RootState) => state.game.enPassantTargets);
   
   // Memoize expensive calculations
   const displayBoardState = useMemo(() => {
@@ -96,11 +101,21 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
   }, [viewingHistoryIndex, history, boardState]);
   // OPTIMIZATION: Use separate selectors to avoid creating new objects
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
-  const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
   const players = useSelector((state: RootState) => state.game.players);
   
   // Get last move for highlighting
   const lastMove = useSelector((state: RootState) => state.game.lastMove);
+  const botPlayers = useSelector((state: RootState) => state.game.botPlayers);
+  
+  // Get current user from service
+  const getCurrentUser = () => {
+    try {
+      const realtimeDatabaseService = require('../../services/realtimeDatabaseService').default;
+      return realtimeDatabaseService.getCurrentUser();
+    } catch (error) {
+      return null;
+    }
+  };
 
   // Animation values for current player glow
   const glowOpacity = useSharedValue(0);
@@ -121,7 +136,7 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
     col: number;
   }>>([]);
 
-  // Animation lock to prevent input during animations
+  // Simple animation lock
   const [isAnimating, setIsAnimating] = React.useState(false);
 
   // Reanimated shared values for the piece's X and Y position
@@ -145,6 +160,22 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
     return `url(#${gradientId})`;
   }, [currentPlayerTurn]);
 
+  // ✅ Custom hook to track previous values for sound effects
+  const usePrevious = (value: any) => {
+    const ref = useRef<any>(undefined);
+    React.useEffect(() => {
+      ref.current = value;
+    });
+    return ref.current;
+  };
+
+  // Track the previous values for enhanced sound effects
+  const prevCheckStatus = usePrevious(checkStatus);
+  const prevGameStatus = usePrevious(gameStatus);
+
+  // ✅ Ref to track the last animated move to prevent duplicate animations
+  const lastAnimatedMoveRef = useRef<string | null>(null);
+
   // Update glow animation when turn changes
   React.useEffect(() => {
     if (currentPlayerTurn) {
@@ -165,7 +196,158 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
       glowOpacity.value = withTiming(0, { duration: 300 });
       glowScale.value = withTiming(1);
     }
-  }, [currentPlayerTurn]);
+
+    // ✅ Add cleanup function to prevent memory leaks
+    return () => {
+      cancelAnimation(glowScale);
+    };
+  }, [currentPlayerTurn, glowOpacity, glowScale]);
+
+  // ✅ SINGLE SOURCE OF TRUTH: Watch lastMove for all animations
+  // This effect runs whenever ANY move is made (local player, bot, or remote player)
+  React.useEffect(() => {
+    // Don't animate if there's no move, or if we're just loading the game
+    if (!lastMove || history.length <= 1) {
+      return;
+    }
+
+    // ✅ CRITICAL FIX: Prevent duplicate animations by checking if we've already animated this move
+    // Use a combination of move details and timestamp to create a unique key
+    const moveKey = `${lastMove.from.row}-${lastMove.from.col}-${lastMove.to.row}-${lastMove.to.col}-${lastMove.pieceCode}-${lastMove.timestamp}`;
+    
+    // Check if we've already animated this exact move
+    if (lastAnimatedMoveRef.current === moveKey) {
+      return; // Skip animation - we've already animated this move
+    }
+    
+    // Mark this move as animated
+    lastAnimatedMoveRef.current = moveKey;
+
+    // Trigger the capture "poof" effect
+    if (lastMove.capturedPiece) {
+      const captureKey = `${lastMove.to.row}-${lastMove.to.col}-${Date.now()}`;
+      setCapturingPieces(prev => [...prev, {
+        key: captureKey,
+        code: lastMove.capturedPiece!,
+        row: lastMove.to.row,
+        col: lastMove.to.col
+      }]);
+    }
+    
+    // Trigger the floating points animation
+    if (lastMove.capturedPiece && onCapture) {
+      const capturedPieceType = lastMove.capturedPiece[1];
+      let points = 0;
+      switch (capturedPieceType) {
+        case "P": // Pawn
+          points = 1;
+          break;
+        case "N": // Knight
+          points = 3;
+          break;
+        case "B": // Bishop
+        case "R": // Rook
+          points = 5;
+          break;
+        case "Q": // Queen
+          points = 9;
+          break;
+        case "K": // King
+          points = 0; // Kings cannot be captured - should be checkmated instead
+          break;
+        default:
+          points = 0;
+      }
+
+      const boardX = (lastMove.to.col * squareSize) + (squareSize / 2);
+      const boardY = (lastMove.to.row * squareSize) + (squareSize / 2);
+      onCapture(points, boardX, boardY, lastMove.playerColor);
+    }
+
+    // ✅ CONDITIONAL ANIMATION: Skip move animation in single player modes
+    if (effectiveMode !== "solo" && mode !== "single" && !isAnimating) {
+      setIsAnimating(true);
+      animatePieceMove(
+        lastMove.from.row,
+        lastMove.from.col,
+        lastMove.to.row,
+        lastMove.to.col,
+        lastMove.pieceCode,
+        () => {
+          setIsAnimating(false); // Release the lock when animation completes
+        }
+      );
+    }
+
+    // ✅ CRITICAL FIX: SOUND + HAPTICS LOGIC - Only play sounds when user actually sees the move
+    // In online mode: Only play sounds when animation is playing (user sees the move)
+    // In local modes: Always play sounds since moves are immediate
+    const shouldPlaySounds = effectiveMode === "online" 
+      ? (mode !== "solo" && mode !== "single") // Only when animation plays in online mode
+      : true; // Always play in local modes (solo, single, p2p)
+
+    if (shouldPlaySounds) {
+      try {
+        const soundService = require('../../../services/soundService').default;
+        const isCastling = require('../../../state/gameHelpers').isCastlingMove(
+          lastMove.pieceCode,
+          lastMove.from.row,
+          lastMove.from.col,
+          lastMove.to.row,
+          lastMove.to.col
+        );
+
+        // ✅ CRITICAL FIX: Use unified playSound method to ensure sounds and haptics happen simultaneously
+        if (isCastling) {
+          soundService.playSound('castle');
+        } else if (lastMove.capturedPiece) {
+          soundService.playSound('capture');
+        } else {
+          soundService.playSound('move');
+        }
+
+        // ✅ Move sound effects only - check/checkmate sounds handled separately
+
+      } catch (error) {
+        console.log('🔊 SoundService: Failed to play sound from Board component:', error);
+      }
+    }
+  }, [lastMove]); // ✅ FIXED: Only depend on lastMove to prevent animation loops
+
+  // ✅ Reset animation tracking when game resets or changes
+  React.useEffect(() => {
+    // Reset animation tracking when history is cleared (new game)
+    if (history.length <= 1) {
+      lastAnimatedMoveRef.current = null;
+    }
+  }, [history.length]);
+
+  // ✅ SEPARATE EFFECT: Handle check/checkmate sound effects
+  // This effect runs when checkStatus or gameStatus changes, but doesn't trigger animations
+  React.useEffect(() => {
+    try {
+      const soundService = require('../../../services/soundService').default;
+      
+      // ✅ CRITICAL FIX: Use unified playSound method for check/checkmate sounds and haptics
+      // Check for game-ending sounds
+      if (prevGameStatus !== 'finished' && gameStatus === 'finished') {
+        soundService.playSound('checkmate'); // Game over sound + haptics
+      } else if (prevGameStatus !== 'checkmate' && gameStatus === 'checkmate') {
+        soundService.playSound('checkmate');
+      }
+
+      // Check if a player just entered check
+      const wasInCheck = prevCheckStatus && Object.values(prevCheckStatus).some(v => v);
+      const isNowInCheck = Object.values(checkStatus).some(v => v);
+
+      if (!wasInCheck && isNowInCheck) {
+        soundService.playSound('check');
+      }
+
+    } catch (error) {
+      console.log('🔊 SoundService: Failed to play check/checkmate sound from Board component:', error);
+    }
+  }, [checkStatus, gameStatus, prevCheckStatus, prevGameStatus]); // Safe to depend on these for sound effects
 
   // ✅ SVG border glow style
   const borderGlowStyle = useAnimatedStyle(() => ({
@@ -217,9 +399,12 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
     
     // Use requestAnimationFrame to ensure the piece renders before starting animation
     requestAnimationFrame(() => {
+      // ✅ SYNCHRONIZED TIMING: Use centralized animation duration
+      const moveDuration = ANIMATION_DURATIONS.PIECE_MOVE;
+      
       // Start the animation after the animated piece is rendered
-      piecePositionX.value = withTiming(toX, { duration: 250, easing: Easing.out(Easing.quad) });
-      piecePositionY.value = withTiming(toY, { duration: 250, easing: Easing.out(Easing.quad) }, (isFinished) => {
+      piecePositionX.value = withTiming(toX, { duration: moveDuration, easing: Easing.out(Easing.quad) });
+      piecePositionY.value = withTiming(toY, { duration: moveDuration, easing: Easing.out(Easing.quad) }, (isFinished) => {
         if (isFinished) {
           // Hide the animated piece using scheduleOnRN
           scheduleOnRN(setAnimatedPiece, null);
@@ -315,144 +500,109 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
         return; // Game not active - ignore move
       }
       
-      // Check if this move captures a piece
-      const capturedPiece = displayBoardState[row][col];
-      if (capturedPiece) {
-        // Trigger capture animation
-        const captureKey = `${row}-${col}-${Date.now()}`;
-        setCapturingPieces(prev => [...prev, { 
-          key: captureKey, 
-          code: capturedPiece, 
-          row, 
-          col 
-        }]);
-        
-        // Handle points calculation for floating points animation
-        if (onCapture) {
-          const capturedPieceType = capturedPiece[1];
-          let points = 0;
-          switch (capturedPieceType) {
-            case "P": // Pawn
-              points = 1;
-              break;
-            case "N": // Knight
-              points = 3;
-              break;
-            case "B": // Bishop
-            case "R": // Rook
-              points = 5;
-              break;
-            case "Q": // Queen
-              points = 9;
-              break;
-            case "K": // King
-              points = 0; // Kings cannot be captured - should be checkmated instead
-              break;
-            default:
-              points = 0;
-          }
-          
-          // Calculate screen coordinates for the capture square
-          const boardX = (col * squareSize) + (squareSize / 2);
-          const boardY = (row * squareSize) + (squareSize / 2);
-          
-          // Trigger floating points animation
-          onCapture(points, boardX, boardY, pieceColor!);
-        }
-      }
+      // Find the specific move from the already calculated validMoves
+      const moveInfo = displayValidMoves.find(
+        (move) => move.row === row && move.col === col
+      );
+
+      // ✅ Check for en passant capture
+      const enPassantTarget = enPassantTargets.find(
+        (target: any) =>
+          target.position.row === row &&
+          target.position.col === col &&
+          pieceToMove![1] === "P" &&
+          pieceToMove !== target.createdBy
+      );
 
       const moveData = {
         from: { row: selectedPiece.row, col: selectedPiece.col },
         to: { row, col },
         pieceCode: pieceToMove!,
         playerColor: pieceColor!,
+        isEnPassant: !!enPassantTarget,
+        enPassantTarget: enPassantTarget,
       };
 
-      // Set animation lock to prevent input during animation
-      setIsAnimating(true);
-
-      // 🚀 ANIMATION LOGIC - Animate the piece movement first
-      animatePieceMove(
-        selectedPiece.row,
-        selectedPiece.col,
-        row,
-        col,
-        pieceToMove!,
-        () => {
-          // This callback runs AFTER the animation completes
-          // Handle different game modes
-          if (effectiveMode === "online") {
-            if (onlineGameService.isConnected && onlineGameService.currentGameId) {
-              // Online multiplayer mode
-              onlineGameService.makeMove(moveData).catch((error) => {
-                console.error("Failed to make online move:", error);
-                // Check if it's a "Not your turn" error
-                if (error instanceof Error && error.message === "Not your turn") {
-                  // 🔊 Play illegal move sound
-                  try {
-                    const soundService = require('../../services/soundService').default;
-                    soundService.playIllegalMoveSound();
-                  } catch (soundError) {
-                    console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
-                  }
-                  notificationService.show("Not your turn", "warning", 1500);
-                } else {
-                  // 🔊 Play illegal move sound for failed moves
-                  try {
-                    const soundService = require('../../services/soundService').default;
-                    soundService.playIllegalMoveSound();
-                  } catch (soundError) {
-                    console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
-                  }
-                  // FIX: Inform the user about the failed move
-                  notificationService.show("Move failed - check connection", "error", 2000);
-                }
-              });
+      // ✅ SIMPLIFIED: Just dispatch the move. The useEffect will handle the animation.
+      if (effectiveMode === "online") {
+        if (onlineGameService.isConnected && onlineGameService.currentGameId) {
+          // Online multiplayer mode
+          onlineGameService.makeMove(moveData).catch((error) => {
+            console.error("Failed to make online move:", error);
+            // Check if it's a "Not your turn" error
+            if (error instanceof Error && error.message === "Not your turn") {
+              // ✅ CRITICAL FIX: Use unified playSound method for illegal move sound + haptics
+              try {
+                const soundService = require('../../../services/soundService').default;
+                soundService.playSound('illegal');
+              } catch (soundError) {
+                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
+              }
+              notificationService.show("Not your turn", "warning", 1500);
             } else {
-              console.log(
-                "Board: Online service not connected, falling back to local move"
-              );
+              // ✅ CRITICAL FIX: Use unified playSound method for failed move sound + haptics
+              try {
+                const soundService = require('../../../services/soundService').default;
+                soundService.playSound('illegal');
+              } catch (soundError) {
+                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
+              }
+              // FIX: Inform the user about the failed move
+              notificationService.show("Move failed - check connection", "error", 2000);
+            }
+          });
+        } else {
+          console.log(
+            "Board: Online service not connected, falling back to local move"
+          );
               // Fallback to local move if online service is not connected
-              dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
-            }
-          } else if (effectiveMode === "p2p") {
-            console.log(
-              "Board: P2P mode - isConnected:",
-              p2pGameService.isConnected,
-              "currentGameId:",
-              p2pGameService.currentGameId
-            );
-            if (p2pGameService.isConnected && p2pGameService.currentGameId) {
-              // P2P multiplayer mode
-              p2pGameService.makeMove(moveData).catch((error) => {
-                console.error("Failed to make P2P move:", error);
-                // Check if it's a "Not your turn" error
-                if (error instanceof Error && error.message === "Not your turn") {
-                  notificationService.show("Not your turn", "warning", 1500);
-                } else {
-                  // FIX: Inform the user about the failed move
-                  notificationService.show("Move failed - check connection", "error", 2000);
-                }
-              });
-            } else {
-              console.log(
-                "Board: P2P service not connected, falling back to local move"
-              );
-              // Fallback to local move if P2P service is not connected
-              dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
-            }
-          } else if (networkService.connected && networkService.roomId) {
-            // Local multiplayer mode
-            dispatch(sendMoveToServer({ row, col }));
-          } else {
-            // Single player mode
-            dispatch(makeMove({ from: selectedPiece, to: { row, col } }));
-          }
-          
-          // Release animation lock after all move processing is complete
-          setIsAnimating(false);
+              dispatch(makeMove({ 
+                from: selectedPiece, 
+                to: { row, col },
+                isPromotion: moveInfo?.isPromotion 
+              }));
         }
-      );
+      } else if (effectiveMode === "p2p") {
+        console.log(
+          "Board: P2P mode - isConnected:",
+          p2pGameService.isConnected,
+          "currentGameId:",
+          p2pGameService.currentGameId
+        );
+        if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+          // P2P multiplayer mode
+          p2pGameService.makeMove(moveData).catch((error) => {
+            console.error("Failed to make P2P move:", error);
+            // Check if it's a "Not your turn" error
+            if (error instanceof Error && error.message === "Not your turn") {
+              notificationService.show("Not your turn", "warning", 1500);
+            } else {
+              // FIX: Inform the user about the failed move
+              notificationService.show("Move failed - check connection", "error", 2000);
+            }
+          });
+        } else {
+          console.log(
+            "Board: P2P service not connected, falling back to local move"
+          );
+              // Fallback to local move if P2P service is not connected
+              dispatch(makeMove({ 
+                from: selectedPiece, 
+                to: { row, col },
+                isPromotion: moveInfo?.isPromotion 
+              }));
+        }
+      } else if (networkService.connected && networkService.roomId) {
+        // Local multiplayer mode
+        dispatch(sendMoveToServer({ row, col }));
+      } else {
+        // Single player mode
+        dispatch(makeMove({ 
+          from: selectedPiece, 
+          to: { row, col },
+          isPromotion: moveInfo?.isPromotion 
+        }));
+      }
     } else {
       // If clicking on empty square and a piece is selected, deselect it
       if (!pieceCode && selectedPiece) {
@@ -585,8 +735,15 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
           return (
             <View key={rowIndex} style={{ flexDirection: "row" }}>
               {row.map((piece, colIndex) => {
-                // Check if this piece is currently moving
-                const isMoving = animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex;
+                // ✅ CRITICAL FIX: Hide piece during animation at BOTH source and destination
+                const isMovingFrom = animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex;
+                const isMovingTo = lastMove && 
+                  lastMove.to.row === rowIndex && 
+                  lastMove.to.col === colIndex && 
+                  animatedPiece && 
+                  animatedPiece.row === lastMove.from.row && 
+                  animatedPiece.col === lastMove.from.col;
+                const isMoving = isMovingFrom || isMovingTo;
                 const isLight = (rowIndex + colIndex) % 2 === 0;
                 return (
                   <Square
@@ -616,6 +773,7 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
                     playerData={playerData}
                     isLastMoveFrom={lastMove?.from.row === rowIndex && lastMove?.from.col === colIndex}
                     isLastMoveTo={lastMove?.to.row === rowIndex && lastMove?.to.col === colIndex}
+                    boardRotation={boardRotation}
                   />
                 );
               })}
@@ -627,7 +785,9 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
       {/* 🚀 Animation Overlay Layer - Floating Piece */}
       {animatedPiece && (
         <Animated.View style={[animatedPieceStyle, { zIndex: 2 }]}>
-          <Piece piece={animatedPiece.code} size={squareSize} />
+          <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
+            <Piece piece={animatedPiece.code} size={squareSize} />
+          </Animated.View>
         </Animated.View>
       )}
 

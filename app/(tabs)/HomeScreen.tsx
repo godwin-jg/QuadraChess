@@ -20,10 +20,11 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
-import { resetGame } from '../../state/gameSlice';
+import { resetGame, setBotPlayers } from '../../state/gameSlice';
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
+import BotConfigurationModal from "../components/ui/BotConfigurationModal";
 
 // --- Background Piece Component ---
 const BackgroundPiece = ({ piece, size, style }: { piece: string, size: number, style: any }) => {
@@ -160,6 +161,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
   const [isNavigating, setIsNavigating] = useState(false);
+  const [showBotConfig, setShowBotConfig] = useState(false);
   const { height, width } = useWindowDimensions(); // Get screen dimensions
 
   // Simplified animation values for the container
@@ -267,8 +269,16 @@ export default function HomeScreen() {
   );
 
   const handleStartSinglePlayer = () => {
-    // Super simple: Just navigate - bots are set automatically by game mode
-    handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single"); 
+    // Show bot configuration modal first
+    setShowBotConfig(true);
+  };
+
+  const handleBotConfigConfirm = (botPlayers: string[]) => {
+    // Set the configured bot players in Redux
+    dispatch(setBotPlayers(botPlayers));
+    
+    // Navigate to single player game
+    handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single");
   };
 
   const handleModeSwitch = async (
@@ -415,13 +425,13 @@ export default function HomeScreen() {
         </Text> */}
         <TouchableOpacity
           className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
-          onPress={() => {
+          onPress={async () => {
             try {
-              // Only play haptic feedback, no sound
-              const { Haptics } = require('expo-haptics');
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              // ✅ CRITICAL FIX: Use sound service to respect haptics settings
+              const soundService = require('../../services/soundService').default;
+              await soundService.playSound('button');
             } catch (error) {
-              console.log('🔊 Failed to play haptic feedback:', error);
+              console.log('🔊 Failed to play button sound:', error);
             }
             router.push("/settings");
           }}
@@ -538,6 +548,14 @@ export default function HomeScreen() {
         </View>
       </View>
       </Animated.View>
+
+      {/* Bot Configuration Modal */}
+      <BotConfigurationModal
+        visible={showBotConfig}
+        onClose={() => setShowBotConfig(false)}
+        onConfirm={handleBotConfigConfirm}
+        initialBotPlayers={['b', 'y', 'g']} // Default: Red is human, others are bots
+      />
     </SafeAreaView>
   );
 }

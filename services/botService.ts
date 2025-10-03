@@ -1,24 +1,16 @@
 // services/botService.ts
 
 import { store } from '../state/store';
-import { makeMove, completePromotion } from '../state/gameSlice';
+import { makeMove, completePromotion, resignGame } from '../state/gameSlice';
 import { getValidMoves } from '../functions/src/logic/gameLogic';
 import { GameState, Position } from '../state/types';
 import p2pGameService from './p2pGameService';
-import captureAnimationService from './captureAnimationService';
+import { PIECE_VALUES, TURN_ORDER, BOT_CONFIG } from '../config/gameConfig';
 
 // Global lock to prevent multiple bots from moving simultaneously
 let botMoveInProgress = false;
 
-// Point values for each piece type
-const pieceValues: { [key: string]: number } = {
-  P: 1,  // Pawn
-  N: 3,  // Knight
-  B: 5,  // Bishop
-  R: 5,  // Rook
-  Q: 9,  // Queen
-  // K: Kings cannot be captured in chess, so no value assigned
-};
+// ✅ Using centralized piece values from gameConfig
 
 interface MoveOption {
   from: Position;
@@ -30,15 +22,21 @@ interface MoveOption {
   // Note: capturedPieceCode removed to avoid stale data in multiplayer
 }
 
-const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: number = 20): MoveOption[] => {
+const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: number = BOT_CONFIG.MAX_MOVES_TO_CALCULATE, cancellationToken?: { cancelled: boolean }): MoveOption[] => {
   const allMoves: MoveOption[] = [];
   const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
 
-  // Collect all bot pieces first to avoid positional bias
+  // ✅ CRITICAL FIX: Collect all bot pieces and shuffle them for random selection
   const botPieces: { pieceCode: string; position: { row: number; col: number } }[] = [];
   
   for (let r = 0; r < boardState.length; r++) {
     for (let c = 0; c < boardState[r].length; c++) {
+      // Check for cancellation before each piece
+      if (cancellationToken?.cancelled) {
+        console.log(`🤖 BotService: Move calculation cancelled for bot ${botColor}`);
+        return [];
+      }
+      
       const pieceCode = boardState[r][c];
       if (pieceCode && pieceCode.startsWith(botColor)) {
         botPieces.push({ pieceCode, position: { row: r, col: c } });
@@ -46,17 +44,40 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
     }
   }
   
-  // Prioritize pieces that are more likely to have good moves (captures first)
-  const prioritizedPieces = botPieces.sort((a, b) => {
-    // Prioritize by piece value and likelihood of captures
-    const pieceValues = { 'Q': 9, 'R': 5, 'B': 5, 'N': 3, 'P': 1, 'K': 0 };
-    const aValue = pieceValues[a.pieceCode[1] as keyof typeof pieceValues] || 0;
-    const bValue = pieceValues[b.pieceCode[1] as keyof typeof pieceValues] || 0;
-    return bValue - aValue; // Higher value pieces first
-  });
+  // ✅ CRITICAL FIX: Shuffle pieces for random selection instead of predictable row-wise order
+  const shuffledPieces = botPieces.sort(() => Math.random() - 0.5);
   
-  // Process pieces in prioritized order with early termination
-  for (const { pieceCode, position } of prioritizedPieces) {
+  // ✅ CRITICAL FIX: Only prioritize pieces that actually have legal moves
+  const availablePieces: { pieceCode: string; position: { row: number; col: number }; hasMoves: boolean }[] = [];
+  
+  for (const { pieceCode, position } of shuffledPieces) {
+    // Check for cancellation before processing each piece
+    if (cancellationToken?.cancelled) {
+      console.log(`🤖 BotService: Move calculation cancelled for bot ${botColor}`);
+      return [];
+    }
+    
+    const movesForPiece = getValidMoves(
+      pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
+    );
+    
+    // Only include pieces that have legal moves
+    if (movesForPiece.length > 0) {
+      availablePieces.push({ pieceCode, position, hasMoves: true });
+    }
+  }
+  
+  // ✅ CRITICAL FIX: Shuffle available pieces again for maximum randomness
+  const randomizedPieces = availablePieces.sort(() => Math.random() - 0.5);
+  
+  // ✅ CRITICAL FIX: Process pieces in random order with early termination and cancellation checks
+  for (const { pieceCode, position } of randomizedPieces) {
+    // Check for cancellation before processing each piece
+    if (cancellationToken?.cancelled) {
+      console.log(`🤖 BotService: Move calculation cancelled for bot ${botColor}`);
+      return [];
+    }
+    
     const movesForPiece = getValidMoves(
       pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
     );
@@ -97,6 +118,12 @@ const makeBotMove = (botColor: string) => {
     return;
   }
 
+  // ✅ CRITICAL FIX: Don't make moves when promotion modal is open
+  if (gameState.promotionState.isAwaiting) {
+    console.log(`🤖 BotService: Promotion modal is open, skipping bot ${botColor} move`);
+    return;
+  }
+
   // ✅ CRITICAL: Double-check that it's actually this bot's turn
   if (gameState.currentPlayerTurn !== botColor) {
     return;
@@ -112,14 +139,39 @@ const makeBotMove = (botColor: string) => {
   botMoveInProgress = true;
   
   // ⚡ PERFORMANCE FIX: Set a timeout to prevent bot from taking too long
+  const cancellationToken = { cancelled: false };
   const moveTimeout = setTimeout(() => {
-    console.warn(`🤖 BotService: Bot ${botColor} move timed out after 5 seconds, releasing lock`);
+    console.warn(`🤖 BotService: Bot ${botColor} brain overheated after ${BOT_CONFIG.BRAIN_TIMEOUT / 1000} seconds, skipping move`);
+    cancellationToken.cancelled = true;
     botMoveInProgress = false;
-  }, 5000); // 5 second timeout
+    
+    // Skip bot's turn and advance to next player
+    skipBotTurn(botColor);
+  }, BOT_CONFIG.BRAIN_TIMEOUT);
   
-  const allLegalMoves = getAllLegalMoves(botColor, gameState);
+  const allLegalMoves = getAllLegalMoves(botColor, gameState, BOT_CONFIG.MAX_MOVES_TO_CALCULATE, cancellationToken);
+
+  // Check if calculation was cancelled due to timeout (brain overheated)
+  if (cancellationToken.cancelled) {
+    console.log(`🤖 BotService: Bot ${botColor} brain overheated, skipping turn`);
+    clearTimeout(moveTimeout);
+    botMoveInProgress = false;
+    return;
+  }
 
   if (allLegalMoves.length === 0) {
+    // Bot has no legal moves - check if it's checkmate or stalemate
+    const { isKingInCheck } = require('../functions/src/logic/gameLogic');
+    const isInCheck = isKingInCheck(botColor, gameState.boardState, gameState.eliminatedPlayers, gameState.hasMoved);
+    
+    if (isInCheck) {
+      console.log(`🤖 BotService: Bot ${botColor} is checkmated, auto-eliminating`);
+      // Auto-eliminate the bot by dispatching a resign action
+      store.dispatch(resignGame(botColor));
+    } else {
+      console.log(`🤖 BotService: Bot ${botColor} is stalemated, skipping turn`);
+    }
+    
     clearTimeout(moveTimeout);
     botMoveInProgress = false; // Release the lock
     return;
@@ -138,10 +190,10 @@ const makeBotMove = (botColor: string) => {
       const currentCapturedPiece = gameState.boardState[currentMove.to.row][currentMove.to.col];
       
       const bestValue = (bestCapturedPiece && bestCapturedPiece.length >= 2) 
-        ? pieceValues[bestCapturedPiece[1]] || 0 
+        ? PIECE_VALUES[bestCapturedPiece[1] as keyof typeof PIECE_VALUES] || 0 
         : 0;
       const currentValue = (currentCapturedPiece && currentCapturedPiece.length >= 2) 
-        ? pieceValues[currentCapturedPiece[1]] || 0 
+        ? PIECE_VALUES[currentCapturedPiece[1] as keyof typeof PIECE_VALUES] || 0 
         : 0;
       
       return currentValue > bestValue ? currentMove : bestMove;
@@ -228,15 +280,32 @@ const makeBotMove = (botColor: string) => {
     );
   }
 
-  // 🎯 Trigger capture animation if this move captures a piece
-  const capturedPiece = currentGameState.boardState[chosenMove.to.row][chosenMove.to.col];
-  if (capturedPiece && captureAnimationService.isAvailable()) {
-    captureAnimationService.triggerCaptureAnimation(capturedPiece, chosenMove.to.row, chosenMove.to.col, botColor);
-  }
+  // ✅ Animation is now handled automatically by the Board component
+  // when it detects the lastMove state change from the dispatched makeMove action
 
   // Release the lock and clear timeout
   clearTimeout(moveTimeout);
   botMoveInProgress = false;
+};
+
+// Skip bot's turn when brain overheats (timeout)
+const skipBotTurn = (botColor: string) => {
+  console.log(`🤖 BotService: Bot ${botColor} brain overheated, skipping turn`);
+  
+  // Use the existing turn advancement logic by dispatching a dummy move that will be rejected
+  // This will trigger the turn advancement logic in the makeMove reducer
+  const gameState = store.getState().game;
+  
+  // Create a dummy move that will be rejected (invalid move)
+  const dummyMove = {
+    from: { row: -1, col: -1 },
+    to: { row: -1, col: -1 }
+  };
+  
+  // Dispatch the dummy move - it will be rejected but turn will advance
+  store.dispatch(makeMove(dummyMove));
+  
+  console.log(`🤖 BotService: Turn advanced from ${botColor} due to timeout`);
 };
 
 // Handle bot pawn promotion

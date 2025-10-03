@@ -41,7 +41,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           foregroundImage: "./assets/images/chess.png",
           backgroundColor: "#000000"
         },
-        screenOrientation: "portrait"
+        screenOrientation: "portrait",
+        // Optimize for broader device compatibility
+        minSdkVersion: 23, // Android 6.0 (Marshmallow) - supports 95%+ of devices
+        targetSdkVersion: 34, // Android 14 - current stable target
+        compileSdkVersion: 34 // Android 14 - for compilation
       },
       ios: {
         ...config.expo?.ios,
@@ -62,6 +66,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           {
             android: {
               usesCleartextTraffic: true,
+              minSdkVersion: 23, // Android 6.0 - broader compatibility
+              targetSdkVersion: 34, // Android 14 - stable target
+              compileSdkVersion: 34, // Android 14 - compilation target
+              // Optimize for older devices
+              enableProguardInReleaseBuilds: true,
+              enableShrinkResourcesInReleaseBuilds: true,
             },
           },
         ],

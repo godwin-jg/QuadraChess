@@ -154,11 +154,11 @@ class OnlineGameServiceImpl implements OnlineGameService {
       this.gameUnsubscribe = realtimeDatabaseService.subscribeToGame(
         gameId,
         (game) => {
-          if (game) {
-            // Keep connected status true when we receive game data
-            this.isConnected = true;
-            console.log("🔍 DEBUG OnlineGameService: Setting isConnected=true in game callback - gameId:", gameId, "currentGameId:", this.currentGameId);
-          } else {
+        if (game) {
+          // Keep connected status true when we receive game data
+          this.isConnected = true;
+          console.log("🔍 DEBUG OnlineGameService: Setting isConnected=true in game callback - gameId:", gameId, "currentGameId:", this.currentGameId);
+        } else {
             // Only mark as disconnected if we're sure the game doesn't exist
             // Don't immediately disconnect on temporary null values
             // Keep isConnected true for now, let the resign method handle the actual connection check
@@ -746,7 +746,11 @@ class OnlineGameServiceImpl implements OnlineGameService {
           JSON.stringify(currentState.hasMoved) !== JSON.stringify(gameState.hasMoved) ||
           JSON.stringify(currentState.gameOverState) !== JSON.stringify(gameState.gameOverState) ||
           currentState.viewingHistoryIndex !== gameState.viewingHistoryIndex ||
-          JSON.stringify(currentState.history) !== JSON.stringify(gameState.history);
+          JSON.stringify(currentState.history) !== JSON.stringify(gameState.history) ||
+          // ✅ CRITICAL FIX: Include players array comparison - this was missing!
+          JSON.stringify(currentState.players) !== JSON.stringify(gameState.players) ||
+          currentState.isHost !== gameState.isHost ||
+          currentState.canStartGame !== gameState.canStartGame;
         
 
         if (hasSignificantChanges) {
@@ -943,7 +947,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
       }
 
       // Notify callbacks
-      this.gameUpdateCallbacks.forEach((callback) => callback(game));
+      this.gameUpdateCallbacks.forEach((callback) => {
+        callback(game);
+      });
     } else {
       // Game not found or deleted
       this.gameUpdateCallbacks.forEach((callback) => callback(null));

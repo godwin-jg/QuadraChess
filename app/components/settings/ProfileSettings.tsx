@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { hapticsService } from '@/services/hapticsService';
-import { HapticsTestService } from '@/services/hapticsTestService';
 import soundService from '@/services/soundService';
 import * as Haptics from 'expo-haptics';
 import { useSettings } from "../../../context/SettingsContext";
@@ -429,18 +428,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.hapticsEnabled ? "#FFFFFF" : "#9CA3AF"}
               />
-            </View>
-            <View className="py-4">
-              <TouchableOpacity
-                className="bg-blue-600 rounded-lg py-3 px-4 items-center"
-                onPress={async () => {
-                  console.log('🧪 Testing haptics...');
-                  await HapticsTestService.testHaptics();
-                  await HapticsTestService.testHapticsService();
-                }}
-              >
-                <Text className="text-white font-semibold">🧪 Test Haptics</Text>
-              </TouchableOpacity>
             </View>
           </View>
         </View>

@@ -1,15 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   Modal,
   StyleSheet,
-  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { 
+  useSharedValue, 
+  useAnimatedStyle, 
+  withTiming, 
+  withSpring,
+  withDelay,
+} from 'react-native-reanimated';
 import { hapticsService } from '../../../services/hapticsService';
+import GridBackground from './GridBackground';
 
 interface BotConfigurationModalProps {
   visible: boolean;
@@ -25,6 +32,57 @@ const BotConfigurationModal: React.FC<BotConfigurationModalProps> = ({
   initialBotPlayers = ['b', 'y', 'g'], // Default: Red is human, others are bots
 }) => {
   const [botPlayers, setBotPlayers] = useState<string[]>(initialBotPlayers);
+  
+  // Animation values
+  const modalOpacity = useSharedValue(0);
+  const modalScale = useSharedValue(0.9);
+  const titleOpacity = useSharedValue(0);
+  const subtitleOpacity = useSharedValue(0);
+  const playersOpacity = useSharedValue(0);
+  const buttonsOpacity = useSharedValue(0);
+  
+  // Individual player animations
+  const playerAnimations = Array.from({ length: 4 }, () => ({
+    opacity: useSharedValue(0),
+    scale: useSharedValue(0.8),
+    rotateY: useSharedValue(-15),
+  }));
+
+  useEffect(() => {
+    if (visible) {
+      // Entry animations
+      modalOpacity.value = withTiming(1, { duration: 300 });
+      modalScale.value = withSpring(1, { damping: 15, stiffness: 100 });
+      
+      titleOpacity.value = withDelay(100, withTiming(1, { duration: 400 }));
+      subtitleOpacity.value = withDelay(200, withTiming(1, { duration: 400 }));
+      
+      // Staggered player animations
+      playerAnimations.forEach((player, index) => {
+        player.opacity.value = withDelay(300 + (index * 100), withTiming(1, { duration: 400 }));
+        player.scale.value = withDelay(300 + (index * 100), withSpring(1, { damping: 12, stiffness: 100 }));
+        player.rotateY.value = withDelay(300 + (index * 100), withSpring(0, { damping: 10, stiffness: 80 }));
+      });
+      
+      playersOpacity.value = withDelay(700, withTiming(1, { duration: 300 }));
+      buttonsOpacity.value = withDelay(800, withTiming(1, { duration: 400 }));
+    } else {
+      // Exit animations
+      modalOpacity.value = withTiming(0, { duration: 200 });
+      modalScale.value = withTiming(0.9, { duration: 200 });
+      
+      titleOpacity.value = withTiming(0, { duration: 150 });
+      subtitleOpacity.value = withTiming(0, { duration: 150 });
+      playersOpacity.value = withTiming(0, { duration: 150 });
+      buttonsOpacity.value = withTiming(0, { duration: 150 });
+      
+      playerAnimations.forEach((player) => {
+        player.opacity.value = withTiming(0, { duration: 150 });
+        player.scale.value = withTiming(0.8, { duration: 150 });
+        player.rotateY.value = withTiming(-15, { duration: 150 });
+      });
+    }
+  }, [visible]);
 
   const toggleBotPlayer = (color: string) => {
     hapticsService.selection();
@@ -50,107 +108,236 @@ const BotConfigurationModal: React.FC<BotConfigurationModalProps> = ({
   const getColorInfo = (color: string) => {
     switch (color) {
       case 'r':
-        return { name: 'Red', colorClass: 'bg-red-500', colorHex: '#ef4444' };
+        return { 
+          name: 'Red', 
+          gradient: ['#FF6B6B', '#FF5252', '#E53E3E'], 
+          emoji: '🔴',
+          borderColor: '#FF4444'
+        };
       case 'b':
-        return { name: 'Blue', colorClass: 'bg-blue-500', colorHex: '#3b82f6' };
+        return { 
+          name: 'Blue', 
+          gradient: ['#60A5FA', '#3B82F6', '#2563EB'], 
+          emoji: '🔵',
+          borderColor: '#3B82F6'
+        };
       case 'y':
-        return { name: 'Yellow', colorClass: 'bg-purple-500', colorHex: '#7c3aed' };
+        return { 
+          name: 'Yellow', 
+          gradient: ['#A78BFA', '#8B5CF6', '#7C3AED'], 
+          emoji: '🟡',
+          borderColor: '#8B5CF6'
+        };
       case 'g':
-        return { name: 'Green', colorClass: 'bg-green-500', colorHex: '#10b981' };
+        return { 
+          name: 'Green', 
+          gradient: ['#34D399', '#10B981', '#059669'], 
+          emoji: '🟢',
+          borderColor: '#10B981'
+        };
       default:
-        return { name: 'Unknown', colorClass: 'bg-gray-500', colorHex: '#6b7280' };
+        return { 
+          name: 'Unknown', 
+          gradient: ['#9CA3AF', '#6B7280', '#4B5563'], 
+          emoji: '⚪',
+          borderColor: '#9CA3AF'
+        };
     }
   };
+
+  // Animated styles
+  const modalAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: modalOpacity.value,
+    transform: [{ scale: modalScale.value }],
+  }));
+
+  const titleAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: titleOpacity.value,
+    transform: [{ translateY: titleOpacity.value === 0 ? -20 : 0 }],
+  }));
+
+  const subtitleAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: subtitleOpacity.value,
+    transform: [{ translateY: subtitleOpacity.value === 0 ? -15 : 0 }],
+  }));
+
+  const playersAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: playersOpacity.value,
+  }));
+
+  const buttonsAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: buttonsOpacity.value,
+    transform: [{ translateY: buttonsOpacity.value === 0 ? 20 : 0 }],
+  }));
+
+  const getPlayerAnimatedStyle = (index: number) => useAnimatedStyle(() => {
+    const player = playerAnimations[index];
+    return {
+      opacity: player.opacity.value,
+      transform: [
+        { scale: player.scale.value },
+        { rotateY: `${player.rotateY.value}deg` },
+      ],
+    };
+  });
 
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
+      animationType="none"
+      presentationStyle="overFullScreen"
       onRequestClose={handleClose}
+      transparent
     >
       <SafeAreaView style={styles.container}>
+        {/* Background with gradient overlay */}
         <LinearGradient
-          colors={['#000000', '#1a1a1a']}
+          colors={['rgba(0,0,0,0.85)', 'rgba(0,0,0,0.95)']}
           style={StyleSheet.absoluteFill}
         />
         
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Bot Configuration</Text>
-          <Text style={styles.subtitle}>
-            Choose which players will be controlled by AI
-          </Text>
-        </View>
+        {/* Grid background */}
+        <GridBackground />
+        
+        {/* Close button */}
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={handleClose}
+          activeOpacity={0.7}
+        >
+          <LinearGradient
+            colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
+            style={styles.closeButtonGradient}
+          >
+            <Text style={styles.closeButtonText}>✕</Text>
+          </LinearGradient>
+        </TouchableOpacity>
 
-        {/* Player Selection */}
-        <View style={styles.selectionContainer}>
-          <Text style={styles.sectionTitle}>Select Bot Players</Text>
-          <Text style={styles.sectionSubtitle}>
-            Tap to toggle between Human and Bot
-          </Text>
-          
-          <View style={styles.playerGrid}>
-            {['r', 'b', 'y', 'g'].map((color) => {
-              const isBot = botPlayers.includes(color);
-              const colorInfo = getColorInfo(color);
+        {/* Main modal container */}
+        <Animated.View style={[styles.modalContainer, modalAnimatedStyle]}>
+          <LinearGradient
+            colors={['rgba(31, 41, 55, 0.95)', 'rgba(17, 24, 39, 0.95)']}
+            style={styles.modalGradient}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <Animated.Text style={[styles.title, titleAnimatedStyle]}>
+                🤖 Bot Configuration
+              </Animated.Text>
+              <Animated.Text style={[styles.subtitle, subtitleAnimatedStyle]}>
+                Choose which players will be controlled by AI opponents
+              </Animated.Text>
+            </View>
+
+            {/* Player Selection */}
+            <Animated.View style={[styles.selectionContainer, playersAnimatedStyle]}>
+              <Text style={styles.sectionTitle}>Player Types</Text>
+              <Text style={styles.sectionSubtitle}>
+                Tap to toggle between Human and Bot players
+              </Text>
               
-              return (
-                <TouchableOpacity
-                  key={color}
-                  style={[
-                    styles.playerButton,
-                    isBot ? styles.playerButtonActive : styles.playerButtonInactive,
-                  ]}
-                  onPress={() => toggleBotPlayer(color)}
-                >
-                  <View style={styles.playerContent}>
-                    <View
-                      style={[
-                        styles.colorIndicator,
-                        { backgroundColor: colorInfo.colorHex },
-                      ]}
-                    />
-                    <Text style={[
-                      styles.playerName,
-                      isBot ? styles.playerNameActive : styles.playerNameInactive,
-                    ]}>
-                      {colorInfo.name}
-                    </Text>
-                    <Text style={[
-                      styles.playerType,
-                      isBot ? styles.playerTypeActive : styles.playerTypeInactive,
-                    ]}>
-                      {isBot ? '🤖 Bot' : '👤 Human'}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
+              <View style={styles.playerGrid}>
+                {['r', 'b', 'y', 'g'].map((color, index) => {
+                  const isBot = botPlayers.includes(color);
+                  const colorInfo = getColorInfo(color);
+                  
+                  return (
+                    <Animated.View 
+                      key={color} 
+                      style={[styles.playerCard, getPlayerAnimatedStyle(index)]}
+                    >
+                      <TouchableOpacity
+                        style={styles.playerButton}
+                        onPress={() => toggleBotPlayer(color)}
+                        activeOpacity={0.8}
+                      >
+                        <LinearGradient
+                          colors={isBot ? colorInfo.gradient as any : ['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
+                          style={styles.playerGradient}
+                        >
+                          {/* Player content */}
+                          <View style={styles.playerContent}>
+                            {/* Color indicator with emoji */}
+                            <View style={styles.playerIndicator}>
+                              <LinearGradient
+                                colors={colorInfo.gradient as any}
+                                style={styles.colorCircle}
+                              >
+                                <Text style={styles.colorEmoji}>{colorInfo.emoji}</Text>
+                              </LinearGradient>
+                            </View>
+                            
+                            {/* Player name */}
+                            <Text style={[
+                              styles.playerName,
+                              isBot && styles.playerNameActive
+                            ]}>
+                              {colorInfo.name}
+                            </Text>
+                            
+                            {/* Player type indicator */}
+                            <View style={[
+                              styles.typeIndicator,
+                              isBot && styles.typeIndicatorActive
+                            ]}>
+                              <Text style={[
+                                styles.typeIcon,
+                                isBot && styles.typeIconActive
+                              ]}>
+                                {isBot ? '🤖' : '👤'}
+                              </Text>
+                              <Text style={[
+                                styles.typeText,
+                                isBot && styles.typeTextActive
+                              ]}>
+                                {isBot ? 'Bot' : 'Human'}
+                              </Text>
+                            </View>
+                          </View>
+                          
+                          {/* Status indicator */}
+                          <View style={[
+                            styles.statusIndicator,
+                            isBot && { borderColor: colorInfo.borderColor }
+                          ]} />
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  );
+                })}
+              </View>
+            </Animated.View>
 
-        {/* Action Buttons */}
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={handleClose}
-          >
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.confirmButton}
-            onPress={handleConfirm}
-          >
-            <LinearGradient
-              colors={['#ffffff', '#f0f0f0']}
-              style={styles.confirmButtonGradient}
-            >
-              <Text style={styles.confirmButtonText}>Start Game</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+            {/* Action Buttons */}
+            <Animated.View style={[styles.buttonContainer, buttonsAnimatedStyle]}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleClose}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
+                  style={styles.buttonGradient}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.confirmButton}
+                onPress={handleConfirm}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={['#FFFFFF', '#F0F0F0']}
+                  style={styles.buttonGradient}
+                >
+                  <Text style={styles.confirmButtonText}>🎮 Start Game</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </Animated.View>
+          </LinearGradient>
+        </Animated.View>
       </SafeAreaView>
     </Modal>
   );
@@ -161,123 +348,228 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000000',
   },
-  header: {
+  closeButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    zIndex: 20,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  closeButtonGradient: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  closeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginVertical: 60,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.5,
+    shadowRadius: 25,
+    elevation: 20,
+  },
+  modalGradient: {
+    flex: 1,
+    justifyContent: 'space-between',
     paddingVertical: 32,
   },
+  header: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    marginBottom: 20,
+  },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
+    color: '#FFFFFF',
+    marginBottom: 12,
     textAlign: 'center',
+    letterSpacing: 0.5,
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: '#9ca3af',
+    color: '#9CA3AF',
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 24,
+    paddingHorizontal: 20,
   },
   selectionContainer: {
     flex: 1,
-    paddingHorizontal: 24,
+    paddingHorizontal: 32,
+    justifyContent: 'center',
   },
   sectionTitle: {
     fontSize: 20,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: '700',
+    color: '#FFFFFF',
     marginBottom: 8,
     textAlign: 'center',
+    letterSpacing: 0.5,
   },
   sectionSubtitle: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#6B7280',
     textAlign: 'center',
-    marginBottom: 32,
+    marginBottom: 40,
+    lineHeight: 20,
   },
   playerGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 16,
+  },
+  playerCard: {
+    width: '48%',
+    marginBottom: 20,
   },
   playerButton: {
-    width: '48%',
-    padding: 20,
-    borderRadius: 16,
+    borderRadius: 20,
+    overflow: 'hidden',
     borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  playerButtonActive: {
-    borderColor: '#10b981',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-  },
-  playerButtonInactive: {
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  playerGradient: {
+    padding: 24,
+    minHeight: 120,
   },
   playerContent: {
     alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
   },
-  colorIndicator: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginBottom: 8,
+  playerIndicator: {
+    marginBottom: 12,
+  },
+  colorCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  colorEmoji: {
+    fontSize: 20,
   },
   playerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    textAlign: 'center',
   },
   playerNameActive: {
-    color: '#10b981',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  playerNameInactive: {
-    color: '#ffffff',
+  typeIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
-  playerType: {
+  typeIndicatorActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  typeIcon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  typeIconActive: {
+    // Keep same styling for icons
+  },
+  typeText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  playerTypeActive: {
-    color: '#34d399',
+  typeTextActive: {
+    color: '#FFFFFF',
   },
-  playerTypeInactive: {
-    color: '#9ca3af',
+  statusIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   buttonContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 24,
-    paddingBottom: 32,
+    paddingHorizontal: 32,
     gap: 16,
   },
   cancelButton: {
     flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   confirmButton: {
     flex: 1,
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  confirmButtonGradient: {
-    paddingVertical: 16,
+  buttonGradient: {
+    paddingVertical: 18,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   confirmButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#000000',
+    letterSpacing: 0.5,
   },
 });
 

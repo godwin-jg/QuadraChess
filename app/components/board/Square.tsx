@@ -91,52 +91,61 @@ const Square = React.memo(function Square({
           const isLeftCorner = col === 1;
           const isRightCorner = col === 12;
           
-          // Calculate adjusted padding based on board rotation
-          // When board rotates, we need to inverse the padding to maintain proper alignment
-          const getAdjustedPadding = () => {
-            switch (boardRotation) {
-              case 0: // Red player - no rotation, use original padding
-                return {
-                  paddingBottom: isTopCorner ? 28 : 0,
-                  paddingTop: isBottomCorner ? 4 : 0,
-                  paddingRight: isLeftCorner ? 8 : 0,
-                  paddingLeft: isRightCorner ? 8 : 0,
-                };
-              case 90: // Blue player - 90° clockwise
-                // Top becomes right, bottom becomes left, left becomes top, right becomes bottom
-                return {
-                  paddingBottom: isRightCorner ? 8 : 0, // Right corners become bottom
-                  paddingTop: isLeftCorner ? 8 : 0,     // Left corners become top
-                  paddingRight: isTopCorner ? 8 : 0,    // Top corners become right
-                  paddingLeft: isBottomCorner ? 8 : 0,  // Bottom corners become left
-                };
-              case 180: // Yellow player - 180°
-                // Top becomes bottom, bottom becomes top, left becomes right, right becomes left
-                return {
-                  paddingBottom: isBottomCorner ? 8 : 0, // Bottom corners stay bottom
-                  paddingTop: isTopCorner ? 8 : 0,       // Top corners become bottom
-                  paddingRight: isRightCorner ? 8 : 0,   // Right corners become left
-                  paddingLeft: isLeftCorner ? 8 : 0,     // Left corners become right
-                };
-              case 270: // Green player - 270° clockwise
-                // Top becomes left, bottom becomes right, left becomes bottom, right becomes top
-                return {
-                  paddingBottom: isLeftCorner ? 8 : 0,   // Left corners become bottom
-                  paddingTop: isRightCorner ? 8 : 0,     // Right corners become top
-                  paddingRight: isBottomCorner ? 8 : 0,  // Bottom corners become right
-                  paddingLeft: isTopCorner ? 8 : 0,      // Top corners become left
-                };
-              default:
-                return {
-                  paddingBottom: isTopCorner ? 8 : 0,
-                  paddingTop: isBottomCorner ? 8 : 0,
-                  paddingRight: isLeftCorner ? 28 : 0,
-                  paddingLeft: isRightCorner ? 3 : 0,
-                };
-            }
+          // Smart positioning using transforms - separate configs for each rotation!
+          const getPlayerPosition = () => {
+            // Different offsets for each board rotation - maximum customization!
+            const rotationConfigs: Record<number, any> = {
+              0: { // Red player - no rotation
+                topLeft: { x: -5, y: -10 },
+                topRight: { x: 3, y: -8 },
+                bottomLeft: { x: -5, y: 0 },
+                bottomRight: { x: 3, y: 3 }
+              },
+              [-90]: { // Blue player - 90° clockwise
+                topLeft: { x: 5, y: 0 },
+                topRight: { x: 3, y: 8 },
+                bottomLeft: { x: -5, y: 0 },
+                bottomRight: { x: -5, y: 12 }
+              },
+              [-180]: { // Yellow player - 180°
+                topLeft: { x: 5, y: 0},
+                topRight: { x: -3, y: 0 },
+                bottomLeft: { x: 8, y: -12 },
+                bottomRight: { x: -3, y: -9 }
+              },
+              [-270]: { // Green player - 270° clockwise
+                topLeft: { x: 0, y: 6 },
+                topRight: { x: 6, y: 6 },
+                bottomLeft: { x: -6, y: -6 },
+                bottomRight: { x: -6, y: -6 }
+              }
+            };
+            
+            // Get offsets for current rotation
+            const offsets = rotationConfigs[boardRotation] || rotationConfigs[0];
+            
+            // Determine which corner this is
+            let cornerOffset;
+            if (isTopCorner && isLeftCorner) cornerOffset = offsets.topLeft;
+            else if (isTopCorner && isRightCorner) cornerOffset = offsets.topRight;
+            else if (isBottomCorner && isLeftCorner) cornerOffset = offsets.bottomLeft;
+            else if (isBottomCorner && isRightCorner) cornerOffset = offsets.bottomRight;
+            else cornerOffset = { x: 0, y: 0 };
+            
+            // Apply rotation to the offset
+            const radians = (boardRotation * Math.PI) / 180;
+            const cos = Math.cos(radians);
+            const sin = Math.sin(radians);
+            
+            return {
+              transform: [
+                { translateX: cornerOffset.x * cos - cornerOffset.y * sin },
+                { translateY: cornerOffset.x * sin + cornerOffset.y * cos }
+              ]
+            };
           };
           
-          const adjustedPadding = getAdjustedPadding();
+          const playerPosition = getPlayerPosition();
           
           return (
             <View
@@ -146,10 +155,15 @@ const Square = React.memo(function Square({
                 backgroundColor: "transparent",
                 justifyContent: "center",
                 alignItems: "center",
-                ...adjustedPadding,
+                alignSelf: "center",
               }}
             >
-              <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
+              <Animated.View 
+                style={[
+                  playerPosition,
+                  { transform: [...playerPosition.transform, { rotate: `${-boardRotation}deg` }] }
+                ]}
+              >
                 <MiniPlayerCircle
                   player={player}
                   isCurrentTurn={player.isCurrentTurn}

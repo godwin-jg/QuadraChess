@@ -53,7 +53,6 @@ const OnlineLobbyScreen: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState("Initializing...");
   const [refreshKey, setRefreshKey] = useState(0);
   const [botPlayers, setBotPlayers] = useState<string[]>([]);
-  const [currentGame, setCurrentGame] = useState<RealtimeGame | null>(null);
 
   // Initialize Firebase auth (optimized)
   useEffect(() => {
@@ -124,31 +123,12 @@ const OnlineLobbyScreen: React.FC = () => {
       currentGameId,
       (game) => {
         if (game) {
-          // Store current game data for join code display
-          setCurrentGame(game);
-          
-          // ✅ CRITICAL FIX: Update players in Redux state when they join/leave
-          const playersArray = Object.values(game.players || {});
-          
-          // Update Redux players state
-          dispatch(setPlayers(playersArray));
-          
-          // Update host status
-          const user = realtimeDatabaseService.getCurrentUser();
-          const isHost = user ? game.hostId === user.uid : false;
-          dispatch(setIsHost(isHost));
-          
-          // Update can start game status
-          const canStartGame = playersArray.length >= 2 && game.status === "waiting";
-          dispatch(setCanStartGame(canStartGame));
-          
           // Sync bot players from game data
+          const playersArray = Object.values(game.players || {});
           const botPlayersFromGame = playersArray
             .filter((player: any) => player.isBot === true)
             .map((player: any) => player.color);
           setBotPlayers(botPlayersFromGame);
-          
-          console.log(`🔍 OnlineLobbyScreen: Updated players (${playersArray.length}):`, playersArray.map(p => p.name));
           
           // Check if game status changed to playing
           if (game.status === "playing") {
@@ -159,7 +139,6 @@ const OnlineLobbyScreen: React.FC = () => {
         } else {
           // Game was deleted
           setCurrentGameId(null);
-          setCurrentGame(null);
           dispatch(setPlayers([]));
           dispatch(setIsHost(false));
           dispatch(setCanStartGame(false));
@@ -426,9 +405,6 @@ const OnlineLobbyScreen: React.FC = () => {
             <Text className="text-gray-300 text-sm">
               {playerCount}/{item.maxPlayers} players
             </Text>
-            <Text className="text-gray-500 text-xs mt-1">
-              Join Code: {item.joinCode || item.id.substring(0, 8)}
-            </Text>
           </View>
           <View className="items-end">
             <Text className="text-green-400 text-sm">Available</Text>
@@ -488,45 +464,48 @@ const OnlineLobbyScreen: React.FC = () => {
           <Text className="text-white text-xl font-bold mb-4 text-center">
             Waiting for Players
           </Text>
-          
-          <Text className="text-gray-300 text-sm mb-4 text-center">
-            Join Code: <Text className="text-white font-bold">{currentGame?.joinCode || 'Loading...'}</Text>
-          </Text>
 
           <View className="space-y-3 w-full">
             <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
-            {players && players.length > 0 ? (
-              players.map((player, index) => (
-                <View
-                  key={player.id}
-                  className="flex-row items-center justify-between"
-                >
-                  <Text className="text-white text-lg">
-                    {player.name} {player.isHost && "(Host)"}
-                  </Text>
-                  <View className="flex-row items-center">
-                    <View
-                      className={`w-3 h-3 rounded-full mr-2 ${
-                        player.color === "r"
-                          ? "bg-red-500"
-                          : player.color === "b"
-                            ? "bg-blue-500"
-                            : player.color === "y"
-                              ? "bg-purple-500"
-                              : player.color === "g"
-                                ? "bg-green-500"
-                                : "bg-gray-500"
-                      }`}
-                    />
-                    <Text className="text-gray-400 text-sm">
-                      {player.connectionState || 'connected'}
+            {/* ✅ CRITICAL FIX: Show all players (bots are already included in Redux players array) */}
+            {(() => {
+              // All players (including bots) come from Redux players array
+              // No need to duplicate bots from botPlayers state
+              const allPlayers = players;
+              
+              return allPlayers.length > 0 ? (
+                allPlayers.map((player, index) => (
+                  <View
+                    key={player.id}
+                    className="flex-row items-center justify-between"
+                  >
+                    <Text className="text-white text-lg">
+                      {player.name} {player.isHost && "(Host)"} {player.isBot && "🤖"}
                     </Text>
+                    <View className="flex-row items-center">
+                      <View
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          player.color === "r"
+                            ? "bg-red-500"
+                            : player.color === "b"
+                              ? "bg-blue-500"
+                              : player.color === "y"
+                                ? "bg-purple-500"
+                                : player.color === "g"
+                                  ? "bg-green-500"
+                                  : "bg-gray-500"
+                        }`}
+                      />
+                      <Text className="text-gray-400 text-sm">
+                        {player.isBot ? 'Bot' : (player.connectionState || 'connected')}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              ))
-            ) : (
-              <Text className="text-gray-400 text-center">No players yet</Text>
-            )}
+                ))
+              ) : (
+                <Text className="text-gray-400 text-center">No players yet</Text>
+              );
+            })()}
             
             {/* Bot Configuration Section (Host Only) */}
             {isHost && (
@@ -755,7 +734,14 @@ const OnlineLobbyScreen: React.FC = () => {
         ) : (
           <View style={{ position: 'relative', width: '100%' }}>
             <FlatList
-              data={availableGames}
+              data={availableGames
+                .slice()
+                .sort((a, b) => {
+                  // Sort by timestamp (newest first), with createdAt as fallback
+                  const timestampA = a.lastActivity || a.createdAt || 0;
+                  const timestampB = b.lastActivity || b.createdAt || 0;
+                  return timestampB - timestampA;
+                })}
               renderItem={renderGameItem}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}

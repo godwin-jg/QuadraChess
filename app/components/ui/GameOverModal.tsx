@@ -202,7 +202,18 @@ export default function GameOverModal({
   const getMessage = () => {
     switch (status) {
       case "finished":
-        return `${winner?.toUpperCase()} emerges victorious!`;
+        switch (winner) {
+          case "r":
+            return "Red Dragon emerges victorious!";
+          case "b":
+            return "Blue Megalodon emerges victorious!";
+          case "y":
+            return "Black Wolf emerges victorious!";
+          case "g":
+            return "Green Serpent emerges victorious!";
+          default:
+            return `${winner?.toUpperCase()} emerges victorious!`;
+        }
       default:
         return "The battle has concluded.";
     }

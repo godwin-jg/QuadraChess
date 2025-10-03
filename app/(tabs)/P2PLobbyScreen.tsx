@@ -492,39 +492,57 @@ const P2PLobbyScreen: React.FC = () => {
           </Text>
 
           <View className="space-y-3 w-full">
-            <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
-            {players && players.length > 0 ? (
-              players.map((player, index) => (
-                <View
-                  key={player.id}
-                  className="flex-row items-center justify-between"
-                >
-                  <Text className="text-white text-lg">
-                    {player.name} {player.isHost && "(Host)"}
-                  </Text>
-                  <View className="flex-row items-center">
-                    <View
-                      className={`w-3 h-3 rounded-full mr-2 ${
-                        player.color === "r"
-                          ? "bg-red-500"
-                          : player.color === "b"
-                            ? "bg-blue-500"
-                            : player.color === "y"
-                              ? "bg-purple-500"
-                              : player.color === "g"
-                                ? "bg-green-500"
-                                : "bg-gray-500"
-                      }`}
-                    />
-                    <Text className="text-gray-400 text-sm">
-                      {player.connectionState || 'connected'}
+            <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length + botPlayers.length})</Text>
+            {/* ✅ CRITICAL FIX: Show both human players and bot players */}
+            {(() => {
+              const allPlayers = [
+                // Human players
+                ...players.map(player => ({ ...player, isBot: false })),
+                // Bot players
+                ...botPlayers.map(color => ({
+                  id: `bot_${color}`,
+                  name: `Bot ${color.toUpperCase()}`,
+                  color: color,
+                  isHost: false,
+                  isConnected: true,
+                  connectionState: 'bot',
+                  isBot: true
+                }))
+              ];
+              
+              return allPlayers.length > 0 ? (
+                allPlayers.map((player, index) => (
+                  <View
+                    key={player.id}
+                    className="flex-row items-center justify-between"
+                  >
+                    <Text className="text-white text-lg">
+                      {player.name} {player.isHost && "(Host)"} {player.isBot && "🤖"}
                     </Text>
+                    <View className="flex-row items-center">
+                      <View
+                        className={`w-3 h-3 rounded-full mr-2 ${
+                          player.color === "r"
+                            ? "bg-red-500"
+                            : player.color === "b"
+                              ? "bg-blue-500"
+                              : player.color === "y"
+                                ? "bg-purple-500"
+                                : player.color === "g"
+                                  ? "bg-green-500"
+                                  : "bg-gray-500"
+                        }`}
+                      />
+                      <Text className="text-gray-400 text-sm">
+                        {player.isBot ? 'Bot' : (player.connectionState || 'connected')}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              ))
-            ) : (
-              <Text className="text-gray-400 text-center">No players yet</Text>
-            )}
+                ))
+              ) : (
+                <Text className="text-gray-400 text-center">No players yet</Text>
+              );
+            })()}
             
             {/* Bot Configuration Section (Host Only) */}
             {isHost && (
@@ -570,23 +588,36 @@ const P2PLobbyScreen: React.FC = () => {
 
         {isHost && (
           <View className="items-center gap-4 mb-4">
-            {players.length < 4 && (
-              <Text className="text-gray-400 text-sm mb-3">
-                Need exactly 4 players to start
-              </Text>
-            )}
+            {/* ✅ CRITICAL FIX: Check total players (human + bot) instead of just human players */}
+            {(() => {
+              const totalPlayers = players.length + botPlayers.length;
+              return totalPlayers < 4 && (
+                <Text className="text-gray-400 text-sm mb-3">
+                  Need exactly 4 players to start ({totalPlayers}/4)
+                </Text>
+              );
+            })()}
             <TouchableOpacity
               className="w-full py-3 px-6 rounded-xl shadow-lg overflow-hidden"
               onPress={startGame}
-              disabled={players.length !== 4 || isLoading}
+              disabled={(() => {
+                const totalPlayers = players.length + botPlayers.length;
+                return totalPlayers !== 4 || isLoading;
+              })()}
             >
               <LinearGradient
-                colors={players.length !== 4 || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0']}
+                colors={(() => {
+                  const totalPlayers = players.length + botPlayers.length;
+                  return totalPlayers !== 4 || isLoading ? ['#6b7280', '#4b5563'] : ['#ffffff', '#f0f0f0'];
+                })()}
                 style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
               />
               <Text 
                 className={`text-lg font-bold text-center ${
-                  players.length !== 4 || isLoading
+                  (() => {
+                    const totalPlayers = players.length + botPlayers.length;
+                    return totalPlayers !== 4 || isLoading;
+                  })()
                     ? "text-gray-300" 
                     : "text-black"
                 }`}
@@ -599,10 +630,12 @@ const P2PLobbyScreen: React.FC = () => {
                   textTransform: 'uppercase',
                 }}
               >
-                {isLoading ? "Starting..." : 
-                  players.length !== 4
-                    ? "Waiting for players..."
-                    : "Start Game"}
+                {(() => {
+                  const totalPlayers = players.length + botPlayers.length;
+                  if (isLoading) return "Starting...";
+                  if (totalPlayers !== 4) return "Waiting for players...";
+                  return "Start Game";
+                })()}
               </Text>
             </TouchableOpacity>
           </View>
@@ -725,7 +758,7 @@ const P2PLobbyScreen: React.FC = () => {
 
         {discoveredGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8 pb-4">
-            No games available. Create one to get started!
+            The arena stands empty... Be the first to spill digital blood!
           </Text>
         ) : (
           <View style={{ position: 'relative', width: '100%' }}>

@@ -54,6 +54,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
       owner: "jgnsecrets",
       plugins: [
+        "expo-router",
         [
           "@config-plugins/react-native-webrtc",
           {
@@ -76,6 +77,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           },
         ],
         "expo-video",
+        "expo-web-browser",
       ],
       extra: {
         ...config.expo?.extra,

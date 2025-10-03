@@ -108,9 +108,6 @@ export default function GameScreen() {
 
   // Master connection management - single useEffect to prevent race conditions
   useEffect(() => {
-    console.log("🔍 DEBUG GameScreen: useEffect running - mode:", mode, "gameId:", gameId);
-    console.trace("🔍 DEBUG GameScreen: useEffect call stack");
-    
     // This function will be returned by the effect to clean up everything
     let cleanupFunction = () => {};
 
@@ -119,10 +116,8 @@ export default function GameScreen() {
     // BUT allow mode changes when explicitly navigating to a different mode
     if (initialModeRef.current === null && mode) {
       initialModeRef.current = mode;
-      console.log("🔒 GameScreen: Locking initial mode to:", mode);
     } else if (mode && initialModeRef.current && mode !== initialModeRef.current) {
       // Allow mode change if explicitly navigating to a different mode
-      console.log("🔄 GameScreen: Mode change detected, updating locked mode from", initialModeRef.current, "to", mode);
       initialModeRef.current = mode;
     }
     
@@ -136,39 +131,19 @@ export default function GameScreen() {
       ? "solo"
       : (stableMode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
     
-    console.log("🔧 GameScreen Debug:", {
-      "settings.developer.soloMode": settings.developer.soloMode,
-      "route mode": mode,
-      "stableMode": stableMode,
-      "lockedMode": initialModeRef.current,
-      "effectiveMode": effectiveMode,
-      "settings object": settings.developer,
-      "full settings": settings
-    });
 
     const setupConnectionForMode = async (currentMode: string) => {
-      console.log("GameScreen: Setting up connection for mode:", currentMode);
       
       // Update mode flags
       setIsOnlineMode(currentMode === "online" && !!gameId);
       setIsP2PMode(currentMode === "p2p");
 
-      console.log(
-        "GameScreen: Setting game mode:",
-        currentMode,
-        "from route mode:",
-        mode,
-        "solo mode enabled:",
-        settings.developer.soloMode
-      );
-      console.log("GameScreen: Current Redux gameMode before dispatch:", store.getState().game.gameMode);
       
       // ✅ Don't override P2P mode if it's already set
       if (store.getState().game.gameMode === "p2p" && currentMode !== "p2p") {
-        console.log("GameScreen: Skipping gameMode change - already set to p2p");
+        // Skip mode change
       } else {
         dispatch(setGameMode(currentMode as any));
-        console.log("GameScreen: Current Redux gameMode after dispatch:", store.getState().game.gameMode);
       }
 
       // Handle mode switching with proper disconnection
@@ -551,13 +526,13 @@ export default function GameScreen() {
         case 'r': // Red - default position (0 degrees)
           rotation = 0;
           break;
-        case 'b': // Blue - rotate 90 degrees clockwise
+        case 'b': // Blue - rotate  - 90 degrees clockwise
           rotation = -90;
           break;
-        case 'y': // Yellow - rotate 180 degrees
+        case 'y': // Yellow - rotate - 180 degrees
           rotation = -180;
           break;
-        case 'g': // Green - rotate 270 degrees clockwise (or -90 degrees)
+        case 'g': // Green - rotate -270 degrees clockwise (or 90 degrees)
           rotation = -270;
           break;
         default:
@@ -726,7 +701,7 @@ export default function GameScreen() {
         <GridBackground />
         <View style={{ paddingTop: insets.top }}>
           <ActivityIndicator size="large" color="#ffffff" />
-          <Text className="text-white text-lg mt-4">Loading game...</Text>
+          <Text className="text-white text-lg mt-4">Preparing the battlefield...</Text>
           {(isOnlineMode || isP2PMode) && (
             <Text className="text-gray-400 text-sm mt-2">{connectionStatus}</Text>
           )}

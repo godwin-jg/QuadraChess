@@ -99,7 +99,7 @@ const Square = React.memo(function Square({
                 topLeft: { x: -5, y: -10 },
                 topRight: { x: 3, y: -8 },
                 bottomLeft: { x: -5, y: 0 },
-                bottomRight: { x: 3, y: 3 }
+                bottomRight: { x: 3, y: 0 }
               },
               [-90]: { // Blue player - 90° clockwise
                 topLeft: { x: 5, y: 0 },
@@ -114,10 +114,10 @@ const Square = React.memo(function Square({
                 bottomRight: { x: -3, y: -9 }
               },
               [-270]: { // Green player - 270° clockwise
-                topLeft: { x: 0, y: 6 },
-                topRight: { x: 6, y: 6 },
-                bottomLeft: { x: -6, y: -6 },
-                bottomRight: { x: -6, y: -6 }
+                topLeft: { x: -3, y: 8 },
+                topRight: { x: -3, y: 3 },
+                bottomLeft: { x: 3, y: 8 },
+                bottomRight: { x: 3, y: 3 }
               }
             };
             

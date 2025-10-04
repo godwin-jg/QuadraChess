@@ -33,8 +33,6 @@ import networkService from "../../services/networkService";
 import { getBoardTheme } from "./BoardThemeConfig";
 import Square from "./Square";
 import Piece from "./Piece";
-import AnimatedCapture from "./AnimatedCapture";
-import FloatingPointsText from "../ui/FloatingPointsText";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -50,18 +48,11 @@ interface BoardProps {
     isCurrentTurn: boolean;
     isEliminated: boolean;
   }>;
-  floatingPoints?: Array<{
-    id: string;
-    points: number;
-    x: number;
-    y: number;
-    color: string;
-  }>;
-  onFloatingPointComplete?: (id: string) => void;
+  // floatingPoints and onFloatingPointComplete removed for performance optimization
   boardRotation?: number;
 }
 
-export default function Board({ onCapture, playerData, floatingPoints, onFloatingPointComplete, boardRotation = 0 }: BoardProps) {
+export default function Board({ onCapture, playerData, boardRotation = 0 }: BoardProps) {
   const { width } = useWindowDimensions();
   // Memoized board dimensions - only recalculates when screen width changes
   const boardSize = React.useMemo(() => Math.min(width * 0.98, 600), [width]);
@@ -128,13 +119,13 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
     col: number;
   } | null>(null);
 
-  // Animation state for capturing pieces
-  const [capturingPieces, setCapturingPieces] = React.useState<Array<{
-    key: string;
-    code: string;
-    row: number;
-    col: number;
-  }>>([]);
+  // Animation state for capturing pieces - DISABLED
+  // const [capturingPieces, setCapturingPieces] = React.useState<Array<{
+  //   key: string;
+  //   code: string;
+  //   row: number;
+  //   col: number;
+  // }>>([]);
 
   // Simple animation lock
   const [isAnimating, setIsAnimating] = React.useState(false);
@@ -223,73 +214,66 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
     // Mark this move as animated
     lastAnimatedMoveRef.current = moveKey;
 
-    // Trigger the capture "poof" effect
-    if (lastMove.capturedPiece) {
-      const captureKey = `${lastMove.to.row}-${lastMove.to.col}-${Date.now()}`;
-      setCapturingPieces(prev => [...prev, {
-        key: captureKey,
-        code: lastMove.capturedPiece!,
-        row: lastMove.to.row,
-        col: lastMove.to.col
-      }]);
-    }
+    // Trigger the capture "poof" effect - DISABLED
+    // if (lastMove.capturedPiece) {
+    //   const captureKey = `${lastMove.to.row}-${lastMove.to.col}-${Date.now()}`;
+    //   setCapturingPieces(prev => [...prev, {
+    //     key: captureKey,
+    //     code: lastMove.capturedPiece!,
+    //     row: lastMove.to.row,
+    //     col: lastMove.to.col
+    //   }]);
+    // }
     
-    // Trigger the floating points animation
-    if (lastMove.capturedPiece && onCapture) {
-      const capturedPieceType = lastMove.capturedPiece[1];
-      let points = 0;
-      switch (capturedPieceType) {
-        case "P": // Pawn
-          points = 1;
-          break;
-        case "N": // Knight
-          points = 3;
-          break;
-        case "B": // Bishop
-        case "R": // Rook
-          points = 5;
-          break;
-        case "Q": // Queen
-          points = 9;
-          break;
-        case "K": // King
-          points = 0; // Kings cannot be captured - should be checkmated instead
-          break;
-        default:
-          points = 0;
-      }
+    // Trigger the floating points animation - DISABLED
+    // if (lastMove.capturedPiece && onCapture) {
+    //   const capturedPieceType = lastMove.capturedPiece[1];
+    //   let points = 0;
+    //   switch (capturedPieceType) {
+    //     case "P": // Pawn
+    //       points = 1;
+    //       break;
+    //     case "N": // Knight
+    //       points = 3;
+    //       break;
+    //     case "B": // Bishop
+    //     case "R": // Rook
+    //       points = 5;
+    //       break;
+    //     case "Q": // Queen
+    //       points = 9;
+    //       break;
+    //     case "K": // King
+    //       points = 0; // Kings cannot be captured - should be checkmated instead
+    //       break;
+    //     default:
+    //       points = 0;
+    //   }
 
-      const boardX = (lastMove.to.col * squareSize) + (squareSize / 2);
-      const boardY = (lastMove.to.row * squareSize) + (squareSize / 2);
-      onCapture(points, boardX, boardY, lastMove.playerColor);
-    }
+    //   const boardX = (lastMove.to.col * squareSize) + (squareSize / 2);
+    //   const boardY = (lastMove.to.row * squareSize) + (squareSize / 2);
+    //   onCapture(points, boardX, boardY, lastMove.playerColor);
+    // }
 
-    // ✅ CONDITIONAL ANIMATION: Skip move animation in single player modes
-    if (effectiveMode !== "solo" && mode !== "single" && !isAnimating) {
-      setIsAnimating(true);
-      animatePieceMove(
-        lastMove.from.row,
-        lastMove.from.col,
-        lastMove.to.row,
-        lastMove.to.col,
-        lastMove.pieceCode,
-        () => {
-          setIsAnimating(false); // Release the lock when animation completes
-        }
-      );
-    }
+    // Movement animations disabled
+    // if (effectiveMode !== "solo" && mode !== "single" && !isAnimating) {
+    //   setIsAnimating(true);
+    //   animatePieceMove(
+    //     lastMove.from.row,
+    //     lastMove.from.col,
+    //     lastMove.to.row,
+    //     lastMove.to.col,
+    //     lastMove.pieceCode,
+    //     () => {
+    //       setIsAnimating(false); // Release the lock when animation completes
+    //     }
+    //   );
+    // }
 
-    // ✅ CRITICAL FIX: SOUND + HAPTICS LOGIC - Only play sounds when user actually sees the move
-    // In online mode: Only play sounds when animation is playing (user sees the move)
-    // In local modes: Always play sounds since moves are immediate
-    const shouldPlaySounds = effectiveMode === "online" 
-      ? (mode !== "solo" && mode !== "single") // Only when animation plays in online mode
-      : true; // Always play in local modes (solo, single, p2p)
-
-    if (shouldPlaySounds) {
-      try {
-        const soundService = require('../../../services/soundService').default;
-        const isCastling = require('../../../state/gameHelpers').isCastlingMove(
+    // Play sounds for all moves since animations are disabled
+    try {
+      const soundService = require('../../../services/soundService').default;
+      const isCastling = require('../../../state/gameHelpers').isCastlingMove(
           lastMove.pieceCode,
           lastMove.from.row,
           lastMove.from.col,
@@ -297,20 +281,19 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
           lastMove.to.col
         );
 
-        // ✅ CRITICAL FIX: Use unified playSound method to ensure sounds and haptics happen simultaneously
-        if (isCastling) {
-          soundService.playSound('castle');
-        } else if (lastMove.capturedPiece) {
-          soundService.playSound('capture');
-        } else {
-          soundService.playSound('move');
-        }
-
-        // ✅ Move sound effects only - check/checkmate sounds handled separately
-
-      } catch (error) {
-        console.log('🔊 SoundService: Failed to play sound from Board component:', error);
+      // ✅ CRITICAL FIX: Use unified playSound method to ensure sounds and haptics happen simultaneously
+      if (isCastling) {
+        soundService.playSound('castle');
+      } else if (lastMove.capturedPiece) {
+        soundService.playSound('capture');
+      } else {
+        soundService.playSound('move');
       }
+
+      // ✅ Move sound effects only - check/checkmate sounds handled separately
+
+    } catch (error) {
+      console.log('🔊 SoundService: Failed to play sound from Board component:', error);
     }
   }, [lastMove]); // ✅ FIXED: Only depend on lastMove to prevent animation loops
 
@@ -370,10 +353,10 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
   // Get dispatch function
   const dispatch = useDispatch();
 
-  // Helper function to handle capture animation completion
-  const handleCaptureAnimationComplete = (key: string) => {
-    setCapturingPieces(prev => prev.filter(p => p.key !== key));
-  };
+  // Helper function to handle capture animation completion - DISABLED
+  // const handleCaptureAnimationComplete = (key: string) => {
+  //   setCapturingPieces(prev => prev.filter(p => p.key !== key));
+  // };
 
   // Helper function to animate piece movement
   const animatePieceMove = (
@@ -452,10 +435,10 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
 
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
-    // Animation lock - prevent input during animations
-    if (isAnimating) {
-      return;
-    }
+    // Animation lock disabled
+    // if (isAnimating) {
+    //   return;
+    // }
 
     // Debounce rapid clicks
     const now = Date.now();
@@ -735,15 +718,16 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
           return (
             <View key={rowIndex} style={{ flexDirection: "row" }}>
               {row.map((piece, colIndex) => {
-                // ✅ CRITICAL FIX: Hide piece during animation at BOTH source and destination
-                const isMovingFrom = animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex;
-                const isMovingTo = lastMove && 
-                  lastMove.to.row === rowIndex && 
-                  lastMove.to.col === colIndex && 
-                  animatedPiece && 
-                  animatedPiece.row === lastMove.from.row && 
-                  animatedPiece.col === lastMove.from.col;
-                const isMoving = isMovingFrom || isMovingTo;
+                // Animation disabled - pieces always visible
+                // const isMovingFrom = animatedPiece?.row === rowIndex && animatedPiece?.col === colIndex;
+                // const isMovingTo = lastMove && 
+                //   lastMove.to.row === rowIndex && 
+                //   lastMove.to.col === colIndex && 
+                //   animatedPiece && 
+                //   animatedPiece.row === lastMove.from.row && 
+                //   animatedPiece.col === lastMove.from.col;
+                // const isMoving = isMovingFrom || isMovingTo;
+                const isMoving = false; // Never hide pieces
                 const isLight = (rowIndex + colIndex) % 2 === 0;
                 return (
                   <Square
@@ -782,45 +766,20 @@ export default function Board({ onCapture, playerData, floatingPoints, onFloatin
         })}
       </View>
       
-      {/* 🚀 Animation Overlay Layer - Floating Piece */}
-      {animatedPiece && (
+      {/* Movement animations disabled */}
+      {/* {animatedPiece && (
         <Animated.View style={[animatedPieceStyle, { zIndex: 2 }]}>
           <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
             <Piece piece={animatedPiece.code} size={squareSize} />
           </Animated.View>
         </Animated.View>
-      )}
+      )} */}
 
-      {/* 🎯 Capture Animation Layer - Poof Effect */}
-      {capturingPieces.map(({ key, code, row, col }) => (
-        <View 
-          key={key} 
-          style={{ 
-            position: 'absolute', 
-            left: col * squareSize, 
-            top: row * squareSize, 
-            zIndex: 3 
-          }}
-        >
-          <AnimatedCapture 
-            pieceCode={code} 
-            size={squareSize} 
-            onAnimationComplete={() => handleCaptureAnimationComplete(key)} 
-          />
-        </View>
-      ))}
+      {/* 🎯 Capture Animation Layer - DISABLED */}
+      {/* AnimatedCapture and FloatingPointsText components removed for performance */}
       
-      {/* 💰 Floating Points Layer - Board Relative */}
-      {floatingPoints?.map((point) => (
-        <FloatingPointsText
-          key={point.id}
-          points={point.points}
-          x={point.x}
-          y={point.y}
-          color={point.color}
-          onComplete={() => onFloatingPointComplete?.(point.id)}
-        />
-      ))}
+      {/* 💰 Floating Points Layer - DISABLED */}
+      {/* Components removed for performance optimization */}
     </View>
   );
 }

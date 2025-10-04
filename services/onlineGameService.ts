@@ -64,7 +64,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
   private lastBoardStateHash: string | null = null;
   private cachedProcessedBoardState: (string | null)[][] | null = null;
   
-  // ✅ CRITICAL FIX: Track processed captures to prevent duplicate animations
   private lastProcessedMove: any = null;
   
   // ✅ CRITICAL FIX: Debounce game updates to prevent excessive calls
@@ -810,51 +809,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
           
           store.dispatch(setGameState(gameStateWithLocalSelection));
           
-          // ✅ CRITICAL FIX: Trigger capture animation if a capture was detected
-          // Only trigger animation if this is NOT a local player move AND NOT a bot move (to avoid duplicate animations)
-          const currentUser = realtimeDatabaseService.getCurrentUser();
-          const isLocalPlayerMove = game.lastMove && game.lastMove.playerId === currentUser?.uid;
-          
-          // Check if the move was made by a bot
-          const movePlayerId = game.lastMove?.playerId;
-          const movePlayer = movePlayerId ? game.players[movePlayerId] : null;
-          const isBotMove = movePlayer?.isBot === true;
-          
-          if (capturedPiece && capturePosition && !isLocalPlayerMove && !isBotMove) {
-            // Calculate points for captured piece
-            const capturedPieceType = capturedPiece[1];
-            let points = 0;
-            switch (capturedPieceType) {
-              case "P": // Pawn
-                points = 1;
-                break;
-              case "N": // Knight
-                points = 3;
-                break;
-              case "B": // Bishop
-              case "R": // Rook
-                points = 5;
-                break;
-              case "Q": // Queen
-                points = 9;
-                break;
-              case "K": // King
-                points = 0; // Kings cannot be captured - should be checkmated instead
-                break;
-              default:
-                points = 0;
-            }
-            
-            // Calculate screen coordinates for the capture square
-            const squareSize = 600 / 14; // Assuming 600px board size
-            const boardX = (capturePosition.col * squareSize) + (squareSize / 2);
-            const boardY = (capturePosition.row * squareSize) + (squareSize / 2);
-            
-            // ✅ Animation is now handled automatically by the Board component
-            // when it detects the lastMove state change from the dispatched makeMove action
-            console.log(`🎬 OnlineGameService: Capture animation will be handled by Board component for ${capturedPiece} at (${capturePosition.row},${capturePosition.col}) - Remote human move`);
-          } else if (capturedPiece && capturePosition) {
-            console.log(`🎬 OnlineGameService: Skipping capture animation - Local move: ${isLocalPlayerMove}, Bot move: ${isBotMove}`);
+          // Capture event detected - no animation needed
+          if (capturedPiece && capturePosition) {
+            console.log(`OnlineGameService: Capture detected - ${capturedPiece} at (${capturePosition.row},${capturePosition.col})`);
           }
         }
       } else {

@@ -28,7 +28,6 @@ import HistoryControls from "../components/ui/HistoryControls";
 import PlayerHUDPanel from "../components/ui/PlayerHUDPanel";
 import GameUtilityPanel from "../components/ui/GameUtilityPanel";
 import PromotionModal from "../components/ui/PromotionModal";
-import FloatingPointsText from "../components/ui/FloatingPointsText";
 import notificationService from "../../services/notificationService";
 import SimpleNotification from "../components/ui/SimpleNotification";
 import networkService from "../services/networkService";
@@ -64,14 +63,6 @@ export default function GameScreen() {
   const [connectionStatus, setConnectionStatus] =
     useState<string>("Connecting...");
   
-  // Floating points animation state
-  const [floatingPoints, setFloatingPoints] = useState<Array<{
-    id: string;
-    points: number;
-    x: number;
-    y: number;
-    color: string;
-  }>>([]);
 
   // Bot turn tracking to prevent multiple rapid triggers
   const lastProcessedTurn = useRef<string | null>(null);
@@ -596,51 +587,6 @@ export default function GameScreen() {
     }
   }, [justEliminated, dispatch, gameMode, gameId]);
 
-  // Function to trigger floating points animation
-  const triggerFloatingPoints = (points: number, boardX: number, boardY: number, playerColor: string) => {
-    const id = `floating-${Date.now()}-${Math.random()}`;
-    // Add slight random offset to prevent overlapping animations
-    const offsetX = (Math.random() - 0.5) * 20;
-    const offsetY = (Math.random() - 0.5) * 10;
-    
-    // Ensure floating points stay within screen bounds
-    const safeAreaTop = insets.top;
-    const safeAreaBottom = insets.bottom;
-    const safeAreaLeft = insets.left;
-    const safeAreaRight = insets.right;
-    const { width, height } = require('react-native').Dimensions.get('window');
-    
-    // Clamp X position to stay within screen bounds
-    const clampedX = Math.max(safeAreaLeft + 10, Math.min(width - safeAreaRight - 10, boardX + offsetX));
-    
-    // Clamp Y position to stay within safe area bounds
-    const clampedY = Math.max(safeAreaTop + 50, Math.min(height - safeAreaBottom - 100, boardY + offsetY));
-    
-    // Debug logging for coordinate calculations
-    console.log(`🎯 Floating Points Debug:`, {
-      original: { boardX, boardY },
-      offset: { offsetX, offsetY },
-      screen: { width, height },
-      safeArea: { top: safeAreaTop, bottom: safeAreaBottom, left: safeAreaLeft, right: safeAreaRight },
-      clamped: { x: clampedX, y: clampedY },
-      points
-    });
-    
-    const newFloatingPoint = {
-      id,
-      points,
-      x: clampedX,
-      y: clampedY,
-      color: playerColor,
-    };
-    
-    setFloatingPoints(prev => [...prev, newFloatingPoint]);
-  };
-
-  // Function to remove floating point after animation
-  const removeFloatingPoint = (id: string) => {
-    setFloatingPoints(prev => prev.filter(point => point.id !== id));
-  };
 
   // Determine notification message
   const getNotificationMessage = () => {
@@ -752,10 +698,7 @@ export default function GameScreen() {
           }}
         >
           <Board 
-            onCapture={triggerFloatingPoints} 
             playerData={players}
-            floatingPoints={floatingPoints}
-            onFloatingPointComplete={removeFloatingPoint}
             boardRotation={boardRotation}
           />
         </Animated.View>

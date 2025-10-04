@@ -97,7 +97,7 @@ const Square = React.memo(function Square({
             const rotationConfigs: Record<number, any> = {
               0: { // Red player - no rotation
                 topLeft: { x: -5, y: -10 },
-                topRight: { x: 3, y: -8 },
+                topRight: { x: 3, y: -12 },
                 bottomLeft: { x: -5, y: 0 },
                 bottomRight: { x: 3, y: 0 }
               },

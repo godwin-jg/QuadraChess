@@ -24,7 +24,6 @@ import { resetGame, setBotPlayers } from '../../state/gameSlice';
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
-import BotConfigurationModal from "../components/ui/BotConfigurationModal";
 
 // --- Background Piece Component ---
 const BackgroundPiece = ({ piece, size, style }: { piece: string, size: number, style: any }) => {
@@ -161,7 +160,6 @@ export default function HomeScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
   const [isNavigating, setIsNavigating] = useState(false);
-  const [showBotConfig, setShowBotConfig] = useState(false);
   const { height, width } = useWindowDimensions(); // Get screen dimensions
 
   // Simplified animation values for the container
@@ -269,17 +267,12 @@ export default function HomeScreen() {
   );
 
   const handleStartSinglePlayer = () => {
-    // Show bot configuration modal first
-    setShowBotConfig(true);
+    // Set default bot players and start single player game
+    hapticsService.buttonPress();
+    dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Yellow, Green)
+    router.push("/(tabs)/GameScreen");
   };
 
-  const handleBotConfigConfirm = (botPlayers: string[]) => {
-    // Set the configured bot players in Redux
-    dispatch(setBotPlayers(botPlayers));
-    
-    // Navigate to single player game
-    handleModeSwitch("solo", "/(tabs)/GameScreen?mode=single");
-  };
 
   const handleModeSwitch = async (
     targetMode: "online" | "local" | "solo",
@@ -549,13 +542,6 @@ export default function HomeScreen() {
       </View>
       </Animated.View>
 
-      {/* Bot Configuration Modal */}
-      <BotConfigurationModal
-        visible={showBotConfig}
-        onClose={() => setShowBotConfig(false)}
-        onConfirm={handleBotConfigConfirm}
-        initialBotPlayers={['b', 'y', 'g']} // Default: Red is human, others are bots
-      />
     </SafeAreaView>
   );
 }

@@ -22,22 +22,54 @@ interface SplashScreenProps {
 export default function SplashScreen({ visible, transitioning = false, videoSource, useVideo = false, onVideoEnd }: SplashScreenProps) {
   const backgroundOpacity = useSharedValue(1);
   const [videoError, setVideoError] = React.useState(false);
+  const [playerReady, setPlayerReady] = React.useState(false);
   
-  // Create video player instance with error handling
-  const player = useVideoPlayer(videoSource || '', (player) => {
-    player.loop = false; // Don't loop the video
-    player.muted = true; // Mute the video
-    
-    // Add status update listener
-    player.addListener('statusChange', (status) => {
-      console.log('Video status:', status);
-      // Check if video has finished playing
-      if (status.status === 'idle') {
-        console.log('Video finished playing');
-        onVideoEnd?.(); // Trigger transition when video ends
+  // ✅ CRITICAL FIX: Always call useVideoPlayer at top level (Rules of Hooks requirement)
+  const player = useVideoPlayer(videoSource || '', React.useCallback((player: any) => {
+    if (player && useVideo) {
+      try {
+        player.loop = false; // Don't loop the video
+        player.muted = true; // Mute the video
+        
+        // Add status update listener with error handling
+        player.addListener('statusChange', (status: any) => {
+          console.log('Video status:', status);
+          // Check if video has finished playing
+          if (status?.status === 'idle') {
+            console.log('Video finished playing');
+            onVideoEnd?.(); // Trigger transition when video ends
+          }
+        });
+        
+        setPlayerReady(true);
+      } catch (error) {
+        console.error('❌ Failed to configure video player:', error);
+        setVideoError(true);
       }
-    });
-  });
+    }
+  }, [useVideo, onVideoEnd]));
+
+  // ✅ CRITICAL FIX: Handle video mode changes
+  React.useEffect(() => {
+    if (!useVideo) {
+      setPlayerReady(false);
+      setVideoError(false);
+    }
+  }, [useVideo]);
+
+  // ✅ CRITICAL FIX: Cleanup video player when component unmounts
+  React.useEffect(() => {
+    return () => {
+      if (player) {
+        try {
+          console.log('🎬 Cleaning up video player');
+          // The player will be automatically cleaned up by expo-video
+        } catch (error) {
+          console.error('❌ Error during video player cleanup:', error);
+        }
+      }
+    };
+  }, [player]);
 
   // Debug logging
   React.useEffect(() => {
@@ -51,17 +83,31 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
 
   React.useEffect(() => {
     if (visible) {
-      // Start video playback if using video
-      if (useVideo && player) {
-        player.play();
+      // Start video playback if using video and player is ready
+      if (useVideo && player && playerReady) {
+        try {
+          console.log('🎬 Starting video playback');
+          player.play();
+        } catch (error) {
+         
+        
+         
+          console.error('❌ Failed to start video playback:', error);
+          setVideoError(true);
+        }
       }
     } else {
-      // Stop video playback if using video
-      if (useVideo && player) {
-        player.pause();
+      // Stop video playback if using video and player is ready
+      if (useVideo && player && playerReady) {
+        try {
+          console.log('🎬 Stopping video playback');
+          player.pause();
+        } catch (error) {
+          console.error('❌ Failed to stop video playback:', error);
+        }
       }
     }
-  }, [visible, useVideo, player]);
+  }, [visible, useVideo, player, playerReady]);
 
   // Handle transition animation
   React.useEffect(() => {
@@ -80,7 +126,7 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
   return (
     <Animated.View style={[styles.container, backgroundStyle]}>
       {/* Background - Video or Gradient */}
-      {useVideo && videoSource && !videoError ? (
+      {useVideo && videoSource && !videoError && player && playerReady ? (
         <View style={styles.videoContainer}>
           <VideoView
             player={player}
@@ -100,7 +146,7 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
       )}
       
       {/* Subtle grid pattern overlay - show if not using video or if video fails */}
-      {(!useVideo || videoError) && (
+      {(!useVideo || videoError || !player || !playerReady) && (
         <View style={styles.gridOverlay}>
           {Array.from({ length: 20 }).map((_, i) => (
             <View key={i} style={[styles.gridLine, { 

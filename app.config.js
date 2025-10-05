@@ -23,14 +23,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
         screenOrientation: "portrait",
         // Optimize for broader device compatibility
-        minSdkVersion: 23, // Android 6.0 (Marshmallow) - supports 95%+ of devices
-        targetSdkVersion: 34, // Android 14 - current stable target
-        compileSdkVersion: 34 // Android 14 - for compilation
+        minSdkVersion: 24, // Android 7.0 (Nougat) - required for release builds
+        targetSdkVersion: 35, // Android 15 - required by Google Play Store
+        compileSdkVersion: 35, // Android 15 - required for dependencies
+        // Privacy policy URL for camera permission
+        privacyPolicy: "https://godwin-jg.github.io/quadchess-privacy"
       },
       ios: {
         ...config.expo?.ios,
         bundleIdentifier: "com.chess4d",
-        screenOrientation: "portrait"
+        screenOrientation: "portrait",
+        requireFullScreen: true
       },
       owner: "jgnsecrets",
       plugins: [
@@ -47,14 +50,20 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           {
             android: {
               usesCleartextTraffic: true,
-              minSdkVersion: 23, // Android 6.0 - broader compatibility
-              targetSdkVersion: 34, // Android 14 - stable target
-              compileSdkVersion: 34, // Android 14 - compilation target
+              minSdkVersion: 24, // Android 7.0 - required for release builds
+              targetSdkVersion: 35, // Android 15 - required by Google Play Store
+              compileSdkVersion: 35, // Android 15 - required for dependencies
               // Optimize for older devices
               enableProguardInReleaseBuilds: true,
               enableShrinkResourcesInReleaseBuilds: true,
             },
           },
+        ],
+        [
+          "expo-screen-orientation",
+          {
+            initialOrientation: "PORTRAIT_UP"
+          }
         ],
         "expo-video",
         "expo-web-browser",

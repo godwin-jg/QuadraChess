@@ -10,6 +10,7 @@ import { Stack } from "expo-router";
 import { useEffect, useState } from "react";
 import { Provider } from "react-redux";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import * as ScreenOrientation from 'expo-screen-orientation';
 import "../global.css";
 import { store } from "../state";
 import { SettingsProvider } from "../context/SettingsContext";
@@ -45,6 +46,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
+      // Lock screen orientation to portrait
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(error => {
+        console.warn('Failed to lock screen orientation:', error);
+      });
+      
       // Initialize sound service
       soundService.initialize().catch(error => {
         console.warn('Failed to initialize sound service:', error);

@@ -1,5 +1,8 @@
 import ProfileSettings from "./components/settings/ProfileSettings";
+import { useRouter } from "expo-router";
 
 export default function SettingsScreen() {
-  return <ProfileSettings />;
+  const router = useRouter();
+  
+  return <ProfileSettings onClose={() => router.back()} />;
 }

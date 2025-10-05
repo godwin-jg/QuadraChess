@@ -212,9 +212,27 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
 
   return (
     <View className="flex-1 bg-black">
+      {/* Header with Back Button */}
+      <View className="flex-row items-center justify-between px-4 pt-8 pb-4">
+        <TouchableOpacity
+          className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
+          onPress={async () => {
+            await hapticsService.selection();
+            if (onClose) {
+              onClose();
+            } else {
+              router.back();
+            }
+          }}
+        >
+          <Text className="text-xl">←</Text>
+        </TouchableOpacity>
+        <Text className="text-xl font-bold text-white">Settings</Text>
+        <View className="w-10" />
+      </View>
 
       {/* Scrollable Content */}
-      <ScrollView className="flex-1 pt-8" showsVerticalScrollIndicator={false}>
+      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
         <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
           <Text className="text-xl font-bold text-white mb-4 tracking-wide">👤 Profile</Text>

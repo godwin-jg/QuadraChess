@@ -20,7 +20,7 @@ import Animated, {
 import { scheduleOnRN } from "react-native-worklets";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
-import { resetGame, setBotPlayers } from '../../state/gameSlice';
+import { resetGame, setBotPlayers, setGameMode } from '../../state/gameSlice';
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
@@ -269,6 +269,7 @@ export default function HomeScreen() {
   const handleStartSinglePlayer = () => {
     // Set default bot players and start single player game
     hapticsService.buttonPress();
+    dispatch(setGameMode("single")); // Set game mode to single player
     dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Yellow, Green)
     router.push("/(tabs)/GameScreen");
   };
@@ -422,7 +423,7 @@ export default function HomeScreen() {
             try {
               // ✅ CRITICAL FIX: Use sound service to respect haptics settings
               const soundService = require('../../services/soundService').default;
-              await soundService.playSound('button');
+              // Sound effect removed for menu clicks
             } catch (error) {
               console.log('🔊 Failed to play button sound:', error);
             }

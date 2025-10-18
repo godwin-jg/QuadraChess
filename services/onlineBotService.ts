@@ -188,6 +188,8 @@ class OnlineBotService {
     }, 5000); // 5 second timeout
 
     try {
+      // ✅ CRITICAL FIX: Calculate the move WITHOUT applying it to the database first
+      // This prevents intermediate moves from showing in the UI during calculation
       const chosenMove = this.chooseBestMove(botColor, gameState, cancellationToken);
       
       // Check if calculation was cancelled due to timeout (brain overheated)
@@ -241,32 +243,19 @@ class OnlineBotService {
         playerColor: botColor,
       };
 
+      // ✅ CRITICAL FIX: Store captured piece info for lastMove object
+      // This ensures Board component can play correct sound
+      const capturedPiece = gameState.boardState[chosenMove.to.row][chosenMove.to.col];
+      const isCastling = require('../state/gameHelpers').isCastlingMove(
+        pieceCode,
+        chosenMove.from.row,
+        chosenMove.from.col,
+        chosenMove.to.row,
+        chosenMove.to.col
+      );
 
-      // 🔊 Play sound and vibration for bot move
-      try {
-        const soundService = require('./soundService').default;
-        const capturedPiece = gameState.boardState[chosenMove.to.row][chosenMove.to.col];
-        
-        // Check if this is a castling move
-        const isCastling = require('../state/gameHelpers').isCastlingMove(
-          pieceCode,
-          chosenMove.from.row,
-          chosenMove.from.col,
-          chosenMove.to.row,
-          chosenMove.to.col
-        );
-        
-        if (isCastling) {
-          soundService.playCastleSound();
-        } else if (capturedPiece) {
-          soundService.playCaptureSound();
-        } else {
-          soundService.playMoveSound();
-        }
-      } catch (error) {
-      }
-
-      // Apply move directly to database with retry logic
+      // ✅ CRITICAL FIX: Only apply the final chosen move to the database
+      // This ensures no intermediate moves are shown during calculation
       const gameRef = database().ref(`games/${gameId}`);
       
       // Add retry logic for transaction conflicts
@@ -288,8 +277,15 @@ class OnlineBotService {
           return gameData;
         }
 
-        // Validate bot turn
+        // ✅ CRITICAL FIX: Validate bot turn and prevent multiple moves
         if (gameData.gameState.currentPlayerTurn !== botColor) {
+          console.log(`🤖 OnlineBotService: Bot ${botColor} turn validation failed - current turn is ${gameData.gameState.currentPlayerTurn}`);
+          return gameData;
+        }
+
+        // ✅ CRITICAL FIX: Double-check that this bot hasn't already moved
+        if (gameData.lastMove && gameData.lastMove.playerColor === botColor) {
+          console.log(`🤖 OnlineBotService: Bot ${botColor} has already moved this turn`);
           return gameData;
         }
 
@@ -355,13 +351,15 @@ class OnlineBotService {
         gameData.currentPlayerTurn = nextPlayer;
 
         // Update move history
+        const moveTimestamp = Date.now();
         gameData.lastMove = {
           from: moveData.from,
           to: moveData.to,
           pieceCode: moveData.pieceCode,
           playerColor: botColor,
           playerId: `bot_${botColor}`,
-          timestamp: Date.now(),
+          timestamp: moveTimestamp,
+          capturedPiece: capturedPiece, // ✅ CRITICAL FIX: Include captured piece for proper sound effects
         };
         gameData.lastActivity = Date.now();
         
@@ -431,8 +429,9 @@ class OnlineBotService {
         const totalTime = Date.now() - startTime;
         console.log(`🤖 Bot ${botColor} move completed in ${totalTime}ms`);
         
-        // ✅ Animation is now handled automatically by the Board component
-        // when it detects the lastMove state change from the dispatched makeMove action
+        // ✅ CRITICAL FIX: Only one move per bot per turn
+        // The move is now applied atomically to the database, preventing multiple moves from showing
+        // Animation is handled automatically by the Board component when it detects the lastMove state change
       }
 
     } catch (error) {
@@ -467,12 +466,26 @@ class OnlineBotService {
       clearTimeout(existingTimeout);
     }
 
+    // ✅ CRITICAL FIX: Validate game state before scheduling
+    if (!gameState || !gameState.boardState || gameState.currentPlayerTurn !== botColor) {
+      console.log(`🤖 OnlineBotService: Invalid game state for bot ${botColor}, skipping move`);
+      return;
+    }
+
     // ✅ UNIFIED TIMING: Use centralized bot timing for consistency
     // This allows piece animation (250ms) + thinking time (1250ms) = 1500ms total
     const delay = BOT_CONFIG.MOVE_DELAY;
 
     const timeout = setTimeout(() => {
-      this.processBotMove(gameId, botColor, gameState);
+      // ✅ CRITICAL FIX: Re-validate game state before processing
+      const currentGameState = require('../state/store').store.getState().game;
+      if (currentGameState.currentPlayerTurn !== botColor) {
+        console.log(`🤖 OnlineBotService: Bot ${botColor} turn validation failed during execution`);
+        this.botMoveTimeouts.delete(botColor);
+        return;
+      }
+      
+      this.processBotMove(gameId, botColor, currentGameState);
       this.botMoveTimeouts.delete(botColor);
     }, delay);
 

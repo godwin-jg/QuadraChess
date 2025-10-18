@@ -22,6 +22,7 @@ export {
   setCanStartGame,
   setGameMode,
   baseInitialState,
+  endGame,
 } from "./gameSlice";
 
 // Re-export the store

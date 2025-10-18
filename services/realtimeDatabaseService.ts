@@ -640,13 +640,19 @@ class RealtimeDatabaseService {
         gameData.gameState.currentPlayerTurn = nextPlayer;
         gameData.currentPlayerTurn = nextPlayer;
 
+        // ✅ CRITICAL FIX: Detect bot moves and set correct playerId for promotions
+        // Check if this is a bot move by looking at the player's bot status
+        const player = gameData.players[user.uid];
+        const isBotMove = player && player.isBot;
+        const playerId = isBotMove ? `bot_${promotionData.playerColor}` : user.uid;
+        
         // Update move history
         gameData.lastMove = {
           from: { row: -1, col: -1 }, // Special promotion move
           to: promotionData.position,
           pieceCode: `${promotionData.playerColor}${promotionData.pieceType}`,
           playerColor: promotionData.playerColor,
-          playerId: user.uid,
+          playerId: playerId,
           timestamp: Date.now(),
         };
         gameData.lastActivity = Date.now();
@@ -1031,12 +1037,17 @@ class RealtimeDatabaseService {
           gameData.currentPlayerTurn = nextPlayer; // Also update top-level turn
         }
         
+        // ✅ CRITICAL FIX: Detect bot moves and set correct playerId
+        // Check if this is a bot move by looking at the player's bot status
+        const isBotMove = player && player.isBot;
+        const playerId = isBotMove ? `bot_${moveData.playerColor}` : user.uid;
+        
         gameData.lastMove = {
           from: moveData.from,
           to: moveData.to,
           pieceCode: moveData.pieceCode,
           playerColor: moveData.playerColor,
-          playerId: user.uid,
+          playerId: playerId,
           timestamp: Date.now(),
         };
         gameData.lastActivity = Date.now();

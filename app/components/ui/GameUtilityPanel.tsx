@@ -1,11 +1,20 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
+import { useSelector } from "react-redux";
+import { RootState } from "../../../state";
 import HistoryControls from "./HistoryControls";
 import ResignButton from "./ResignButton";
+import EndgameButton from "./EndgameButton";
 
 interface GameUtilityPanelProps {}
 
 export default function GameUtilityPanel({}: GameUtilityPanelProps) {
+  const { gameMode } = useSelector((state: RootState) => state.game);
+  
+  // Determine if this is single player mode
+  const isSinglePlayerMode = gameMode === "solo" || gameMode === "single";
+
+
   return (
     <View style={[
       styles.panel,
@@ -23,6 +32,7 @@ export default function GameUtilityPanel({}: GameUtilityPanelProps) {
           <Text style={styles.utilityLabel}>Actions</Text>
           <View style={styles.actionsContainer}>
             <ResignButton />
+            {isSinglePlayerMode && <EndgameButton />}
           </View>
         </View>
       </View>

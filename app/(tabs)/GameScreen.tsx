@@ -112,8 +112,9 @@ export default function GameScreen() {
       initialModeRef.current = mode;
     }
     
-    // Use the locked initial mode, fallback to current mode, then to "solo"
-    const stableMode = initialModeRef.current || mode || "solo";
+    // Use the locked initial mode, fallback to current mode, then to current Redux gameMode, then to "solo"
+    const currentReduxGameMode = store.getState().game.gameMode;
+    const stableMode = initialModeRef.current || mode || currentReduxGameMode || "solo";
     
     // Determine the effective mode based on settings
     // Use current settings value to avoid dependency issues
@@ -458,6 +459,13 @@ export default function GameScreen() {
       if (effectiveGameMode === 'online') {
         // For online games, use centralized bot service
         const currentGameState = store.getState().game;
+        
+        // ✅ CRITICAL FIX: Additional validation to prevent multiple bot triggers
+        if (currentGameState.currentPlayerTurn !== currentPlayerTurn) {
+          console.log(`🤖 GameScreen: Bot trigger cancelled - turn mismatch: expected ${currentPlayerTurn}, got ${currentGameState.currentPlayerTurn}`);
+          return;
+        }
+        
         onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
       } else {
         // For local modes (solo, p2p, single), use local bot service with same timing
@@ -726,7 +734,7 @@ export default function GameScreen() {
             // ✅ CRITICAL FIX: Use sound service to respect haptics settings
             try {
               const soundService = require('../../services/soundService').default;
-              await soundService.playSound('button');
+              // Sound effect removed for menu clicks
             } catch (error) {
               console.log('🔊 Failed to play button sound:', error);
             }

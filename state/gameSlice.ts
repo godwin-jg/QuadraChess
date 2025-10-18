@@ -679,7 +679,7 @@ const gameSlice = createSlice({
     resetGame: (state) => {
       // Preserve the current game mode and bot configuration before resetting
       const currentGameMode = state.gameMode;
-      const currentBotPlayers = state.botPlayers;
+      const currentBotPlayers = [...state.botPlayers]; // Create a copy to preserve
       
       // ✅ CRITICAL FIX: Completely clear all state properties first
       // Delete all existing properties to ensure no stale data persists
@@ -700,15 +700,17 @@ const gameSlice = createSlice({
       
       // Set bots based on game mode and preserve user configuration
       if (currentGameMode === "single") {
-        // For single player mode, preserve the bot configuration set by the user
-        // If no configuration was set, use default (Red is human, others are bots)
-        state.botPlayers = currentBotPlayers.length > 0 ? currentBotPlayers : ['b', 'y', 'g'];
+        // For single player mode, always use the default bot configuration (Red is human, others are bots)
+        // This ensures that "Play Again" always maintains the 1 vs 3 bots setup
+        state.botPlayers = ['b', 'y', 'g'];
+        console.log(`🤖 resetGame: Single player mode - set botPlayers to:`, state.botPlayers);
       } else if (currentGameMode === "p2p" || currentGameMode === "online") {
         // P2P and Online modes: preserve existing bot configuration (set by host in lobby)
-        // The botPlayers array is already set by the host, don't clear it
-        // This allows P2P and Online lobbies to configure bots and they persist through resets
+        state.botPlayers = currentBotPlayers;
+        console.log(`🤖 resetGame: Multiplayer mode - preserved botPlayers:`, state.botPlayers);
       } else {
         state.botPlayers = []; // Other modes have no bots
+        console.log(`🤖 resetGame: Other mode - cleared botPlayers`);
       }
       
       // Initialize history as empty - no initial snapshot
@@ -876,6 +878,55 @@ const gameSlice = createSlice({
 
         state.currentPlayerTurn = nextActivePlayer;
       }
+
+      // Save current state to history
+      if (state.historyIndex < state.history.length - 1) {
+        state.history = state.history.slice(0, state.historyIndex + 1);
+      }
+
+      state.history.push(createStateSnapshot(state));
+      state.historyIndex = state.history.length - 1;
+    },
+    endGame: (state) => {
+      // Don't allow ending game when viewing historical moves
+      if (state.viewingHistoryIndex !== null) {
+        return;
+      }
+
+      // Don't allow ending game if game is already over
+      if (
+        state.gameStatus === "finished" ||
+        state.gameStatus === "checkmate" ||
+        state.gameStatus === "stalemate"
+      ) {
+        return;
+      }
+
+      // Clear selection
+      state.selectedPiece = null;
+      state.validMoves = [];
+
+      // Find the player with the highest score
+      const scores = state.scores;
+      const players = ['r', 'b', 'y', 'g'] as const;
+      let winner: string = players[0];
+      let highestScore = scores[winner as keyof typeof scores];
+
+      for (const player of players) {
+        if (!state.eliminatedPlayers.includes(player) && scores[player] > highestScore) {
+          winner = player;
+          highestScore = scores[player];
+        }
+      }
+
+      // Set the winner and end the game
+      state.winner = winner;
+      state.gameStatus = "finished";
+      state.gameOverState = {
+        isGameOver: true,
+        status: "finished",
+        eliminatedPlayer: null,
+      };
 
       // Save current state to history
       if (state.historyIndex < state.history.length - 1) {
@@ -1165,6 +1216,7 @@ export const {
   stepHistory,
   returnToLive,
   resignGame,
+  endGame,
   applyNetworkMove,
   syncGameState,
   setGameState,

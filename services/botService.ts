@@ -235,30 +235,6 @@ const makeBotMove = (botColor: string) => {
 
   // Execute the chosen move - handle different game modes
   if (currentGameState.gameMode === 'p2p') {
-    // 🔊 Play sound and vibration for P2P bot move (since P2P doesn't trigger sounds automatically)
-    try {
-      const soundService = require('./soundService').default;
-      const capturedPiece = currentGameState.boardState[chosenMove.to.row][chosenMove.to.col];
-      
-      // Check if this is a castling move
-      const isCastling = require('../state/gameHelpers').isCastlingMove(
-        pieceCode,
-        chosenMove.from.row,
-        chosenMove.from.col,
-        chosenMove.to.row,
-        chosenMove.to.col
-      );
-      
-      if (isCastling) {
-        soundService.playCastleSound();
-      } else if (capturedPiece) {
-        soundService.playCaptureSound();
-      } else {
-        soundService.playMoveSound();
-      }
-    } catch (error) {
-    }
-
     // In P2P mode, send the move over the network
     const moveData = {
       from: chosenMove.from,

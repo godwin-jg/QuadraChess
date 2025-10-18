@@ -197,8 +197,8 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
   // ✅ SINGLE SOURCE OF TRUTH: Watch lastMove for all animations
   // This effect runs whenever ANY move is made (local player, bot, or remote player)
   React.useEffect(() => {
-    // Don't animate if there's no move, or if we're just loading the game
-    if (!lastMove || history.length <= 1) {
+    // Don't animate if there's no move
+    if (!lastMove) {
       return;
     }
 
@@ -270,7 +270,8 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
     //   );
     // }
 
-    // Play sounds for all moves since animations are disabled
+    // ✅ SINGLE SOURCE OF TRUTH: Board component handles ALL move sounds
+    // This ensures consistent sound behavior across all game modes and player types
     try {
       const soundService = require('../../../services/soundService').default;
       const isCastling = require('../../../state/gameHelpers').isCastlingMove(

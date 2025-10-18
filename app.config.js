@@ -6,7 +6,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     expo: {
       ...config.expo,
+      name: "QuadChess",
       slug: "FourPlayer",
+      version: "1.0.4",
       scheme: "FourPlayer",
       icon: "./assets/images/chess.png",
       splash: {

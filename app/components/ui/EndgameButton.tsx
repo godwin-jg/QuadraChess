@@ -39,7 +39,6 @@ export default function EndgameButton() {
       try {
         soundService.playGameEndSound();
       } catch (error) {
-        console.log('🔊 Failed to play game-end sound:', error);
       }
       
       setShowEndgameModal(false);

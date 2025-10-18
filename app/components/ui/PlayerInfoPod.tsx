@@ -267,7 +267,7 @@ export default function PlayerInfoPod({
         >
           Captured
         </Text>
-        <View className="flex-row flex-wrap justify-center gap-0.5">
+        <View className="flex-row flex-wrap justify-center gap-0.5 h-8 min-h-8">
           {capturedPieces.length > 0 ? (
             capturedPieces
               .slice(0, 8)

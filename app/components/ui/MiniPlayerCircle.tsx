@@ -177,9 +177,10 @@ export default function MiniPlayerCircle({
   const adjustedPadding = getAdjustedPadding();
 
   return (
-    <Animated.View style={[eliminationAnimatedStyle, adjustedPadding]} className="items-center justify-center">
-      {/* Avatar Container - Glass Effect */}
-      <Animated.View
+    <View style={{ overflow: 'visible', zIndex: 10 }}>
+      <Animated.View style={[eliminationAnimatedStyle, adjustedPadding]} className="items-center justify-center">
+        {/* Avatar Container - Glass Effect */}
+        <Animated.View
         style={[
           avatarAnimatedStyle,
           {
@@ -260,6 +261,7 @@ export default function MiniPlayerCircle({
           </Animated.View>
         )}
       </Animated.View>
-    </Animated.View>
+      </Animated.View>
+    </View>
   );
 }

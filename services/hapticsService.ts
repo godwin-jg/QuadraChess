@@ -15,7 +15,6 @@ export class HapticsService {
   // Helper function to safely trigger haptic feedback
   async triggerHaptic(style: Haptics.ImpactFeedbackStyle): Promise<void> {
     const settings = settingsService.getSettings();
-    console.log('🔍 HapticsService - Current settings:', settings?.game?.hapticsEnabled);
     
     // Only trigger haptics if they're enabled in settings
     if (!settings?.game?.hapticsEnabled) {

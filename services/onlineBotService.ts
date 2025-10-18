@@ -28,15 +28,14 @@ const pieceValues: { [key: string]: number } = {
 };
 
 class OnlineBotService {
-  private botMoveTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private botProcessingFlags: Map<string, boolean> = new Map(); // Per-bot processing flags
 
   // Get all legal moves for a bot with smart timeout and early termination
-  private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves: number = 20, cancellationToken?: { cancelled: boolean }): MoveOption[] {
+  private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves: number = 5, cancellationToken?: { cancelled: boolean }): MoveOption[] {
     const allMoves: MoveOption[] = [];
     const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
     const startTime = Date.now();
-    const maxCalculationTime = 2000; // 2 seconds max for move calculation
+    const maxCalculationTime = 1500; // Reduced from 3000 to 1500ms for much faster calculation
 
     // Collect all bot pieces first to avoid positional bias
     const botPieces: { pieceCode: string; position: { row: number; col: number } }[] = [];
@@ -104,24 +103,19 @@ class OnlineBotService {
   // Choose the best move for a bot with smart fallback strategies
   private chooseBestMove(botColor: string, gameState: GameState, cancellationToken?: { cancelled: boolean }): MoveOption | null {
     const startTime = Date.now();
-    const maxMoveTime = 2500; // 2.5 seconds max for move selection
+    const maxMoveTime = 1500; // Reduced from 2500 to 1500ms for faster move selection
     
     // ✅ SMART OPTIMIZATION: Start with fewer moves, increase if time allows
-    let maxMoves = 10; // Start conservative
-    if (Date.now() - startTime < 1000) {
-      maxMoves = 20; // If we have time, get more moves
+    let maxMoves = 5; // Reduced from 10 to 5 - start very conservative
+    if (Date.now() - startTime < 500) { // Reduced from 1000 to 500ms
+      maxMoves = 8; // Reduced from 20 to 8 - much smaller increase
     }
     
     const allLegalMoves = this.getAllLegalMoves(botColor, gameState, maxMoves, cancellationToken);
 
     // Check if calculation was cancelled due to timeout (brain overheated)
     if (cancellationToken?.cancelled) {
-      // ✅ SMART FALLBACK: If we have any moves, use the first one instead of skipping
-      if (allLegalMoves.length > 0) {
-        // Using fallback move due to timeout
-        return allLegalMoves[0]; // Use first available move as fallback
-      }
-      return null; // Only skip if no moves available
+      return null; // Skip turn if timeout
     }
 
     if (allLegalMoves.length === 0) {
@@ -169,7 +163,6 @@ class OnlineBotService {
       } else {
         // This should never happen since we already filtered captureMoves above
         // If it does happen, it indicates a logic error - log and use first available move
-        // Logic fallback: using first available move
         chosenMove = allLegalMoves[0];
       }
     }
@@ -198,15 +191,21 @@ class OnlineBotService {
     
     // Calculate adaptive timeout based on game state complexity
     const pieceCount = gameState.boardState.flat().filter(cell => cell && cell.startsWith(botColor)).length;
-    const adaptiveTimeout = Math.max(1500, Math.min(BOT_CONFIG.BRAIN_TIMEOUT, 2000 + (pieceCount * 100)));
+    const adaptiveTimeout = Math.max(2000, Math.min(BOT_CONFIG.BRAIN_TIMEOUT, 2500 + (pieceCount * 50))); // Reduced base timeout and piece multiplier
     
     const moveTimeout = setTimeout(() => {
-      // Bot brain overheated, using fallback
+      // Bot is thinking hard, show notification and continue
       cancellationToken.cancelled = true;
-      this.botProcessingFlags.set(botColor, false);
       
-      // ✅ SMART FALLBACK: Try to make any available move instead of skipping
-      this.makeFallbackMove(gameId, botColor, gameState);
+      // Notify user about bot thinking hard
+      try {
+        const notificationService = require('./notificationService').default;
+        notificationService.show(`Bot ${botColor.toUpperCase()} is thinking hard...`, "info", 3000);
+      } catch (notificationError) {
+        console.warn("Failed to show bot thinking notification:", notificationError);
+      }
+      
+      this.botProcessingFlags.set(botColor, false);
     }, adaptiveTimeout);
 
     try {
@@ -225,12 +224,29 @@ class OnlineBotService {
         // No legal moves found (stalemate) - skip turn and advance to next player
         clearTimeout(moveTimeout);
         this.botProcessingFlags.set(botColor, false);
+        
+        // Notify user about bot stalemate
+        try {
+          const notificationService = require('./notificationService').default;
+          notificationService.show(`Bot ${botColor.toUpperCase()} has no moves - skipping turn`, "info", 3000);
+        } catch (notificationError) {
+          console.warn("Failed to show bot stalemate notification:", notificationError);
+        }
+        
         await this.skipBotTurn(gameId, botColor);
         return;
       }
 
       // Handle bot elimination (checkmate)
       if (chosenMove.isEliminate) {
+        // Notify user about bot elimination
+        try {
+          const notificationService = require('./notificationService').default;
+          notificationService.show(`Bot ${botColor.toUpperCase()} eliminated!`, "error", 4000);
+        } catch (notificationError) {
+          console.warn("Failed to show bot elimination notification:", notificationError);
+        }
+        
         await this.eliminateBot(gameId, botColor);
         clearTimeout(moveTimeout);
         this.botProcessingFlags.set(botColor, false);
@@ -281,14 +297,8 @@ class OnlineBotService {
       // This ensures no intermediate moves are shown during calculation
       const gameRef = database().ref(`games/${gameId}`);
       
-      // Add retry logic for transaction conflicts
-      let retryCount = 0;
-      const maxRetries = 3;
-      let result: any = null;
-      
-      while (retryCount < maxRetries) {
-        try {
-          result = await gameRef.transaction((gameData) => {
+      // Simplified transaction for faster bot moves
+      const result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
           // Game not found
           return null;
@@ -419,48 +429,37 @@ class OnlineBotService {
         gameData.gameState.historyIndex = gameData.gameState.history.length - 1;
 
         return gameData;
-          });
-
-          if (result.committed) {
-            // Success! Break out of retry loop
-            break;
-          } else {
-            throw new Error("Transaction failed to commit");
-          }
-        } catch (error: any) {
-          retryCount++;
-          // Bot move attempt failed
-          
-          // Check for specific Firebase errors that should not be retried
-          if (error.code === 'database/max-retries' || 
-              error.message?.includes('max-retries') ||
-              error.message?.includes('too many retries')) {
-            // Max retries exceeded for bot move
-            throw error;
-          }
-          
-          if (retryCount >= maxRetries) {
-            // Bot move failed after max attempts
-            throw error;
-          }
-          
-          // Wait before retrying with exponential backoff
-          const delay = 200 * Math.pow(2, retryCount - 1); // 200ms, 400ms, 800ms
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
+      });
 
       if (result && result.committed) {
         const totalTime = Date.now() - startTime;
-        // Bot move completed
+        // Bot move completed successfully
         
-        // ✅ CRITICAL FIX: Only one move per bot per turn
-        // The move is now applied atomically to the database, preventing multiple moves from showing
-        // Animation is handled automatically by the Board component when it detects the lastMove state change
+        // Cancel any thinking notifications immediately since move is complete
+        try {
+          const notificationService = require('./notificationService').default;
+          notificationService.clearByPattern('is thinking hard');
+        } catch (notificationError) {
+          // Ignore notification service errors
+        }
       }
 
-    } catch (error) {
-      console.error(`🤖 OnlineBotService: Error processing bot ${botColor} move:`, error);
+    } catch (error: any) {
+      // Handle Firebase transaction errors gracefully
+      if (error.code === 'database/overridden-by-set' || 
+          error.message?.includes('overridden-by-set') ||
+          error.message?.includes('transaction was overridden')) {
+        // Game state changed during bot calculation - this is normal, just skip this move
+        return;
+      }
+      
+      if (error.code === 'database/max-retries' || 
+          error.message?.includes('max-retries') ||
+          error.message?.includes('too many retries')) {
+        // Max retries exceeded for bot move - just skip this move instead of crashing
+        return; // Skip this bot move instead of throwing error
+      }
+      
     } finally {
       clearTimeout(moveTimeout);
       this.botProcessingFlags.set(botColor, false);
@@ -485,10 +484,9 @@ class OnlineBotService {
 
   // Schedule bot move with delay
   public scheduleBotMove(gameId: string, botColor: string, gameState: GameState): void {
-    // Clear any existing timeout for this bot
-    const existingTimeout = this.botMoveTimeouts.get(botColor);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
+    // ✅ CRITICAL FIX: Check if bot is already processing a move
+    if (this.botProcessingFlags.get(botColor)) {
+      return;
     }
 
     // ✅ CRITICAL FIX: Validate game state before scheduling
@@ -497,96 +495,25 @@ class OnlineBotService {
       return;
     }
 
-    // ✅ UNIFIED TIMING: Use centralized bot timing for consistency
-    // This allows piece animation (250ms) + thinking time (1250ms) = 1500ms total
-    const delay = BOT_CONFIG.MOVE_DELAY;
-
-    const timeout = setTimeout(() => {
-      // ✅ CRITICAL FIX: Re-validate game state before processing
-      const currentGameState = require('../state/store').store.getState().game;
-      if (currentGameState.currentPlayerTurn !== botColor) {
-        // Bot turn validation failed during execution
-        this.botMoveTimeouts.delete(botColor);
-        return;
-      }
-      
-      this.processBotMove(gameId, botColor, currentGameState);
-      this.botMoveTimeouts.delete(botColor);
-    }, delay);
-
-    this.botMoveTimeouts.set(botColor, timeout);
-  }
-
-  // Smart fallback move when bot times out
-  private async makeFallbackMove(gameId: string, botColor: string, gameState: GameState): Promise<void> {
-    try {
-      // Get a simple random move as fallback
-      const allMoves: MoveOption[] = [];
-      const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
-      
-      // Find any piece that can move
-      for (let r = 0; r < boardState.length && allMoves.length === 0; r++) {
-        for (let c = 0; c < boardState[r].length && allMoves.length === 0; c++) {
-          const pieceCode = boardState[r][c];
-          if (pieceCode && pieceCode.startsWith(botColor)) {
-            try {
-              const moves = getValidMoves(pieceCode, { row: r, col: c }, boardState, eliminatedPlayers, hasMoved, enPassantTargets);
-              if (moves.length > 0) {
-                // Use the first available move
-                const move = moves[0];
-                const moveData = {
-                  from: { row: r, col: c },
-                  to: { row: move.row, col: move.col },
-                  pieceCode: pieceCode,
-                  playerColor: botColor,
-                };
-                
-                // Apply the fallback move
-                const gameRef = database().ref(`games/${gameId}`);
-                await gameRef.transaction((gameData) => {
-                  if (!gameData?.gameState) return gameData;
-                  
-                  // Apply the move
-                  gameData.gameState.boardState[move.row][move.col] = pieceCode;
-                  gameData.gameState.boardState[r][c] = null;
-                  
-                  // Update turn
-                  gameData.gameState.currentPlayerTurn = this.getNextPlayer(botColor, gameData.gameState.eliminatedPlayers);
-                  gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
-                  
-                  // Set last move
-                  gameData.lastMove = {
-                    from: { row: r, col: c },
-                    to: { row: move.row, col: move.col },
-                    pieceCode: pieceCode,
-                    playerColor: botColor,
-                    playerId: `bot_${botColor}_fallback`,
-                    timestamp: Date.now(),
-                    capturedPiece: move.isCapture ? gameData.gameState.boardState[move.row][move.col] : null,
-                  };
-                  
-                  return gameData;
-                });
-                
-                // Bot made fallback move
-                return;
-              }
-            } catch (error) {
-              continue; // Try next piece
-            }
-          }
-        }
-      }
-      
-      // If no moves found, skip turn
-      // Bot has no fallback moves, skipping turn
-      await this.skipBotTurn(gameId, botColor);
-      
-    } catch (error) {
-      console.error(`🤖 OnlineBotService: Fallback move failed for bot ${botColor}:`, error);
-      await this.skipBotTurn(gameId, botColor);
+    // ✅ IMMEDIATE EXECUTION: No delay for online bots since Firebase transaction provides natural delay
+    // Re-validate game state before processing
+    const currentGameState = require('../state/store').store.getState().game;
+    if (currentGameState.currentPlayerTurn !== botColor) {
+      // Bot turn validation failed during execution
+      return;
     }
+    
+    // Additional validation: Check if bot is still active and game is still active
+    if (currentGameState.gameStatus !== 'active' || 
+        currentGameState.eliminatedPlayers.includes(botColor) ||
+        currentGameState.promotionState.isAwaiting) {
+      return;
+    }
+    
+    // Execute bot move immediately
+    this.processBotMove(gameId, botColor, currentGameState);
   }
+
 
   // Auto-eliminate a checkmated bot
   private async eliminateBot(gameId: string, botColor: string): Promise<void> {
@@ -761,11 +688,8 @@ class OnlineBotService {
 
   // Cancel all scheduled bot moves
   public cancelAllBotMoves(): void {
-    this.botMoveTimeouts.forEach((timeout, botColor) => {
-      clearTimeout(timeout);
-    });
-    this.botMoveTimeouts.clear();
-    this.botProcessingFlags.clear(); // Clear all processing flags
+    // Since we no longer use setTimeout delays, just clear processing flags
+    this.botProcessingFlags.clear();
   }
 
   // Check if a player is a bot

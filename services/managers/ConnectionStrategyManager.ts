@@ -38,7 +38,6 @@ export class ConnectionStrategyManager {
    * Attempt to connect using WebRTC first, then fallback to HTTP
    */
   public async connectToHost(config: ConnectionConfig): Promise<void> {
-    console.log(`🔗 ConnectionStrategy: Attempting connection to ${config.hostIP}`);
     
     try {
       // Try WebRTC connection first
@@ -51,7 +50,6 @@ export class ConnectionStrategyManager {
       this.eventHandlers.onWebRTCConnectionEstablished(config.hostId);
       
     } catch (webRTCError) {
-      console.log(`🔗 ConnectionStrategy: WebRTC failed, trying HTTP fallback:`, webRTCError);
       
       // Fallback to HTTP polling
       await this.activateHTTPFallback(config);
@@ -62,7 +60,6 @@ export class ConnectionStrategyManager {
    * Attempt WebRTC connection
    */
   private async attemptWebRTCConnection(config: ConnectionConfig): Promise<void> {
-    console.log(`🔗 ConnectionStrategy: Attempting WebRTC connection to ${config.hostIP}`);
     
     // Create WebRTC connection
     const connection = this.webRTCManager.createConnection(config.hostId);
@@ -88,7 +85,6 @@ export class ConnectionStrategyManager {
       await this.webRTCManager.addIceCandidate(config.hostId, candidate);
     }
     
-    console.log(`🔗 ConnectionStrategy: WebRTC offer/answer exchange completed`);
   }
 
   /**
@@ -123,7 +119,6 @@ export class ConnectionStrategyManager {
    * Activate HTTP fallback when WebRTC fails
    */
   private async activateHTTPFallback(config: ConnectionConfig): Promise<void> {
-    console.log(`🔄 ConnectionStrategy: Activating HTTP fallback for ${config.hostIP}`);
     
     this.isHTTPFallbackActive = true;
     this.eventHandlers.onHTTPFallbackActivated(config.hostIP);
@@ -136,7 +131,6 @@ export class ConnectionStrategyManager {
    * Start HTTP polling for game state
    */
   private async startHTTPPolling(hostIP: string): Promise<void> {
-    console.log(`🔄 ConnectionStrategy: Starting HTTP polling to ${hostIP}`);
     
     const maxAttempts = 20; // 20 attempts over 10 seconds
     const pollInterval = 500; // 500ms between attempts
@@ -152,7 +146,6 @@ export class ConnectionStrategyManager {
         
         if (response.ok) {
           const gameState = await response.json();
-          console.log(`🔄 ConnectionStrategy: Received game state via HTTP:`, gameState);
           
           this.gameStateManager.updateGameState(gameState);
           this.eventHandlers.onGameStateReceived(gameState);
@@ -162,7 +155,6 @@ export class ConnectionStrategyManager {
           return;
         }
       } catch (fetchError) {
-        console.log(`🔄 ConnectionStrategy: HTTP polling attempt ${attempt}/${maxAttempts} failed:`, fetchError);
       }
       
       // Wait before next attempt
@@ -178,7 +170,6 @@ export class ConnectionStrategyManager {
    * Start continuous HTTP polling
    */
   private startContinuousHTTPPolling(hostIP: string): void {
-    console.log(`🔄 ConnectionStrategy: Starting continuous HTTP polling`);
     
     this.httpPollingInterval = setInterval(async () => {
       try {
@@ -195,7 +186,6 @@ export class ConnectionStrategyManager {
           this.eventHandlers.onGameStateReceived(gameState);
         }
       } catch (error) {
-        console.warn(`🔄 ConnectionStrategy: HTTP polling error:`, error);
       }
     }, 2000); // Poll every 2 seconds
   }
@@ -204,7 +194,6 @@ export class ConnectionStrategyManager {
    * Send WebRTC offer via HTTP signaling
    */
   private async sendOfferViaHTTP(config: ConnectionConfig, offer: RTCSessionDescriptionInit): Promise<any> {
-    console.log(`🔗 ConnectionStrategy: Sending offer via HTTP to ${config.hostIP}`);
     
     // Collect ICE candidates
     const candidates: RTCIceCandidateInit[] = [];
@@ -242,7 +231,6 @@ export class ConnectionStrategyManager {
     if (this.isWebRTCConnected) {
       this.webRTCManager.sendMessage(hostId, message);
     } else {
-      console.warn('🔗 ConnectionStrategy: Cannot send message - no active connection');
     }
   }
 
@@ -264,7 +252,6 @@ export class ConnectionStrategyManager {
    * Disconnect from host
    */
   public disconnect(): void {
-    console.log(`🔗 ConnectionStrategy: Disconnecting from host`);
     
     if (this.httpPollingInterval) {
       clearInterval(this.httpPollingInterval);

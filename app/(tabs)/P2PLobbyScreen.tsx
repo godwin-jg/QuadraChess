@@ -47,7 +47,6 @@ const P2PLobbyScreen: React.FC = () => {
   
   // Only log when actually focused
   if (isFocused) {
-    console.log("🎮 P2PLobbyScreen: Component mounted/rendered");
   }
 
   // ✅ All state now comes from Redux
@@ -67,7 +66,6 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Debug logging - only when focused
   if (isFocused) {
-    console.log("🎮 P2PLobbyScreen: Current Redux state:", {
       players: players.length,
       isHost,
       canStartGame,
@@ -85,17 +83,12 @@ const P2PLobbyScreen: React.FC = () => {
   useEffect(() => {
     if (!isFocused) return; // Only run when screen is actually focused
     
-    console.log("🎮 UI: Navigation effect triggered - currentGame:", currentGame, "isHost:", isHost);
     if (currentGame && currentGame.status === 'playing' && !isHost) {
-      console.log("🎮 UI: Game status is 'playing', navigating to game screen...");
-      console.log("🎮 UI: Current game:", currentGame);
       try {
         router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
       } catch (navError) {
-        console.error("🎮 UI: Navigation error:", navError);
       }
     } else {
-      console.log("🎮 UI: Not navigating - conditions not met:", {
         hasCurrentGame: !!currentGame,
         gameStatus: currentGame?.status,
         isHost: isHost
@@ -114,7 +107,6 @@ const P2PLobbyScreen: React.FC = () => {
 
     // Cleanup: Stop discovery when component unmounts or loses focus
     return () => {
-      console.log("🎮 P2PLobbyScreen: Cleaning up - stopping network discovery");
       try {
         networkDiscoveryService.stopDiscovery();
         p2pService.stopDiscovery();
@@ -129,7 +121,6 @@ const P2PLobbyScreen: React.FC = () => {
     React.useCallback(() => {
       // Screen is focused - set focus state and start discovery
       setIsFocused(true);
-      console.log("🎮 P2PLobbyScreen: Screen focused - starting network discovery");
       
       try {
         p2pService.discoverGames().catch(error => {
@@ -141,7 +132,6 @@ const P2PLobbyScreen: React.FC = () => {
 
       // Set up periodic refresh every 5 seconds while screen is focused
       const refreshInterval = setInterval(() => {
-        console.log("🎮 P2PLobbyScreen: Periodic refresh - discovering games");
         p2pService.discoverGames().catch(error => {
           console.error("Error in periodic discovery:", error);
         });
@@ -150,7 +140,6 @@ const P2PLobbyScreen: React.FC = () => {
       // Return cleanup function when screen loses focus
       return () => {
         setIsFocused(false);
-        console.log("🎮 P2PLobbyScreen: Screen lost focus - stopping network discovery and periodic refresh");
         clearInterval(refreshInterval);
         try {
           networkDiscoveryService.stopDiscovery();
@@ -177,9 +166,7 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = (color: string) => {
-    console.log(`🤖 P2PLobbyScreen: Toggle bot request for ${color}, isHost: ${isHost}`);
     if (!isHost) {
-      console.log(`🤖 P2PLobbyScreen: Not host, ignoring bot toggle`);
       return;
     }
     
@@ -188,7 +175,6 @@ const P2PLobbyScreen: React.FC = () => {
       : [...botPlayers, color];
     
     dispatch(setBotPlayers(newBotPlayers));
-    console.log(`🤖 P2PLobbyScreen: Host toggled bot for ${color}, new botPlayers:`, newBotPlayers);
   };
 
   // Create a new P2P game
@@ -211,7 +197,6 @@ const P2PLobbyScreen: React.FC = () => {
         const soundService = require('../../services/soundService').default;
         soundService.playSuccessSound();
       } catch (error) {
-        console.log('🔊 SoundService: Failed to play success sound:', error);
       }
       
       console.log("P2P Game created:", game);
@@ -227,7 +212,6 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Join a discovered game
   const joinGame = async (gameId: string) => {
-    console.log(`🎮 P2PLobbyScreen: joinGame called with gameId: ${gameId}`);
     
     if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
@@ -266,7 +250,6 @@ const P2PLobbyScreen: React.FC = () => {
         const soundService = require('../../services/soundService').default;
         soundService.playSuccessSound();
       } catch (error) {
-        console.log('🔊 SoundService: Failed to play success sound:', error);
       }
       
       console.log("Joined P2P game:", gameId);
@@ -291,13 +274,10 @@ const P2PLobbyScreen: React.FC = () => {
     try {
       // Check if all players are connected before starting
       const allPlayersConnected = players.every(p => p.isHost || p.connectionState === 'connected');
-      console.log(`🔗 P2PLobbyScreen: Starting game - all players connected: ${allPlayersConnected}`);
       players.forEach((player: any) => {
-        console.log(`🔗 P2PLobbyScreen: Player ${player.name} (${player.isHost ? 'host' : 'client'}): connectionState=${player.connectionState}, isConnected=${player.isConnected}`);
       });
       
       // ✅ Include botPlayers in the initial game state
-      console.log(`🤖 P2PLobbyScreen: Starting game with botPlayers:`, botPlayers);
       
       // This will update the host's state and trigger the sync to clients
       p2pService.sendGameStarted(); 
@@ -307,14 +287,12 @@ const P2PLobbyScreen: React.FC = () => {
         const soundService = require('../../services/soundService').default;
         soundService.playGameStartSound();
       } catch (error) {
-        console.log('🔊 SoundService: Failed to play game start sound:', error);
       }
       
       // The host navigates itself
       try {
         router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
       } catch (navError) {
-        console.error("🎮 UI: Navigation error in startGame:", navError);
       }
     } catch (error) {
       console.error("Error starting game:", error);
@@ -729,7 +707,6 @@ const P2PLobbyScreen: React.FC = () => {
               try {
                 router.back();
               } catch (navError) {
-                console.error("🎮 UI: Navigation error in back button:", navError);
               }
             }}
             disabled={false}
@@ -745,7 +722,6 @@ const P2PLobbyScreen: React.FC = () => {
           </Text>
           <TouchableOpacity
             onPress={() => {
-              console.log("🎮 P2PLobbyScreen: Manual refresh requested");
               p2pService.discoverGames().catch(error => {
                 console.error("Error refreshing games:", error);
               });

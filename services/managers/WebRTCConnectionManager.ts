@@ -36,7 +36,6 @@ export class WebRTCConnectionManager {
    * Create a new WebRTC connection for a peer
    */
   public createConnection(peerId: string): RTCPeerConnection {
-    console.log(`🔗 WebRTCManager: Creating connection for peer ${peerId}`);
     
     const connection = new RTCPeerConnection({
       iceServers: this.config.iceServers,
@@ -61,7 +60,6 @@ export class WebRTCConnectionManager {
       throw new Error(`No connection found for peer ${peerId}`);
     }
 
-    console.log(`🔗 WebRTCManager: Creating data channel for peer ${peerId}`);
     const dataChannel = connection.createDataChannel(channelName, { 
       ordered: true 
     });
@@ -78,7 +76,6 @@ export class WebRTCConnectionManager {
   public setupIncomingDataChannelListener(connection: RTCPeerConnection, peerId: string): void {
     connection.ondatachannel = (event) => {
       const dataChannel = event.channel;
-      console.log(`🔗 WebRTCManager: Received data channel from peer ${peerId}`);
       
       this.setupDataChannelEventListeners(dataChannel, peerId);
       this.dataChannels.set(peerId, dataChannel);
@@ -96,7 +93,6 @@ export class WebRTCConnectionManager {
       throw new Error(`No connection found for peer ${peerId}`);
     }
 
-    console.log(`🔗 WebRTCManager: Creating offer for peer ${peerId}`);
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
     
@@ -112,7 +108,6 @@ export class WebRTCConnectionManager {
       throw new Error(`No connection found for peer ${peerId}`);
     }
 
-    console.log(`🔗 WebRTCManager: Creating answer for peer ${peerId}`);
     await connection.setRemoteDescription(offer);
     const answer = await connection.createAnswer();
     await connection.setLocalDescription(answer);
@@ -129,7 +124,6 @@ export class WebRTCConnectionManager {
       throw new Error(`No connection found for peer ${peerId}`);
     }
 
-    console.log(`🔗 WebRTCManager: Setting remote description for peer ${peerId}`);
     await connection.setRemoteDescription(description);
   }
 
@@ -151,11 +145,9 @@ export class WebRTCConnectionManager {
   public sendMessage(peerId: string, message: DataChannelMessage): void {
     const dataChannel = this.dataChannels.get(peerId);
     if (!dataChannel || dataChannel.readyState !== 'open') {
-      console.warn(`🔗 WebRTCManager: Cannot send message to peer ${peerId} - data channel not open`);
       return;
     }
 
-    console.log(`📤 WebRTCManager: Sending message to peer ${peerId}:`, message.type);
     dataChannel.send(JSON.stringify(message));
   }
 
@@ -181,7 +173,6 @@ export class WebRTCConnectionManager {
   public closeConnection(peerId: string): void {
     const connection = this.connections.get(peerId);
     if (connection) {
-      console.log(`🔗 WebRTCManager: Closing connection for peer ${peerId}`);
       connection.close();
       this.connections.delete(peerId);
     }
@@ -197,7 +188,6 @@ export class WebRTCConnectionManager {
    * Close all connections
    */
   public closeAllConnections(): void {
-    console.log(`🔗 WebRTCManager: Closing all connections`);
     
     this.connections.forEach((connection, peerId) => {
       connection.close();
@@ -224,7 +214,6 @@ export class WebRTCConnectionManager {
   private setupConnectionEventListeners(connection: RTCPeerConnection, peerId: string): void {
     connection.onconnectionstatechange = () => {
       const state = connection.connectionState;
-      console.log(`🔗 WebRTCManager: Connection state changed to: ${state} for peer ${peerId}`);
       this.eventHandlers.onConnectionStateChange(state);
       
       if (state === 'failed') {
@@ -234,7 +223,6 @@ export class WebRTCConnectionManager {
 
     connection.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log(`🔗 WebRTCManager: ICE candidate generated for peer ${peerId}`);
         this.eventHandlers.onIceCandidate(event.candidate);
       }
     };
@@ -252,7 +240,6 @@ export class WebRTCConnectionManager {
     dataChannel.onmessage = (event) => {
       try {
         const message: DataChannelMessage = JSON.parse(event.data);
-        console.log(`📥 WebRTCManager: Received message from peer ${peerId}:`, message.type);
         this.eventHandlers.onDataChannelMessage(message, peerId);
       } catch (error) {
         console.error(`❌ WebRTCManager: Failed to parse message from peer ${peerId}:`, error);
@@ -264,7 +251,6 @@ export class WebRTCConnectionManager {
     };
 
     dataChannel.onclose = () => {
-      console.log(`🔗 WebRTCManager: Data channel closed for peer ${peerId}`);
     };
   }
 
@@ -280,7 +266,6 @@ export class WebRTCConnectionManager {
     onClose: () => void,
     onError: (error: any) => void
   ): void {
-    console.log(`🔗 WebRTCManager: Setting up data channel listeners for ${playerName} (${peerId})`);
     
     dataChannel.onopen = () => {
       console.log(`✅ WebRTCManager: Data channel opened with ${playerName}`);
@@ -290,7 +275,6 @@ export class WebRTCConnectionManager {
     dataChannel.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
-        console.log(`📥 WebRTCManager: Received message from ${playerName}:`, message.type);
         onMessage(message);
       } catch (error) {
         console.error(`❌ WebRTCManager: Failed to parse message from ${playerName}:`, error);
@@ -304,7 +288,6 @@ export class WebRTCConnectionManager {
     };
 
     dataChannel.onclose = () => {
-      console.log(`🔗 WebRTCManager: Data channel closed with ${playerName}`);
       onClose();
     };
   }

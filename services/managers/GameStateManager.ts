@@ -26,7 +26,6 @@ export class GameStateManager {
     gameName: string;
     maxPlayers: number;
   }): P2PGame {
-    console.log(`🎮 GameStateManager: Initializing host game: ${gameInfo.gameName}`);
     
     const gameState: P2PGame = {
       id: this.generateGameId(),
@@ -70,17 +69,14 @@ export class GameStateManager {
     isHost?: boolean;
   }): P2PPlayer | null {
     if (!this.isHost || !this.gameState) {
-      console.warn('🎮 GameStateManager: Cannot add player - not host or no game state');
       return null;
     }
 
     if (this.players.has(playerInfo.playerId)) {
-      console.log(`🎮 GameStateManager: Player ${playerInfo.playerName} already exists`);
       return this.players.get(playerInfo.playerId)!;
     }
 
     if (this.gameState.playerCount >= this.gameState.maxPlayers) {
-      console.warn('🎮 GameStateManager: Cannot add player - game is full');
       return null;
     }
 
@@ -100,7 +96,6 @@ export class GameStateManager {
     this.players.set(playerInfo.playerId, player);
     this.gameState.playerCount = this.players.size;
 
-    console.log(`🎮 GameStateManager: Added player ${playerInfo.playerName} (${color})`);
     
     this.eventHandlers.onPlayerJoined(player);
     this.eventHandlers.onGameStateUpdate(this.gameState);
@@ -121,7 +116,6 @@ export class GameStateManager {
       return;
     }
 
-    console.log(`🎮 GameStateManager: Removing player ${player.name}`);
     
     this.players.delete(playerId);
     this.gameState.playerCount = this.players.size;
@@ -141,16 +135,13 @@ export class GameStateManager {
    */
   public startGame(): boolean {
     if (!this.isHost || !this.gameState) {
-      console.warn('🎮 GameStateManager: Cannot start game - not host or no game state');
       return false;
     }
 
     if (this.gameState.playerCount !== 4) {
-      console.warn('🎮 GameStateManager: Cannot start game - need exactly 4 players');
       return false;
     }
 
-    console.log(`🎮 GameStateManager: Starting game with ${this.gameState.playerCount} players`);
     
     this.gameState.status = 'playing';
     this.gameState.startedAt = Date.now();
@@ -165,7 +156,6 @@ export class GameStateManager {
    * End the game
    */
   public endGame(): void {
-    console.log('🎮 GameStateManager: Ending game');
     
     if (this.gameState) {
       this.gameState.status = 'ended';
@@ -181,7 +171,6 @@ export class GameStateManager {
    * Update game state (for client)
    */
   public updateGameState(gameState: P2PGame): void {
-    console.log('🎮 GameStateManager: Updating game state from host');
     
     this.gameState = gameState;
     

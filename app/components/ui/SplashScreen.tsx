@@ -62,7 +62,6 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
     return () => {
       if (player) {
         try {
-          console.log('🎬 Cleaning up video player');
           // The player will be automatically cleaned up by expo-video
         } catch (error) {
           console.error('❌ Error during video player cleanup:', error);
@@ -73,7 +72,6 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
 
   // Debug logging
   React.useEffect(() => {
-    console.log('🎬 SplashScreen Debug:', {
       useVideo,
       videoSource,
       videoError,
@@ -86,7 +84,6 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
       // Start video playback if using video and player is ready
       if (useVideo && player && playerReady) {
         try {
-          console.log('🎬 Starting video playback');
           player.play();
         } catch (error) {
          
@@ -100,7 +97,6 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
       // Stop video playback if using video and player is ready
       if (useVideo && player && playerReady) {
         try {
-          console.log('🎬 Stopping video playback');
           player.pause();
         } catch (error) {
           console.error('❌ Failed to stop video playback:', error);

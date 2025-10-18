@@ -200,6 +200,8 @@ const styles = StyleSheet.create({
   },
   capturedSection: {
     alignItems: 'center',
+    height: 50, // Fixed height to prevent layout shifts
+    minHeight: 50, // Fixed height to prevent layout shifts
   },
   capturedLabel: {
     fontSize: 12,
@@ -214,6 +216,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 3,
     maxWidth: 100,
+    minHeight: 30, // Fixed height to prevent layout shifts
+    height: 30, // Fixed height to prevent layout shifts
   },
   noCapturedText: {
     fontSize: 11,

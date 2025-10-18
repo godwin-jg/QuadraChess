@@ -68,17 +68,14 @@ export class P2PGameCoordinator {
     this.webRTCManager = new WebRTCConnectionManager(
       {
         onConnectionStateChange: (state) => {
-          console.log(`🔗 Coordinator: WebRTC connection state: ${state}`);
         },
         onDataChannelOpen: (dataChannel, peerId) => {
-          console.log(`🔗 Coordinator: Data channel opened with ${peerId}`);
           this.handleDataChannelOpen(peerId);
         },
         onDataChannelMessage: (message, peerId) => {
           this.handleDataChannelMessage(message, peerId);
         },
         onIceCandidate: (candidate) => {
-          console.log(`🔗 Coordinator: ICE candidate generated`);
         },
         onConnectionFailed: (error) => {
           this.eventHandlers.onConnectionFailed(error);
@@ -109,18 +106,14 @@ export class P2PGameCoordinator {
       this.gameStateManager,
       {
         onWebRTCConnectionEstablished: (peerId) => {
-          console.log(`🔗 Coordinator: WebRTC connection established with ${peerId}`);
           this.eventHandlers.onConnectionEstablished('webrtc');
         },
         onWebRTCConnectionFailed: (error) => {
-          console.log(`🔗 Coordinator: WebRTC connection failed:`, error);
         },
         onHTTPFallbackActivated: (hostIP) => {
-          console.log(`🔄 Coordinator: HTTP fallback activated for ${hostIP}`);
           this.eventHandlers.onConnectionEstablished('http');
         },
         onGameStateReceived: (gameState) => {
-          console.log(`🔄 Coordinator: Game state received via HTTP`);
           this.eventHandlers.onGameStateUpdate(gameState);
         },
         onConnectionError: (error) => {
@@ -134,7 +127,6 @@ export class P2PGameCoordinator {
    * Create a new game (host)
    */
   public async createGame(options: CreateGameOptions): Promise<P2PGame> {
-    console.log(`🎮 Coordinator: Creating game: ${options.gameName}`);
     
     this.isHost = true;
     
@@ -156,7 +148,6 @@ export class P2PGameCoordinator {
    * Join an existing game (client)
    */
   public async joinGame(options: JoinGameOptions): Promise<void> {
-    console.log(`🎮 Coordinator: Joining game at ${options.hostIP}`);
     
     this.isHost = false;
     
@@ -168,10 +159,8 @@ export class P2PGameCoordinator {
         gameId: options.gameId,
       });
       
-      console.log(`🎮 Coordinator: Successfully joined game`);
       
     } catch (error) {
-      console.error(`🎮 Coordinator: Failed to join game:`, error);
       this.eventHandlers.onConnectionFailed(error as Error);
       throw error;
     }
@@ -182,7 +171,6 @@ export class P2PGameCoordinator {
    */
   public startGame(): boolean {
     if (!this.isHost) {
-      console.warn('🎮 Coordinator: Only host can start the game');
       return false;
     }
 
@@ -193,7 +181,6 @@ export class P2PGameCoordinator {
    * End the game
    */
   public endGame(): void {
-    console.log('🎮 Coordinator: Ending game');
     
     this.gameStateManager.endGame();
     this.connectionStrategyManager.disconnect();
@@ -273,7 +260,6 @@ export class P2PGameCoordinator {
    * Handle data channel opening
    */
   private handleDataChannelOpen(peerId: string): void {
-    console.log(`🔗 Coordinator: Data channel opened with ${peerId}`);
     
     if (this.isHost) {
       // Host: Send current game state to new client
@@ -299,7 +285,6 @@ export class P2PGameCoordinator {
    * Handle data channel messages
    */
   private handleDataChannelMessage(message: any, peerId: string): void {
-    console.log(`📥 Coordinator: Received message from ${peerId}:`, message.type);
     
     switch (message.type) {
       case 'join-request':
@@ -312,7 +297,6 @@ export class P2PGameCoordinator {
         this.handleLobbyStateSync(message.lobbyState);
         break;
       default:
-        console.warn(`📥 Coordinator: Unknown message type: ${message.type}`);
     }
   }
 
@@ -324,7 +308,6 @@ export class P2PGameCoordinator {
       return;
     }
 
-    console.log(`📥 Coordinator: Handling join request from ${message.playerName}`);
     
     const player = this.gameStateManager.addPlayer({
       playerId: message.playerId,
@@ -345,7 +328,6 @@ export class P2PGameCoordinator {
       return;
     }
 
-    console.log(`📥 Coordinator: Updating game state from host`);
     this.gameStateManager.updateGameState(gameState);
   }
 
@@ -357,7 +339,6 @@ export class P2PGameCoordinator {
       return;
     }
 
-    console.log(`📥 Coordinator: Syncing lobby state from host`);
     this.gameStateManager.updateGameState(lobbyState);
   }
 
@@ -390,11 +371,9 @@ export class P2PGameCoordinator {
    */
   public addPlayer(playerId: string, playerName: string): P2PPlayer | null {
     if (!this.isHost) {
-      console.warn('📥 Coordinator: Only host can add players');
       return null;
     }
 
-    console.log(`📥 Coordinator: Adding player ${playerName} (${playerId})`);
     
     const player = this.gameStateManager.addPlayer({
       playerId,
@@ -414,11 +393,9 @@ export class P2PGameCoordinator {
    */
   public setupDataChannelListeners(dataChannel: RTCDataChannel, peerId: string, playerName: string): void {
     if (!this.isHost) {
-      console.warn('📥 Coordinator: Only host can setup data channel listeners');
       return;
     }
 
-    console.log(`📥 Coordinator: Setting up data channel listeners for ${playerName}`);
     
     this.webRTCManager.setupDataChannelListeners(
       dataChannel,
@@ -426,7 +403,6 @@ export class P2PGameCoordinator {
       playerName,
       (message) => this.handleDataChannelMessage(message, peerId),
       () => console.log(`✅ Coordinator: Data channel opened with ${playerName}`),
-      () => console.log(`🔌 Coordinator: Data channel closed with ${playerName}`),
       (error) => console.error(`❌ Coordinator: Data channel error with ${playerName}:`, error)
     );
   }

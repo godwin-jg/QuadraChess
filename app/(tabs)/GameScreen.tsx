@@ -404,13 +404,6 @@ export default function GameScreen() {
 
   // ✅ Bot Controller - triggers bot moves when it's a bot's turn
   useEffect(() => {
-    // ✅ CRITICAL FIX: Reset lastProcessedTurn when currentPlayerTurn changes
-    // This ensures bots can make moves after eliminations and turn changes
-    if (lastProcessedTurn.current !== currentPlayerTurn) {
-      // Turn changed, resetting lastProcessedTurn
-      lastProcessedTurn.current = null;
-    }
-    
     // ✅ CRITICAL FIX: Prevent multiple rapid bot triggers for the same turn
     if (lastProcessedTurn.current === currentPlayerTurn) {
       // Already processed turn, skipping
@@ -431,7 +424,7 @@ export default function GameScreen() {
         !eliminatedPlayers.includes(currentPlayerTurn) && // ✅ CRITICAL FIX: Don't trigger bot moves for eliminated players
         !promotionState.isAwaiting) { // ✅ CRITICAL FIX: Don't trigger bot moves when promotion modal is open
       
-      // Mark this turn as processed
+      // Mark this turn as processed IMMEDIATELY to prevent duplicate triggers
       lastProcessedTurn.current = currentPlayerTurn;
       
       // ✅ UNIFIED BOT TIMING: Use consistent timing for all game modes
@@ -444,7 +437,8 @@ export default function GameScreen() {
         
         // ✅ CRITICAL FIX: Additional validation to prevent multiple bot triggers
         if (currentGameState.currentPlayerTurn !== currentPlayerTurn) {
-          // Bot trigger cancelled - turn mismatch
+          // Bot trigger cancelled - turn mismatch, reset the flag
+          lastProcessedTurn.current = null;
           return;
         }
         
@@ -459,6 +453,12 @@ export default function GameScreen() {
       }
     }
   }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId, eliminatedPlayers, promotionState.isAwaiting]);
+
+  // ✅ CRITICAL FIX: Reset lastProcessedTurn when turn actually changes
+  useEffect(() => {
+    // Reset the processed turn flag when currentPlayerTurn changes
+    lastProcessedTurn.current = null;
+  }, [currentPlayerTurn]);
 
   // Cleanup bot moves when game ends or changes
   useEffect(() => {
@@ -520,7 +520,6 @@ export default function GameScreen() {
           rotation = 0;
       }
       
-      console.log(`🎮 GameScreen: Rotating board for ${currentPlayerColor} player to ${rotation} degrees`);
       setBoardRotation(rotation);
     } else {
       // For local games, keep default rotation
@@ -566,7 +565,6 @@ export default function GameScreen() {
         if (gameMode === 'online' && gameId) {
           try {
             await realtimeDatabaseService.clearJustEliminated(gameId);
-            console.log(`🎯 GameScreen: Cleared justEliminated flag from server for game ${gameId}`);
           } catch (error) {
             console.error('Error clearing justEliminated from server:', error);
           }
@@ -718,7 +716,6 @@ export default function GameScreen() {
               const soundService = require('../../services/soundService').default;
               // Sound effect removed for menu clicks
             } catch (error) {
-              console.log('🔊 Failed to play button sound:', error);
             }
             
             // Animate the toggle
@@ -784,7 +781,6 @@ export default function GameScreen() {
             try {
               // ✅ CRITICAL FIX: For online games, create a rematch with same players and bots
               if (gameMode === 'online' && gameId) {
-                console.log(`🎮 GameScreen: Creating rematch game for ${gameId}`);
                 
                 // Create rematch game with same players and bots
                 const newGameId = await realtimeDatabaseService.createRematchGame(gameId);
@@ -792,7 +788,6 @@ export default function GameScreen() {
                 // Navigate to the new game
                 router.push(`/(tabs)/GameScreen?gameId=${newGameId}&mode=online`);
                 
-                console.log(`🎮 GameScreen: Navigated to rematch game ${newGameId}`);
               } else {
                 // For local games, just reset the game
                 dispatch(resetGame());

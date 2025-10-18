@@ -145,14 +145,6 @@ class P2PGameServiceImpl implements P2PGameService {
     const gameEnded = newEliminatedPlayers.length >= 3 && previousEliminatedPlayers.length < 3;
     
     if (eliminationOccurred || gameEnded) {
-      console.log("🎮 P2PGameService: Game state change detected! Syncing complete game state to all clients");
-      console.log("🎮 P2PGameService: Previous eliminated players:", previousEliminatedPlayers);
-      console.log("🎮 P2PGameService: New eliminated players:", newEliminatedPlayers);
-      console.log("🎮 P2PGameService: Just eliminated:", newState.justEliminated);
-      console.log("🎮 P2PGameService: Game ended:", gameEnded);
-      console.log("🎮 P2PGameService: Game status:", newState.gameStatus);
-      console.log("🎮 P2PGameService: Winner:", newState.winner);
-      console.log("🎮 P2PGameService: Game over state:", newState.gameOverState);
       
       // Sync the complete game state to all clients
       p2pService.syncGameStateToClients();
@@ -175,7 +167,6 @@ class P2PGameServiceImpl implements P2PGameService {
     const { row, col } = gameState.promotionState.position;
     const playerColor = gameState.promotionState.color!;
 
-    console.log(`🎯 P2PGame: Making promotion to ${pieceType} at (${row}, ${col}) for ${playerColor}`);
 
     // ✅ Apply promotion locally first (optimistic UI)
     const { completePromotion } = require("../state/gameSlice");
@@ -206,7 +197,6 @@ class P2PGameServiceImpl implements P2PGameService {
 
     const playerColor = this.currentPlayer?.color || "";
     if (!playerColor) {
-      console.error("🎮 P2PGameService: No player color available for resignation");
       throw new Error("Player color not available for resignation");
     }
 

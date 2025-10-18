@@ -73,34 +73,16 @@ class OnlineGameServiceImpl implements OnlineGameService {
   private handleCriticalError(error: string): void {
     console.error("OnlineGameService: Handling critical error:", error);
     
-    // Force immediate cleanup
-    this.forceCleanup();
+    // Don't immediately reset the game - just log the error and continue
+    // The game should remain playable even with temporary connection issues
+    console.warn("OnlineGameService: Connection issue detected, but continuing game:", error);
     
-    // Reset game state
-    const store = require('../state/store').default;
-    store.dispatch(require('../state/gameSlice').resetGame());
-    
-    // Show user-friendly error message
+    // Only show a subtle notification instead of forcing a restart
     try {
-      const { Alert } = require('react-native');
-      Alert.alert(
-        "Connection Error",
-        "There was a problem with the server connection. You've been returned to the lobby.",
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              // Navigate to lobby
-              try {
-                const { router } = require('expo-router');
-                router.replace('/online-lobby');
-              } catch (navError) {
-              }
-            }
-          }
-        ]
-      );
-    } catch (alertError) {
+      const notificationService = require('./notificationService').default;
+      notificationService.show("Connection issue - game continues", "warning", 3000);
+    } catch (notificationError) {
+      console.warn("Failed to show notification:", notificationError);
     }
   }
   
@@ -147,7 +129,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
       this.currentGameId = gameId;
       this.isConnected = true; // Mark as connected immediately when connection is established
-      console.log("🔍 DEBUG OnlineGameService: Setting isConnected=true in connectToGame - gameId:", gameId);
 
       // Subscribe to game updates
       this.gameUnsubscribe = realtimeDatabaseService.subscribeToGame(
@@ -156,7 +137,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
         if (game) {
           // Keep connected status true when we receive game data
           this.isConnected = true;
-          console.log("🔍 DEBUG OnlineGameService: Setting isConnected=true in game callback - gameId:", gameId, "currentGameId:", this.currentGameId);
         } else {
             // Only mark as disconnected if we're sure the game doesn't exist
             // Don't immediately disconnect on temporary null values
@@ -176,7 +156,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
       await this.updatePlayerPresence(true);
       this.setupPresenceTracking();
       
-      console.log("🔍 DEBUG OnlineGameService: Connection successful - isConnected:", this.isConnected, "currentGameId:", this.currentGameId);
     } catch (error) {
       console.error("Error connecting to enhanced online game:", error);
       this.isConnected = false;
@@ -185,19 +164,16 @@ class OnlineGameServiceImpl implements OnlineGameService {
   }
 
   async disconnect(): Promise<void> {
-    console.log("🔍 DEBUG OnlineGameService: disconnect() called - currentGameId:", this.currentGameId, "isConnected:", this.isConnected);
     // Disconnect call stack
     
     try {
       // ✅ CRITICAL FIX: Clean up subscriptions FIRST to prevent race conditions
       if (this.gameUnsubscribe) {
-        console.log("🔍 DEBUG OnlineGameService: Cleaning up game subscription");
         this.gameUnsubscribe();
         this.gameUnsubscribe = null;
       }
 
       if (this.movesUnsubscribe) {
-        console.log("🔍 DEBUG OnlineGameService: Cleaning up moves subscription");
         this.movesUnsubscribe();
         this.movesUnsubscribe = null;
       }
@@ -209,16 +185,15 @@ class OnlineGameServiceImpl implements OnlineGameService {
         try {
           await this.updatePlayerPresence(false);
           await realtimeDatabaseService.leaveGame(this.currentGameId, (criticalError: string) => {
-            // ✅ CRITICAL FIX: Handle max retries exceeded - force cleanup and redirect
-            console.error("OnlineGameService: Critical error during disconnect:", criticalError);
-            this.handleCriticalError(criticalError);
+            // Don't treat max-retries as critical during disconnect - just log
+            console.warn("OnlineGameService: Connection issue during disconnect:", criticalError);
           });
         } catch (error: any) {
           console.warn("OnlineGameService: Error during server disconnect, continuing with local cleanup:", error.message);
           
-          // ✅ CRITICAL FIX: Check if this is a critical error
+          // Don't treat max-retries as critical - just log and continue
           if (error.message?.includes('max-retries') || error.message?.includes('too many retries')) {
-            this.handleCriticalError(error.message);
+            console.warn("OnlineGameService: Max retries exceeded, but continuing game:", error.message);
           }
           
           // Don't throw error - continue with local cleanup even if server operations fail
@@ -228,11 +203,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
       // Subscriptions already cleaned up above
 
-      console.log("🔍 DEBUG OnlineGameService: Setting isConnected to false in disconnect()");
       this.currentGameId = null;
       this.currentPlayer = null;
       this.isConnected = false;
-      console.log("🔍 DEBUG OnlineGameService: After setting isConnected=false - isConnected:", this.isConnected, "currentGameId:", this.currentGameId);
       this.gameUpdateCallbacks = [];
       this.moveUpdateCallbacks = [];
       
@@ -321,7 +294,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
         // Move successful - no rollback needed
       } catch (error) {
         // Server rejected the move - rollback local state
-        console.error("🎮 OnlineGameService: Server rejected move, rolling back local state:", error);
         
         // ✅ CRITICAL FIX: Preserve local selection state during rollback
         const currentLocalState = store.getState().game;
@@ -373,7 +345,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
     const { row, col } = gameState.promotionState.position;
     const playerColor = gameState.promotionState.color!;
 
-    console.log(`🎯 OnlineGame: Making promotion to ${pieceType} at (${row}, ${col}) for ${playerColor}`);
 
     try {
       await realtimeDatabaseService.makePromotion(this.currentGameId, {
@@ -522,8 +493,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
   private processGameUpdate(game: RealtimeGame | null): void {
     // ✅ CRITICAL FIX: Don't process updates if service is disconnected
     if (!this.isConnected || !this.currentGameId) {
-      console.log("🔍 DEBUG OnlineGameService: Skipping game update - service is disconnected");
-      console.log("🔍 DEBUG OnlineGameService: isConnected:", this.isConnected, "currentGameId:", this.currentGameId);
       // Process game update call stack
       return;
     }
@@ -663,7 +632,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
           // ✅ CRITICAL FIX: Sync promotion state from server
           promotionState: (() => {
             const serverPromotionState = game.gameState.promotionState || { isAwaiting: false, position: null, color: null };
-            console.log(`🔍 DEBUG OnlineGameService: Server promotion state:`, serverPromotionState);
             return serverPromotionState;
           })(),
           // ✅ CRITICAL FIX: Sync hasMoved state from server
@@ -682,7 +650,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
           // ✅ CRITICAL FIX: Sync eliminatedPlayers from server
           eliminatedPlayers: (() => {
             const serverEliminatedPlayers = game.gameState.eliminatedPlayers || [];
-            console.log(`🔍 DEBUG OnlineGameService: Server eliminatedPlayers:`, serverEliminatedPlayers);
             return serverEliminatedPlayers;
           })(),
           // Multiplayer state
@@ -701,7 +668,6 @@ class OnlineGameServiceImpl implements OnlineGameService {
             
             // If user is viewing history and there's a new move, force them back to live state
             if (isCurrentlyViewingHistory && hasNewMove) {
-              console.log(`🔍 OnlineGameService: New move detected, forcing user back to live state`);
               return null;
             }
             

@@ -33,7 +33,6 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
     for (let c = 0; c < boardState[r].length; c++) {
       // Check for cancellation before each piece
       if (cancellationToken?.cancelled) {
-        console.log(`🤖 BotService: Move calculation cancelled for bot ${botColor}`);
         return [];
       }
       
@@ -53,7 +52,6 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
   for (const { pieceCode, position } of shuffledPieces) {
     // Check for cancellation before processing each piece
     if (cancellationToken?.cancelled) {
-      console.log(`🤖 BotService: Move calculation cancelled for bot ${botColor}`);
       return [];
     }
     
@@ -74,7 +72,6 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
   for (const { pieceCode, position } of randomizedPieces) {
     // Check for cancellation before processing each piece
     if (cancellationToken?.cancelled) {
-      console.log(`🤖 BotService: Move calculation cancelled for bot ${botColor}`);
       return [];
     }
     
@@ -120,7 +117,6 @@ const makeBotMove = (botColor: string) => {
 
   // ✅ CRITICAL FIX: Don't make moves when promotion modal is open
   if (gameState.promotionState.isAwaiting) {
-    console.log(`🤖 BotService: Promotion modal is open, skipping bot ${botColor} move`);
     return;
   }
 
@@ -131,7 +127,6 @@ const makeBotMove = (botColor: string) => {
 
   // ✅ CRITICAL FIX: Check if bot is eliminated
   if (gameState.eliminatedPlayers.includes(botColor)) {
-    console.log(`🤖 BotService: Bot ${botColor} is eliminated, skipping move`);
     return;
   }
 
@@ -141,9 +136,16 @@ const makeBotMove = (botColor: string) => {
   // ⚡ PERFORMANCE FIX: Set a timeout to prevent bot from taking too long
   const cancellationToken = { cancelled: false };
   const moveTimeout = setTimeout(() => {
-    console.warn(`🤖 BotService: Bot ${botColor} brain overheated after ${BOT_CONFIG.BRAIN_TIMEOUT / 1000} seconds, skipping move`);
     cancellationToken.cancelled = true;
     botMoveInProgress = false;
+    
+    // Notify user about bot thinking hard
+    try {
+      const notificationService = require('./notificationService').default;
+      notificationService.show(`Bot ${botColor.toUpperCase()} is thinking hard...`, "info", 3000);
+    } catch (notificationError) {
+      console.warn("Failed to show bot thinking notification:", notificationError);
+    }
     
     // Skip bot's turn and advance to next player
     skipBotTurn(botColor);
@@ -153,7 +155,6 @@ const makeBotMove = (botColor: string) => {
 
   // Check if calculation was cancelled due to timeout (brain overheated)
   if (cancellationToken.cancelled) {
-    console.log(`🤖 BotService: Bot ${botColor} brain overheated, skipping turn`);
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     return;
@@ -165,11 +166,26 @@ const makeBotMove = (botColor: string) => {
     const isInCheck = isKingInCheck(botColor, gameState.boardState, gameState.eliminatedPlayers, gameState.hasMoved);
     
     if (isInCheck) {
-      console.log(`🤖 BotService: Bot ${botColor} is checkmated, auto-eliminating`);
+      
+      // Notify user about bot elimination
+      try {
+        const notificationService = require('./notificationService').default;
+        notificationService.show(`Bot ${botColor.toUpperCase()} eliminated!`, "error", 4000);
+      } catch (notificationError) {
+        console.warn("Failed to show bot elimination notification:", notificationError);
+      }
+      
       // Auto-eliminate the bot by dispatching a resign action
       store.dispatch(resignGame(botColor));
     } else {
-      console.log(`🤖 BotService: Bot ${botColor} is stalemated, skipping turn`);
+      
+      // Notify user about bot stalemate
+      try {
+        const notificationService = require('./notificationService').default;
+        notificationService.show(`Bot ${botColor.toUpperCase()} has no moves - skipping turn`, "info", 3000);
+      } catch (notificationError) {
+        console.warn("Failed to show bot stalemate notification:", notificationError);
+      }
     }
     
     clearTimeout(moveTimeout);
@@ -209,7 +225,6 @@ const makeBotMove = (botColor: string) => {
     } else {
       // This should never happen since we already filtered captureMoves above
       // If it does happen, it indicates a logic error - log and use first available move
-      console.warn(`🤖 Bot ${botColor}: Logic error - no captures found but no non-capture moves either. Using first available move.`);
       chosenMove = allLegalMoves[0];
     }
   }
@@ -219,7 +234,6 @@ const makeBotMove = (botColor: string) => {
   const pieceCode = currentGameState.boardState[chosenMove.from.row][chosenMove.from.col];
   
   if (!pieceCode || pieceCode[0] !== botColor) {
-    console.error(`🤖 Bot ${botColor}: Move validation failed - piece not found or wrong color`);
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     return;
@@ -227,7 +241,6 @@ const makeBotMove = (botColor: string) => {
   
   // Check if it's still this bot's turn
   if (currentGameState.currentPlayerTurn !== botColor) {
-    console.error(`🤖 Bot ${botColor}: Turn validation failed - not bot's turn anymore`);
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     return;
@@ -259,6 +272,14 @@ const makeBotMove = (botColor: string) => {
   // ✅ Animation is now handled automatically by the Board component
   // when it detects the lastMove state change from the dispatched makeMove action
 
+  // Cancel any thinking notifications immediately since move is complete
+  try {
+    const notificationService = require('./notificationService').default;
+    notificationService.clearByPattern('is thinking hard');
+  } catch (notificationError) {
+    // Ignore notification service errors
+  }
+
   // Release the lock and clear timeout
   clearTimeout(moveTimeout);
   botMoveInProgress = false;
@@ -266,7 +287,6 @@ const makeBotMove = (botColor: string) => {
 
 // Skip bot's turn when brain overheats (timeout)
 const skipBotTurn = (botColor: string) => {
-  console.log(`🤖 BotService: Bot ${botColor} brain overheated, skipping turn`);
   
   // Use the existing turn advancement logic by dispatching a dummy move that will be rejected
   // This will trigger the turn advancement logic in the makeMove reducer
@@ -281,7 +301,6 @@ const skipBotTurn = (botColor: string) => {
   // Dispatch the dummy move - it will be rejected but turn will advance
   store.dispatch(makeMove(dummyMove));
   
-  console.log(`🤖 BotService: Turn advanced from ${botColor} due to timeout`);
 };
 
 // Handle bot pawn promotion

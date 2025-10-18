@@ -29,7 +29,6 @@ class ServerlessSignalingService {
     }
 
     try {
-      console.log('🚀 ServerlessSignaling: Starting HTTP server on port', this.port);
       
       // Create the bridge server
       this.server = new BridgeServer('webrtc_signaling', true);
@@ -53,13 +52,11 @@ class ServerlessSignalingService {
         try {
           const gameState = p2pService.getGameState();
           if (gameState) {
-            console.log("🔄 ServerlessSignaling: Serving game state via HTTP relay:", gameState);
             return gameState;
           } else {
             return { error: 'Game state not available' };
           }
         } catch (error) {
-          console.error("🔄 ServerlessSignaling: Error serving game state:", error);
           return { error: 'Failed to get game state' };
         }
       });
@@ -67,11 +64,6 @@ class ServerlessSignalingService {
       // Handle WebRTC offer endpoint
       this.server.post('/api/webrtc/offer', async (req: any, res: any) => {
         try {
-          console.log('🚀 ServerlessSignaling: Received WebRTC offer request');
-          console.log('📢 ServerlessSignaling: Request body:', req.body);
-          console.log('📢 ServerlessSignaling: Request data:', req.data);
-          console.log('📢 ServerlessSignaling: Request post:', req.post);
-          console.log('📢 ServerlessSignaling: Full request object:', req);
           
           // Try different ways to get the request data
           const offerData = req.body || req.data || req.post || req;
@@ -237,22 +229,17 @@ class ServerlessSignalingService {
       p2pService.createConnectionForPlayer(playerId);
 
       // ✅ Immediately add the player to the game
-      console.log('📢 ServerlessSignaling: About to add player to game:', playerName, playerId);
       try {
         p2pService.addPlayer(playerId, playerName);
-        console.log('📢 ServerlessSignaling: Successfully added player to game');
       } catch (error) {
-        console.error('📢 ServerlessSignaling: Failed to add player to game:', error);
         throw new Error(`Failed to add player: ${error}`);
       }
 
       // ✅ Redux state is already updated by p2pService.addPlayer() via syncLobbyStateToClients()
-      console.log("📢 ServerlessSignaling: Player added successfully, Redux state updated by p2pService");
 
       // Set up data channel listener (host side)
       connection.ondatachannel = (event: any) => {
         const dataChannel = event.channel;
-        console.log('🎯 ServerlessSignaling: Received data channel from', playerName);
         console.log('ServerlessSignaling: Data channel state:', dataChannel.readyState);
         
         // Set up data channel listeners for host side

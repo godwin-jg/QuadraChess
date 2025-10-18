@@ -344,12 +344,9 @@ class RealtimeDatabaseService {
     } catch (error: any) {
       console.error("Error calling leave game:", error);
       
-      // ✅ CRITICAL FIX: Handle max retries exceeded error
+      // Don't treat max-retries as critical - just log and continue
       if (error.message?.includes('max-retries') || error.message?.includes('too many retries')) {
-        console.error("Critical error: Max retries exceeded for leaveGame");
-        if (onCriticalError) {
-          onCriticalError(error.message);
-        }
+        console.warn("Max retries exceeded for leaveGame, but continuing:", error.message);
         return; // Don't throw - let the caller handle gracefully
       }
       
@@ -442,7 +439,7 @@ class RealtimeDatabaseService {
         if (error.code === 'database/max-retries' || 
             error.message?.includes('max-retries') ||
             error.message?.includes('too many retries')) {
-          console.log(`Max retries exceeded for leaving game ${gameId} - game likely doesn't exist. Treating as success.`);
+          console.warn(`Max retries exceeded for leaving game ${gameId} - treating as success to avoid game restart`);
           return; // Treat this as success - game probably doesn't exist
         }
         
@@ -592,7 +589,6 @@ class RealtimeDatabaseService {
       throw new Error("User not authenticated");
     }
 
-    console.log(`🎯 OnlineGame: Processing promotion to ${promotionData.pieceType} at (${promotionData.position.row}, ${promotionData.position.col})`);
 
     try {
       const result = await gameRef.transaction((gameData) => {
@@ -662,7 +658,6 @@ class RealtimeDatabaseService {
         throw new Error(`Promotion transaction failed: Transaction not committed`);
       }
 
-      console.log(`🎯 OnlineGame: Successfully promoted to ${promotionData.pieceType}`);
 
     } catch (error) {
       console.error("Failed to make promotion:", error);
@@ -767,7 +762,6 @@ class RealtimeDatabaseService {
           }
           gameData.gameState.capturedPieces[capturedColor].push(capturedPiece);
           
-          console.log(`🎯 OnlineGame: ${moveData.playerColor} captured ${capturedPiece} for ${points} points`);
         }
         
         // ✅ CRITICAL FIX: Check if this is a castling move
@@ -978,7 +972,6 @@ class RealtimeDatabaseService {
           );
           
           if (eliminationResult.eliminatedPlayer) {
-            console.log(`🎯 OnlineGame: Player ${eliminationResult.eliminatedPlayer} eliminated by ${eliminationResult.reason}`);
             
             // Initialize eliminatedPlayers array if it doesn't exist
             if (!gameData.gameState.eliminatedPlayers) {
@@ -1232,8 +1225,8 @@ class RealtimeDatabaseService {
         if (error.code === 'database/max-retries' || 
             error.message?.includes('max-retries') ||
             error.message?.includes('too many retries')) {
-          console.error(`Max retries exceeded for resigning game ${gameId}. Giving up.`);
-          throw new Error(`Failed to resign game after ${maxRetries} attempts: ${error.message}`);
+          console.warn(`Max retries exceeded for resigning game ${gameId} - treating as success to avoid game restart`);
+          return; // Treat this as success to avoid game restart
         }
         
         // Check if player is already not in the game (success case)
@@ -1577,7 +1570,6 @@ class RealtimeDatabaseService {
       // Create the new game
       await newGameRef.set(newGameData);
       
-      console.log(`🎯 RealtimeDatabaseService: Created rematch game ${newGameId} with ${players.length} players`);
       return newGameId;
       
     } catch (error) {
@@ -1603,7 +1595,6 @@ class RealtimeDatabaseService {
         return gameData;
       });
       
-      console.log(`🎯 RealtimeDatabaseService: Cleared justEliminated flag for game ${gameId}`);
     } catch (error) {
       console.error('Error clearing justEliminated flag:', error);
       throw error;
@@ -1689,7 +1680,6 @@ class RealtimeDatabaseService {
       }
 
       await gameRef.update(updates);
-      console.log(`🤖 Updated bot configuration for game ${gameId}:`, botColors);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       throw error;

@@ -55,6 +55,14 @@ class NotificationService {
   }
 
   /**
+   * Clear notifications by pattern
+   */
+  clearByPattern(pattern: string) {
+    this.notifications = this.notifications.filter(n => !n.message.includes(pattern));
+    this.updateUI();
+  }
+
+  /**
    * Clear all notifications
    */
   clear() {

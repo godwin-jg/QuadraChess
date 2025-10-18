@@ -137,7 +137,6 @@ class NetworkAdvertiserService {
       
       // Log interface summary
       const interfaceSummary = interfaces.map((iface: any) => `${iface.type}(${iface.address})`).join(', ');
-      console.log(`📡 ADVERTISING: Found ${interfaces.length} interfaces: ${interfaceSummary}`);
 
       // ✅ Smart advertising: Prioritize hotspot interface for hotspot scenarios
       const hotspotInterfaces = interfaces.filter((iface: any) => iface.type === 'hotspot' && iface.isConnected);
@@ -163,7 +162,6 @@ class NetworkAdvertiserService {
               await this.registerMDNSServiceOnInterface(interfaceGameInfo, iface);
               this.activeAdvertisements.set(interfaceKey, gameInfo.gameName);
               
-              console.log(`📡 ADVERTISING: ${iface.type.toUpperCase()}(${iface.address}) -> ${gameInfo.gameName}`);
             } catch (advertiseError) {
               console.error(`❌ ADVERTISING FAILED: ${iface.name}`, advertiseError);
             }
@@ -368,7 +366,6 @@ class NetworkAdvertiserService {
         const interfaces = allInterfaces.filter((iface: any) => iface.type === type && iface.isConnected);
         if (interfaces.length > 0) {
           const selectedIP = interfaces[0].address;
-          console.log(`🎯 IP SELECTION: ${type.toUpperCase()} -> ${selectedIP}`);
           return selectedIP;
         }
       }
@@ -376,15 +373,12 @@ class NetworkAdvertiserService {
       // Fallback to primary interface
       const primaryInterface = await this.networkInterfaceService.getPrimaryInterface();
       if (primaryInterface) {
-        console.log(`🎯 IP SELECTION: PRIMARY -> ${primaryInterface.address}`);
         return primaryInterface.address;
       }
       
       // Final fallback
-      console.warn('🎯 IP SELECTION: FALLBACK -> 192.168.1.100');
       return '192.168.1.100';
     } catch (error) {
-      console.error('🎯 IP SELECTION: ERROR -> 192.168.1.100', error);
       return '192.168.1.100'; // Fallback
     }
   }

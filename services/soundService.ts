@@ -35,7 +35,6 @@ class SoundService {
 
       this.isInitialized = true;
     } catch (error) {
-      console.error('🔊 SoundService: Initialization failed:', error);
     }
   }
 

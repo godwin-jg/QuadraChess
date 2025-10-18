@@ -7,10 +7,7 @@
     "start-clear": "expo start --clear --port 8082",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web",
-    "signaling-server": "node signaling-server.js",
-    "dev-server": "node server.js",
-    "dev-server-https": "node server-https.js"
+    "web": "expo start --web"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^13.0.0",

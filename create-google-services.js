@@ -5,7 +5,6 @@ const path = require('path');
 
 // Create google-services.json from environment variable during EAS build
 if (process.env.GOOGLE_SERVICES_JSON && process.env.EAS_BUILD) {
-  console.log('🔧 Creating google-services.json from environment variable...');
   
   // Ensure the android/app directory exists
   const androidAppDir = path.join(__dirname, 'android', 'app');

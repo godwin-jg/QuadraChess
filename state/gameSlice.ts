@@ -643,6 +643,14 @@ const gameSlice = createSlice({
         enPassantTarget,
       });
 
+      // Cancel any pending bot thinking notifications since a move was made
+      try {
+        const notificationService = require('../services/notificationService').default;
+        notificationService.clearByPattern('is thinking hard');
+      } catch (error) {
+        // Ignore notification service errors
+      }
+
       // ✅ Update the lastMove and history (this is unique to making a new move)
       state.lastMove = {
         from: { row: startRow, col: startCol },
@@ -703,14 +711,11 @@ const gameSlice = createSlice({
         // For single player mode, always use the default bot configuration (Red is human, others are bots)
         // This ensures that "Play Again" always maintains the 1 vs 3 bots setup
         state.botPlayers = ['b', 'y', 'g'];
-        console.log(`🤖 resetGame: Single player mode - set botPlayers to:`, state.botPlayers);
       } else if (currentGameMode === "p2p" || currentGameMode === "online") {
         // P2P and Online modes: preserve existing bot configuration (set by host in lobby)
         state.botPlayers = currentBotPlayers;
-        console.log(`🤖 resetGame: Multiplayer mode - preserved botPlayers:`, state.botPlayers);
       } else {
         state.botPlayers = []; // Other modes have no bots
-        console.log(`🤖 resetGame: Other mode - cleared botPlayers`);
       }
       
       // Initialize history as empty - no initial snapshot
@@ -1039,6 +1044,14 @@ const gameSlice = createSlice({
         enPassantTarget,
       });
 
+      // Cancel any pending bot thinking notifications since a move was made
+      try {
+        const notificationService = require('../services/notificationService').default;
+        notificationService.clearByPattern('is thinking hard');
+      } catch (error) {
+        // Ignore notification service errors
+      }
+
       // ✅ Update lastMove and history
       state.lastMove = {
         from: { row: fromRow, col: fromCol },
@@ -1166,29 +1179,23 @@ const gameSlice = createSlice({
     // P2P Lobby state sync - only essential info
     syncP2PGameState: (state, action: PayloadAction<any>) => {
       const lobbyData = action.payload;
-      console.log("🎮 Redux: syncP2PGameState called with:", lobbyData);
       
       if (lobbyData) {
         // Only update lobby-related state, not the entire game state
         if (lobbyData.currentGame) {
-          console.log("🎮 Redux: Updating currentGame:", lobbyData.currentGame);
           state.currentGame = lobbyData.currentGame;
         }
         if (lobbyData.players) {
-          console.log("🎮 Redux: Updating players:", lobbyData.players);
           state.players = lobbyData.players;
         }
         if (typeof lobbyData.isHost === 'boolean') {
-          console.log("🎮 Redux: Updating isHost:", lobbyData.isHost);
           state.isHost = lobbyData.isHost;
         }
         if (typeof lobbyData.canStartGame === 'boolean') {
-          console.log("🎮 Redux: Updating canStartGame:", lobbyData.canStartGame);
           state.canStartGame = lobbyData.canStartGame;
         }
       } else {
         // Clear lobby state
-        console.log("🎮 Redux: Clearing lobby state");
         state.currentGame = null;
         state.players = [];
         state.isHost = false;
@@ -1198,7 +1205,6 @@ const gameSlice = createSlice({
     
     // Clear the justEliminated flag (used after notification is shown)
     clearJustEliminated: (state) => {
-      console.log("🎮 Redux: Clearing justEliminated flag");
       state.justEliminated = null;
     },
   },

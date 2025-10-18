@@ -286,7 +286,6 @@ class NetworkDiscoveryService {
       
       // Log interface summary
       const interfaceSummary = interfaces.map((iface: any) => `${iface.type}(${iface.address})`).join(', ');
-      console.log(`🔍 DISCOVERY: Scanning on ${interfaces.length} interfaces: ${interfaceSummary}`);
 
       // Start multi-interface discovery
       await this.startMultiInterfaceDiscovery();

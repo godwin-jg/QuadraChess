@@ -338,8 +338,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Switch
                 value={settings.game.soundEnabled}
                 onValueChange={async (value) => {
-                  console.log('🔍 Sound switch toggled to:', value);
-                  console.log('🔍 Current haptics setting:', settings.game.hapticsEnabled);
                   
                   // ✅ CRITICAL FIX: Auto-save sound setting immediately for instant effect
                   updateGame({ soundEnabled: value });
@@ -348,7 +346,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                   if (settings.game.hapticsEnabled) {
                     // Try VERY strong haptic patterns
                     try {
-                      console.log('🎯 Trying TRIPLE Heavy haptics...');
                       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -359,7 +356,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                     
                     setTimeout(async () => {
                       try {
-                        console.log('🎯 Trying Notification haptic...');
                         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                         console.log('✅ Notification haptic successful');
                       } catch (error) {
@@ -369,7 +365,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                     
                     setTimeout(async () => {
                       try {
-                        console.log('🎯 Trying Error notification haptic...');
                         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                         console.log('✅ Error notification haptic successful');
                       } catch (error) {
@@ -377,7 +372,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                       }
                     }, 1000);
                   } else {
-                    console.log('🔇 Haptics disabled - skipping haptic test');
                   }
                   
                   // ✅ CRITICAL FIX: Auto-save the setting immediately

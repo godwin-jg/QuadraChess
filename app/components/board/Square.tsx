@@ -156,6 +156,7 @@ const Square = React.memo(function Square({
                 justifyContent: "center",
                 alignItems: "center",
                 alignSelf: "center",
+                overflow: "visible",
               }}
             >
               <Animated.View 

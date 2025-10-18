@@ -94,10 +94,10 @@ export const NETWORK_CONFIG = {
 
 // Bot configuration
 export const BOT_CONFIG = {
-  MAX_MOVES_TO_CALCULATE: 20,
-  BRAIN_TIMEOUT: 3000, // 3 seconds - smart timeout with fallback
+  MAX_MOVES_TO_CALCULATE: 5, // Reduced from 10 to 5 for much faster moves
+  BRAIN_TIMEOUT: 5000, 
   DEFAULT_DIFFICULTY: 'medium',
-  MOVE_DELAY: 800, // 0.8 seconds - faster bot moves for better responsiveness
+  MOVE_DELAY: 500, // Reduced from 800 to 500ms for faster bot moves
 } as const;
 
 // Type definitions for better type safety

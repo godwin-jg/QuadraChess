@@ -149,7 +149,6 @@ export const getPieceColor = (piece: string): string => {
 }
 
 // Main execution
-console.log("🎨 Extracting SVG paths...");
 const pieceAssets = processSVGFiles();
 generateTypeScriptFile(pieceAssets);
 console.log("✨ Done!");

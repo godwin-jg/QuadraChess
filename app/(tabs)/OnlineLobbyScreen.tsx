@@ -31,7 +31,6 @@ const OnlineLobbyScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   
   // Debug logging
-  console.log('🔍 SafeAreaInsets:', insets);
 
   const gameState = useSelector((state: RootState) => state.game);
 
@@ -243,26 +242,20 @@ const OnlineLobbyScreen: React.FC = () => {
       } catch (error: any) {
         console.error("Error leaving game:", error);
         
-        // Handle specific error cases
+        // Handle specific error cases - don't treat max-retries as critical
         if (error.message?.includes('max-retries') || 
             error.message?.includes('too many retries') ||
             error.message?.includes('Failed to leave game after')) {
           
-          
-          // Force local cleanup even if server operation failed
+          // Just clean up locally without showing error - max-retries is not critical
           setCurrentGameId(null);
           dispatch(setPlayers([]));
           dispatch(setIsHost(false));
           dispatch(setCanStartGame(false));
           
-          // Show user-friendly message and navigate home
-          Alert.alert(
-            "Connection Issue", 
-            "There was a connection issue leaving the game, but you've been removed locally. You can safely continue.",
-          );
+          console.log("Left game despite connection issues - continuing normally");
         } else {
           // For other errors, still try to clean up locally
-          
           setCurrentGameId(null);
           dispatch(setPlayers([]));
           dispatch(setIsHost(false));
@@ -324,7 +317,6 @@ const OnlineLobbyScreen: React.FC = () => {
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = async (color: string) => {
     if (!isHost || !currentGameId) {
-      console.log(`🤖 OnlineLobbyScreen: Not host or no game, ignoring bot toggle`);
       return;
     }
     
@@ -337,7 +329,6 @@ const OnlineLobbyScreen: React.FC = () => {
     // Update bot configuration in database
     try {
       await realtimeDatabaseService.updateBotConfiguration(currentGameId, newBotPlayers);
-      console.log(`🤖 OnlineLobbyScreen: Host updated bot configuration:`, newBotPlayers);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       // Revert local state on error

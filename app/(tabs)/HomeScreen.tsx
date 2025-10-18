@@ -290,7 +290,6 @@ export default function HomeScreen() {
         const soundService = require('../../services/soundService').default;
         soundService.playButtonHomescreenSound();
       } catch (error) {
-        console.log('🔊 SoundService: Failed to play home screen button sound:', error);
       }
 
       await modeSwitchService.handleModeSwitch(
@@ -426,7 +425,6 @@ export default function HomeScreen() {
               const soundService = require('../../services/soundService').default;
               // Sound effect removed for menu clicks
             } catch (error) {
-              console.log('🔊 Failed to play button sound:', error);
             }
             router.push("/settings");
           }}

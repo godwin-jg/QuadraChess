@@ -273,16 +273,6 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
     // ✅ SINGLE SOURCE OF TRUTH: Board component handles ALL move sounds
     // This ensures consistent sound behavior across all game modes and player types
     
-    // ✅ DEBUG: Log move details to track duplicate sounds
-    console.log('🔊 Board: Processing move for sound:', {
-      from: lastMove.from,
-      to: lastMove.to,
-      pieceCode: lastMove.pieceCode,
-      playerColor: lastMove.playerColor,
-      playerId: lastMove.playerId,
-      timestamp: lastMove.timestamp,
-      capturedPiece: lastMove.capturedPiece
-    });
     
     try {
       const soundService = require('../../../services/soundService').default;
@@ -306,7 +296,6 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
       // ✅ Move sound effects only - check/checkmate sounds handled separately
 
     } catch (error) {
-      console.log('🔊 SoundService: Failed to play sound from Board component:', error);
     }
   }, [lastMove]); // ✅ FIXED: Only depend on lastMove to prevent animation loops
 
@@ -341,7 +330,6 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
       }
 
     } catch (error) {
-      console.log('🔊 SoundService: Failed to play check/checkmate sound from Board component:', error);
     }
   }, [checkStatus, gameStatus, prevCheckStatus, prevGameStatus]); // Safe to depend on these for sound effects
 
@@ -532,7 +520,6 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
                 const soundService = require('../../../services/soundService').default;
                 soundService.playSound('illegal');
               } catch (soundError) {
-                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
               }
               notificationService.show("Not your turn", "warning", 1500);
             } else {
@@ -541,7 +528,6 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
                 const soundService = require('../../../services/soundService').default;
                 soundService.playSound('illegal');
               } catch (soundError) {
-                console.log('🔊 SoundService: Failed to play illegal move sound:', soundError);
               }
               // FIX: Inform the user about the failed move
               notificationService.show("Move failed - check connection", "error", 2000);

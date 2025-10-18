@@ -186,7 +186,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
 
   async disconnect(): Promise<void> {
     console.log("🔍 DEBUG OnlineGameService: disconnect() called - currentGameId:", this.currentGameId, "isConnected:", this.isConnected);
-    console.trace("🔍 DEBUG OnlineGameService: disconnect() call stack");
+    // Disconnect call stack
     
     try {
       // ✅ CRITICAL FIX: Clean up subscriptions FIRST to prevent race conditions
@@ -524,7 +524,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
     if (!this.isConnected || !this.currentGameId) {
       console.log("🔍 DEBUG OnlineGameService: Skipping game update - service is disconnected");
       console.log("🔍 DEBUG OnlineGameService: isConnected:", this.isConnected, "currentGameId:", this.currentGameId);
-      console.trace("🔍 DEBUG OnlineGameService: processGameUpdate call stack");
+      // Process game update call stack
       return;
     }
     

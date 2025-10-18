@@ -93,7 +93,7 @@ class OnlineBotService {
         }
       } catch (error) {
         // If getValidMoves fails for a piece, skip it and continue
-        console.warn(`🤖 OnlineBotService: Failed to get moves for ${pieceCode} at ${position.row},${position.col}:`, error);
+        // Skip problematic pieces silently
         continue;
       }
     }
@@ -118,7 +118,7 @@ class OnlineBotService {
     if (cancellationToken?.cancelled) {
       // ✅ SMART FALLBACK: If we have any moves, use the first one instead of skipping
       if (allLegalMoves.length > 0) {
-        console.log(`🤖 OnlineBotService: Bot ${botColor} using fallback move due to timeout`);
+        // Using fallback move due to timeout
         return allLegalMoves[0]; // Use first available move as fallback
       }
       return null; // Only skip if no moves available
@@ -169,7 +169,7 @@ class OnlineBotService {
       } else {
         // This should never happen since we already filtered captureMoves above
         // If it does happen, it indicates a logic error - log and use first available move
-        console.warn(`🤖 OnlineBotService: Bot ${botColor} logic error - no captures found but no non-capture moves either. Using first available move.`);
+        // Logic fallback: using first available move
         chosenMove = allLegalMoves[0];
       }
     }
@@ -187,10 +187,7 @@ class OnlineBotService {
 
     // ✅ CRITICAL FIX: Don't make moves when promotion modal is open
     if (gameState.promotionState.isAwaiting) {
-      console.log(`🤖 OnlineBotService: Promotion modal is open, skipping bot ${botColor} move`);
-      console.log(`🤖 DEBUG: promotionState =`, gameState.promotionState);
-      console.log(`🤖 DEBUG: gameStatus =`, gameState.gameStatus);
-      console.log(`🤖 DEBUG: currentPlayerTurn =`, gameState.currentPlayerTurn);
+      // Promotion modal is open, skipping bot move
       return;
     }
 
@@ -204,7 +201,7 @@ class OnlineBotService {
     const adaptiveTimeout = Math.max(1500, Math.min(BOT_CONFIG.BRAIN_TIMEOUT, 2000 + (pieceCount * 100)));
     
     const moveTimeout = setTimeout(() => {
-      console.warn(`🤖 OnlineBotService: Bot ${botColor} brain overheated after ${adaptiveTimeout}ms, using fallback`);
+      // Bot brain overheated, using fallback
       cancellationToken.cancelled = true;
       this.botProcessingFlags.set(botColor, false);
       
@@ -293,25 +290,25 @@ class OnlineBotService {
         try {
           result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} not found`);
+          // Game not found
           return null;
         }
 
         // ✅ CRITICAL FIX: Check if gameState exists
         if (!gameData.gameState) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} has no gameState`);
+          // Game has no gameState
           return gameData;
         }
 
         // ✅ CRITICAL FIX: Validate bot turn and prevent multiple moves
         if (gameData.gameState.currentPlayerTurn !== botColor) {
-          console.log(`🤖 OnlineBotService: Bot ${botColor} turn validation failed - current turn is ${gameData.gameState.currentPlayerTurn}`);
+          // Bot turn validation failed
           return gameData;
         }
 
         // ✅ CRITICAL FIX: Double-check that this bot hasn't already moved
         if (gameData.lastMove && gameData.lastMove.playerColor === botColor) {
-          console.log(`🤖 OnlineBotService: Bot ${botColor} has already moved this turn`);
+          // Bot has already moved this turn
           return gameData;
         }
 
@@ -320,7 +317,7 @@ class OnlineBotService {
         
         // ✅ CRITICAL FIX: Check if boardState exists
         if (!boardState) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} has no boardState`);
+          // Game has no boardState
           return gameData;
         }
         
@@ -363,7 +360,7 @@ class OnlineBotService {
           }
           gameData.gameState.capturedPieces[capturedColor].push(capturedPiece);
           
-          console.log(`🤖 OnlineBotService: Bot ${botColor} captured ${capturedPiece} for ${points} points`);
+          // Bot captured piece
         }
         
         const piece = boardState[moveData.from.row][moveData.from.col];
@@ -388,16 +385,7 @@ class OnlineBotService {
           capturedPiece: capturedPiece, // ✅ CRITICAL FIX: Include captured piece for proper sound effects
         };
         
-        // ✅ DEBUG: Log when bot sets lastMove
-        console.log('🤖 OnlineBot: Setting lastMove for bot:', {
-          botColor,
-          from: moveData.from,
-          to: moveData.to,
-          pieceCode: moveData.pieceCode,
-          playerId: `bot_${botColor}`,
-          timestamp: moveTimestamp,
-          capturedPiece
-        });
+        // Setting lastMove for bot
         gameData.lastActivity = Date.now();
         
         // ✅ CRITICAL FIX: Update move history for bots
@@ -441,18 +429,18 @@ class OnlineBotService {
           }
         } catch (error: any) {
           retryCount++;
-          console.warn(`🤖 OnlineBotService: Bot ${botColor} move attempt ${retryCount} failed:`, error.message);
+          // Bot move attempt failed
           
           // Check for specific Firebase errors that should not be retried
           if (error.code === 'database/max-retries' || 
               error.message?.includes('max-retries') ||
               error.message?.includes('too many retries')) {
-            console.error(`🤖 OnlineBotService: Max retries exceeded for bot ${botColor} move. Giving up.`);
+            // Max retries exceeded for bot move
             throw error;
           }
           
           if (retryCount >= maxRetries) {
-            console.error(`🤖 OnlineBotService: Bot ${botColor} move failed after ${maxRetries} attempts`);
+            // Bot move failed after max attempts
             throw error;
           }
           
@@ -464,7 +452,7 @@ class OnlineBotService {
 
       if (result && result.committed) {
         const totalTime = Date.now() - startTime;
-        console.log(`🤖 Bot ${botColor} move completed in ${totalTime}ms`);
+        // Bot move completed
         
         // ✅ CRITICAL FIX: Only one move per bot per turn
         // The move is now applied atomically to the database, preventing multiple moves from showing
@@ -505,7 +493,7 @@ class OnlineBotService {
 
     // ✅ CRITICAL FIX: Validate game state before scheduling
     if (!gameState || !gameState.boardState || gameState.currentPlayerTurn !== botColor) {
-      console.log(`🤖 OnlineBotService: Invalid game state for bot ${botColor}, skipping move`);
+      // Invalid game state for bot, skipping move
       return;
     }
 
@@ -517,7 +505,7 @@ class OnlineBotService {
       // ✅ CRITICAL FIX: Re-validate game state before processing
       const currentGameState = require('../state/store').store.getState().game;
       if (currentGameState.currentPlayerTurn !== botColor) {
-        console.log(`🤖 OnlineBotService: Bot ${botColor} turn validation failed during execution`);
+        // Bot turn validation failed during execution
         this.botMoveTimeouts.delete(botColor);
         return;
       }
@@ -580,7 +568,7 @@ class OnlineBotService {
                   return gameData;
                 });
                 
-                console.log(`🤖 OnlineBotService: Bot ${botColor} made fallback move`);
+                // Bot made fallback move
                 return;
               }
             } catch (error) {
@@ -591,7 +579,7 @@ class OnlineBotService {
       }
       
       // If no moves found, skip turn
-      console.log(`🤖 OnlineBotService: Bot ${botColor} has no fallback moves, skipping turn`);
+      // Bot has no fallback moves, skipping turn
       await this.skipBotTurn(gameId, botColor);
       
     } catch (error) {
@@ -612,13 +600,13 @@ class OnlineBotService {
       try {
         const result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} not found during elimination`);
+          // Game not found during elimination
           return null;
         }
 
         // ✅ CRITICAL FIX: Check if gameState exists
         if (!gameData.gameState) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} has no gameState during elimination`);
+          // Game has no gameState during elimination
           return gameData;
         }
 
@@ -679,10 +667,10 @@ class OnlineBotService {
         }
       } catch (error: any) {
         retryCount++;
-        console.warn(`🤖 OnlineBotService: Elimination attempt ${retryCount} failed:`, error.message);
+        // Elimination attempt failed
         
         if (retryCount >= maxRetries) {
-          console.error(`🤖 OnlineBotService: Max retries exceeded for eliminating bot ${botColor}`);
+          // Max retries exceeded for eliminating bot
           return; // Give up after max retries
         }
         
@@ -705,13 +693,13 @@ class OnlineBotService {
       try {
         const result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} not found during skip turn`);
+          // Game not found during skip turn
           return null;
         }
 
         // ✅ CRITICAL FIX: Check if gameState exists
         if (!gameData.gameState) {
-          console.warn(`🤖 OnlineBotService: Game ${gameId} has no gameState during skip turn`);
+          // Game has no gameState during skip turn
           return gameData;
         }
 
@@ -757,10 +745,10 @@ class OnlineBotService {
         }
       } catch (error: any) {
         retryCount++;
-        console.warn(`🤖 OnlineBotService: Skip turn attempt ${retryCount} failed:`, error.message);
+        // Skip turn attempt failed
         
         if (retryCount >= maxRetries) {
-          console.error(`🤖 OnlineBotService: Max retries exceeded for skipping bot ${botColor} turn`);
+          // Max retries exceeded for skipping bot turn
           return; // Give up after max retries
         }
         

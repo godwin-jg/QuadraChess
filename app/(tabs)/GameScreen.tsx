@@ -147,31 +147,31 @@ export default function GameScreen() {
         ? "local"
         : "solo";
       
-      console.log(`GameScreen: Mode check - currentMode: ${currentMode}, currentConnectedMode: ${currentConnectedMode}`);
+      // Mode check
 
       // Only show warning if we're actually switching modes
       if (currentConnectedMode !== currentMode) {
-        console.log(`GameScreen: Mode switch needed - from ${currentConnectedMode} to ${currentMode}`);
+        // Mode switch needed
         await modeSwitchService.handleModeSwitch(
           currentMode as "online" | "p2p" | "local" | "solo" | "single",
           () => {
             // Confirm: Reset game and continue - bots are set automatically by game mode
-            console.log(`GameScreen: Mode switch confirmed - resetting game for ${currentMode}`);
+            // Mode switch confirmed - resetting game
             dispatch(resetGame());
           },
           () => {
             // Cancel: Navigate back to previous mode
-            console.log("Mode switch cancelled by user");
+            // Mode switch cancelled by user
           }
         );
       } else if (currentMode !== "online" && currentMode !== "p2p") {
         // Same mode but not online or P2P - don't reset, just ensure game mode is correct
         const currentState = store.getState().game;
         if (currentState.gameMode !== currentMode) {
-          console.log(`GameScreen: Updating game mode from ${currentState.gameMode} to ${currentMode}`);
+          // Updating game mode
           dispatch(setGameMode(currentMode as any));
         } else {
-          console.log(`GameScreen: Game mode already correct (${currentMode}), no reset needed`);
+          // Game mode already correct
         }
       }
 
@@ -180,20 +180,20 @@ export default function GameScreen() {
         // Online game connection
         try {
           setConnectionStatus("Connecting to game...");
-          console.log("GameScreen: Attempting to connect to online game:", gameId);
+          // Attempting to connect to online game
           
           // ✅ CRITICAL FIX: Ensure game mode is set to "online" BEFORE connecting to the service
           // This prevents the race condition where game updates are skipped because mode is still "single"
           const currentState = store.getState().game;
           if (currentState.gameMode !== "online") {
-            console.log("GameScreen: Setting game mode to 'online' before connecting to service");
+            // Setting game mode to online before connecting
             dispatch(setGameMode("online"));
             // Give Redux a moment to update the state
             await new Promise(resolve => setTimeout(resolve, 10));
           }
           
           await onlineGameService.connectToGame(gameId);
-          console.log("GameScreen: Successfully connected to online game");
+          // Successfully connected to online game
           setConnectionStatus("Connected");
 
           // Set up online game listeners
@@ -201,7 +201,7 @@ export default function GameScreen() {
             if (game) {
               // onlineGameService handles all state management including history
             } else {
-              console.log("Game not found or ended");
+              // Game not found or ended
               setConnectionStatus("Game not found");
             }
           });
@@ -211,8 +211,8 @@ export default function GameScreen() {
           });
 
           cleanupFunction = () => {
-            console.log("🔍 DEBUG GameScreen: Cleaning up online game connection - currentGameId:", gameId);
-            console.trace("🔍 DEBUG GameScreen: cleanupFunction call stack");
+              // Cleaning up online game connection
+            // Cleanup function call stack
             unsubscribeGame();
             unsubscribeMoves();
             
@@ -220,10 +220,10 @@ export default function GameScreen() {
             // Don't disconnect if we're just changing gameId within online mode
             const isStillOnlineMode = mode === "online";
             if (!isStillOnlineMode) {
-              console.log("🔍 DEBUG GameScreen: Mode changed from online, disconnecting");
+            // Mode changed from online, disconnecting
               onlineGameService.disconnect();
             } else {
-              console.log("🔍 DEBUG GameScreen: Still in online mode, skipping disconnect");
+              // Still in online mode, skipping disconnect
             }
           };
         } catch (error) {
@@ -234,37 +234,37 @@ export default function GameScreen() {
         // P2P game connection
         try {
           setConnectionStatus("Connecting to P2P game...");
-          console.log("GameScreen: Attempting to connect to P2P game");
+          // Attempting to connect to P2P game
           await p2pGameService.connectToGame("p2p-game");
-          console.log("GameScreen: Successfully connected to P2P game");
+          // Successfully connected to P2P game
           setConnectionStatus("Connected");
 
           // Set up P2P game listeners
           const unsubscribeGame = p2pGameService.onGameUpdate((game) => {
             if (game) {
-              console.log("P2P Game updated:", game);
+              // P2P Game updated
             } else {
-              console.log("P2P Game not found or ended");
+              // P2P Game not found or ended
               setConnectionStatus("Game not found");
             }
           });
 
           const unsubscribeMoves = p2pGameService.onMoveUpdate((move) => {
-            console.log("P2P Move received:", move);
+            // P2P Move received
           });
 
           cleanupFunction = () => {
-            console.log("GameScreen: Cleaning up P2P game connection");
+            // Cleaning up P2P game connection
             unsubscribeGame();
             unsubscribeMoves();
             
             // ✅ CRITICAL FIX: Only disconnect if we're actually changing modes or unmounting
             const isStillP2PMode = mode === "p2p";
             if (!isStillP2PMode) {
-              console.log("🔍 DEBUG GameScreen: Mode changed from P2P, disconnecting");
+              // Mode changed from P2P, disconnecting
               p2pGameService.disconnect();
             } else {
-              console.log("🔍 DEBUG GameScreen: Still in P2P mode, skipping disconnect");
+              // Still in P2P mode, skipping disconnect
             }
           };
         } catch (error) {
@@ -300,7 +300,7 @@ export default function GameScreen() {
           networkService.on("game-destroyed", handleGameDestroyed);
 
           cleanupFunction = () => {
-            console.log("GameScreen: Cleaning up local network listeners");
+            // Cleaning up local network listeners
             networkService.off("move-made", handleMoveMade);
             networkService.off("game-state-updated", handleGameStateUpdated);
             networkService.off("move-rejected", handleMoveRejected);
@@ -309,7 +309,7 @@ export default function GameScreen() {
         } else {
           // Solo mode - ensure all connections are cleaned up
           cleanupFunction = () => {
-            console.log("GameScreen: Cleaning up for solo mode");
+            // Cleaning up for solo mode
             if (onlineGameService.isConnected) {
               onlineGameService.disconnect();
             }
@@ -327,9 +327,8 @@ export default function GameScreen() {
     // connections and listeners are ALWAYS torn down before the
     // next mode's effect runs.
     return () => {
-      console.log("🔍 DEBUG GameScreen: Cleaning up connections for previous mode...");
-      console.log("🔍 DEBUG GameScreen: Current mode:", mode, "gameId:", gameId);
-      console.trace("🔍 DEBUG GameScreen: useEffect cleanup call stack");
+      // Cleaning up connections for previous mode
+      // useEffect cleanup call stack
       
       // ✅ CRITICAL FIX: Always run cleanup to ensure proper connection management
       // The cleanup function is designed to be safe to call multiple times
@@ -362,9 +361,9 @@ export default function GameScreen() {
   // Clear justEliminated flag after notification duration
   useEffect(() => {
     if (justEliminated && (gameStatus === "checkmate" || gameStatus === "stalemate") && !winner) {
-      console.log("🎮 GameScreen: Setting timer to clear justEliminated flag");
+      // Setting timer to clear justEliminated flag
       const timer = setTimeout(() => {
-        console.log("🎮 GameScreen: Clearing justEliminated flag");
+        // Clearing justEliminated flag
         dispatch(clearJustEliminated());
       }, 3000); // Same duration as notification
 
@@ -408,13 +407,13 @@ export default function GameScreen() {
     // ✅ CRITICAL FIX: Reset lastProcessedTurn when currentPlayerTurn changes
     // This ensures bots can make moves after eliminations and turn changes
     if (lastProcessedTurn.current !== currentPlayerTurn) {
-      console.log(`🤖 GameScreen Bot Controller: Turn changed from ${lastProcessedTurn.current} to ${currentPlayerTurn}, resetting lastProcessedTurn`);
+      // Turn changed, resetting lastProcessedTurn
       lastProcessedTurn.current = null;
     }
     
     // ✅ CRITICAL FIX: Prevent multiple rapid bot triggers for the same turn
     if (lastProcessedTurn.current === currentPlayerTurn) {
-      console.log(`🤖 GameScreen Bot Controller: Already processed turn for ${currentPlayerTurn}, skipping`);
+      // Already processed turn, skipping
       return;
     }
     
@@ -424,23 +423,7 @@ export default function GameScreen() {
       ? "solo"
       : (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
     
-    console.log(`🤖 GameScreen Bot Controller:`, {
-      currentPlayerTurn,
-      lastProcessedTurn: lastProcessedTurn.current,
-      isBot: botPlayers.includes(currentPlayerTurn),
-      gameStatus,
-      gameMode,
-      effectiveGameMode,
-      isGameStateReady,
-      eliminatedPlayers: eliminatedPlayers,
-      isEliminated: eliminatedPlayers.includes(currentPlayerTurn),
-      promotionState: promotionState.isAwaiting,
-      shouldTriggerBot: botPlayers.includes(currentPlayerTurn) && 
-        (gameStatus === 'active' || gameStatus === 'promotion') && 
-        isGameStateReady &&
-        !eliminatedPlayers.includes(currentPlayerTurn) && 
-        !promotionState.isAwaiting
-    });
+    // Bot Controller status
     
     if (botPlayers.includes(currentPlayerTurn) && 
         (gameStatus === 'active' || gameStatus === 'promotion') && // ✅ CRITICAL FIX: Allow bots in promotion mode too
@@ -461,7 +444,7 @@ export default function GameScreen() {
         
         // ✅ CRITICAL FIX: Additional validation to prevent multiple bot triggers
         if (currentGameState.currentPlayerTurn !== currentPlayerTurn) {
-          console.log(`🤖 GameScreen: Bot trigger cancelled - turn mismatch: expected ${currentPlayerTurn}, got ${currentGameState.currentPlayerTurn}`);
+          // Bot trigger cancelled - turn mismatch
           return;
         }
         
@@ -480,7 +463,7 @@ export default function GameScreen() {
   // Cleanup bot moves when game ends or changes
   useEffect(() => {
     if (gameMode === 'online' && (gameStatus === 'finished' || gameStatus === 'checkmate')) {
-      console.log(`🤖 GameScreen: Game ended, cancelling all bot moves`);
+      // Game ended, cancelling all bot moves
       onlineBotService.cancelAllBotMoves();
     }
   }, [gameStatus, gameMode]);
@@ -493,7 +476,7 @@ export default function GameScreen() {
       const promotionDelay = 300 + Math.random() * 300; // 0.3 - 0.6 seconds
 
       const timer = setTimeout(() => {
-        console.log(`🤖 GameScreen: Handling bot promotion for ${promotionState.color} (mode: ${gameMode})`);
+        // Handling bot promotion
         botService.handleBotPromotion(promotionState.color!);
       }, promotionDelay);
 

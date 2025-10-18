@@ -254,10 +254,7 @@ class RealtimeDatabaseService {
       lastActivity: Date.now(),
     };
 
-    console.log("RealtimeDatabaseService: Creating game with data:", JSON.stringify({
-      ...gameData,
-      gameState: "..." // Don't log the full gameState to avoid clutter
-    }, null, 2));
+    // Creating game with data
 
     // Push the new game to the database
     const gameRef = await database().ref("games").push(gameData);
@@ -784,7 +781,7 @@ class RealtimeDatabaseService {
           return (rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2);
         })();
         
-        console.log(`🔍 DEBUG Server makeMove: Checking castling for piece=${piece}, from=(${moveData.from.row},${moveData.from.col}), to=(${moveData.to.row},${moveData.to.col}), isCastling=${isCastling}`);
+        // Checking castling
         
         if (isCastling) {
           // Handle castling - move both King and Rook
@@ -792,7 +789,7 @@ class RealtimeDatabaseService {
           const kingTargetRow = moveData.to.row;
           const kingTargetCol = moveData.to.col;
           
-          console.log(`🔍 DEBUG Server makeMove: CASTLING DETECTED for ${playerColor}K!`);
+          // Castling detected
           
           // Determine rook positions based on castling direction
           let rookStartRow: number = 0, rookStartCol: number = 0, rookTargetRow: number = 0, rookTargetCol: number = 0;
@@ -852,7 +849,7 @@ class RealtimeDatabaseService {
           boardState[rookStartRow][rookStartCol] = "";
           boardState[rookTargetRow][rookTargetCol] = rookPiece;
           
-          console.log(`🔍 DEBUG Server makeMove: Moved rook from (${rookStartRow},${rookStartCol}) to (${rookTargetRow},${rookTargetCol})`);
+          // Moved rook
           
           // Update hasMoved flags
           if (!gameData.gameState.hasMoved) {
@@ -876,7 +873,7 @@ class RealtimeDatabaseService {
             gameData.gameState.hasMoved[kingTargetRow === 9 ? "gR2" : "gR1"] = true;
           }
           
-          console.log(`🔍 DEBUG Server makeMove: Updated hasMoved flags for ${playerColor}K and rook`);
+          // Updated hasMoved flags
         } else {
           // Normal move - just move the piece
           boardState[moveData.from.row][moveData.from.col] = "";
@@ -919,14 +916,14 @@ class RealtimeDatabaseService {
         const isPawn = piece?.endsWith("P");
         let isPromotion = false;
         
-        console.log(`🔍 DEBUG Server makeMove: Checking promotion for piece=${piece}, to=(${moveData.to.row},${moveData.to.col})`);
+        // Checking promotion
         
         if (isPawn) {
           // Check if pawn reached promotion rank
           const { row, col } = moveData.to;
           const playerColor = piece[0];
           
-          console.log(`🔍 DEBUG Server makeMove: Pawn ${playerColor}P at (${row},${col})`);
+          // Pawn at promotion rank
           
           // Promotion ranks: 
           // 1. NEW UNIVERSAL RULE: Opposing player's first rank
@@ -956,8 +953,7 @@ class RealtimeDatabaseService {
           
           if (isUniversalPromotion || isTraditionalPromotion) {
             isPromotion = true;
-            console.log(`🔍 DEBUG Server makeMove: PROMOTION DETECTED for ${playerColor}P at (${row},${col})!`);
-            console.log(`🔍 DEBUG Server makeMove: Universal=${isUniversalPromotion}, Traditional=${isTraditionalPromotion}`);
+            // Promotion detected
           }
         }
 
@@ -969,8 +965,7 @@ class RealtimeDatabaseService {
             color: moveData.playerColor,
           };
           gameData.gameState.gameStatus = "promotion";
-          console.log(`🔍 DEBUG Server makeMove: Set promotion state:`, gameData.gameState.promotionState);
-          console.log(`🔍 DEBUG Server makeMove: Set game status to:`, gameData.gameState.gameStatus);
+          // Set promotion state
           // Don't advance turn yet - wait for promotion completion
         } else {
           // ✅ CRITICAL FIX: Check for elimination after move
@@ -1051,16 +1046,7 @@ class RealtimeDatabaseService {
           timestamp: Date.now(),
         };
         
-        // ✅ DEBUG: Log when realtime database sets lastMove
-        console.log('🔍 RealtimeDB: Setting lastMove:', {
-          from: moveData.from,
-          to: moveData.to,
-          pieceCode: moveData.pieceCode,
-          playerColor: moveData.playerColor,
-          playerId: playerId,
-          isBotMove,
-          timestamp: Date.now()
-        });
+        // Setting lastMove
         gameData.lastActivity = Date.now();
         
         // ✅ CRITICAL FIX: Update move history

@@ -203,8 +203,8 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
     }
 
     // ✅ CRITICAL FIX: Prevent duplicate animations by checking if we've already animated this move
-    // Use a combination of move details and timestamp to create a unique key
-    const moveKey = `${lastMove.from.row}-${lastMove.from.col}-${lastMove.to.row}-${lastMove.to.col}-${lastMove.pieceCode}-${lastMove.timestamp}`;
+    // Use move details WITHOUT timestamp to prevent duplicates from timestamp changes
+    const moveKey = `${lastMove.from.row}-${lastMove.from.col}-${lastMove.to.row}-${lastMove.to.col}-${lastMove.pieceCode}-${lastMove.playerColor}`;
     
     // Check if we've already animated this exact move
     if (lastAnimatedMoveRef.current === moveKey) {
@@ -272,6 +272,18 @@ export default function Board({ onCapture, playerData, boardRotation = 0 }: Boar
 
     // ✅ SINGLE SOURCE OF TRUTH: Board component handles ALL move sounds
     // This ensures consistent sound behavior across all game modes and player types
+    
+    // ✅ DEBUG: Log move details to track duplicate sounds
+    console.log('🔊 Board: Processing move for sound:', {
+      from: lastMove.from,
+      to: lastMove.to,
+      pieceCode: lastMove.pieceCode,
+      playerColor: lastMove.playerColor,
+      playerId: lastMove.playerId,
+      timestamp: lastMove.timestamp,
+      capturedPiece: lastMove.capturedPiece
+    });
+    
     try {
       const soundService = require('../../../services/soundService').default;
       const isCastling = require('../../../state/gameHelpers').isCastlingMove(

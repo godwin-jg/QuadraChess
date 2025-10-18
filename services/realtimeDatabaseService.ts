@@ -1050,6 +1050,17 @@ class RealtimeDatabaseService {
           playerId: playerId,
           timestamp: Date.now(),
         };
+        
+        // ✅ DEBUG: Log when realtime database sets lastMove
+        console.log('🔍 RealtimeDB: Setting lastMove:', {
+          from: moveData.from,
+          to: moveData.to,
+          pieceCode: moveData.pieceCode,
+          playerColor: moveData.playerColor,
+          playerId: playerId,
+          isBotMove,
+          timestamp: Date.now()
+        });
         gameData.lastActivity = Date.now();
         
         // ✅ CRITICAL FIX: Update move history

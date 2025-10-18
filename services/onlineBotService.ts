@@ -31,10 +31,12 @@ class OnlineBotService {
   private botMoveTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private botProcessingFlags: Map<string, boolean> = new Map(); // Per-bot processing flags
 
-  // Get all legal moves for a bot with cancellation support
+  // Get all legal moves for a bot with smart timeout and early termination
   private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves: number = 20, cancellationToken?: { cancelled: boolean }): MoveOption[] {
     const allMoves: MoveOption[] = [];
     const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
+    const startTime = Date.now();
+    const maxCalculationTime = 2000; // 2 seconds max for move calculation
 
     // Collect all bot pieces first to avoid positional bias
     const botPieces: { pieceCode: string; position: { row: number; col: number } }[] = [];
@@ -42,8 +44,8 @@ class OnlineBotService {
     for (let r = 0; r < boardState.length; r++) {
       for (let c = 0; c < boardState[r].length; c++) {
         // Check for cancellation before each piece
-        if (cancellationToken?.cancelled) {
-          return [];
+        if (cancellationToken?.cancelled || (Date.now() - startTime) > maxCalculationTime) {
+          return allMoves; // Return what we have so far
         }
         
         const pieceCode = boardState[r][c];
@@ -53,55 +55,73 @@ class OnlineBotService {
       }
     }
     
-    // Prioritize pieces that are more likely to have good moves (captures first)
+    // ✅ SMART OPTIMIZATION: Prioritize pieces that are more likely to have good moves
     const prioritizedPieces = botPieces.sort((a, b) => {
-      // Prioritize by piece value and likelihood of captures
       const pieceValues = { 'Q': 9, 'R': 5, 'B': 5, 'N': 3, 'P': 1, 'K': 0 };
       const aValue = pieceValues[a.pieceCode[1] as keyof typeof pieceValues] || 0;
       const bValue = pieceValues[b.pieceCode[1] as keyof typeof pieceValues] || 0;
       return bValue - aValue; // Higher value pieces first
     });
     
-    // Process pieces in prioritized order with early termination and cancellation checks
+    // ✅ SMART OPTIMIZATION: Process pieces with time-based early termination
     for (const { pieceCode, position } of prioritizedPieces) {
-      // Check for cancellation before processing each piece
-      if (cancellationToken?.cancelled) {
-        return [];
+      // Check for cancellation and time limit before processing each piece
+      if (cancellationToken?.cancelled || (Date.now() - startTime) > maxCalculationTime) {
+        break; // Stop processing but return what we have
       }
       
-      const movesForPiece = getValidMoves(
-        pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
-      );
-      
-      // Use all legal moves for this piece (no arbitrary truncation)
-      movesForPiece.forEach(move => {
-        allMoves.push({ 
-          from: position, 
-          to: { 
-            row: move.row, 
-            col: move.col, 
-            isCapture: move.isCapture || false 
-          }
-          // Note: capturedPieceCode removed to avoid stale data in multiplayer
+      try {
+        const movesForPiece = getValidMoves(
+          pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
+        );
+        
+        // Add moves for this piece
+        movesForPiece.forEach(move => {
+          allMoves.push({ 
+            from: position, 
+            to: { 
+              row: move.row, 
+              col: move.col, 
+              isCapture: move.isCapture || false 
+            }
+          });
         });
-      });
-      
-      // Early termination: Stop if we have enough moves for decision making
-      if (allMoves.length >= maxMoves) {
-        break;
+        
+        // ✅ SMART OPTIMIZATION: Early termination if we have enough good moves
+        if (allMoves.length >= maxMoves) {
+          break;
+        }
+      } catch (error) {
+        // If getValidMoves fails for a piece, skip it and continue
+        console.warn(`🤖 OnlineBotService: Failed to get moves for ${pieceCode} at ${position.row},${position.col}:`, error);
+        continue;
       }
     }
     
     return allMoves.slice(0, maxMoves); // Ensure we don't exceed the limit
   }
 
-  // Choose the best move for a bot
+  // Choose the best move for a bot with smart fallback strategies
   private chooseBestMove(botColor: string, gameState: GameState, cancellationToken?: { cancelled: boolean }): MoveOption | null {
-    const allLegalMoves = this.getAllLegalMoves(botColor, gameState, 20, cancellationToken);
+    const startTime = Date.now();
+    const maxMoveTime = 2500; // 2.5 seconds max for move selection
+    
+    // ✅ SMART OPTIMIZATION: Start with fewer moves, increase if time allows
+    let maxMoves = 10; // Start conservative
+    if (Date.now() - startTime < 1000) {
+      maxMoves = 20; // If we have time, get more moves
+    }
+    
+    const allLegalMoves = this.getAllLegalMoves(botColor, gameState, maxMoves, cancellationToken);
 
     // Check if calculation was cancelled due to timeout (brain overheated)
     if (cancellationToken?.cancelled) {
-      return null; // Return null to indicate skip turn (not elimination)
+      // ✅ SMART FALLBACK: If we have any moves, use the first one instead of skipping
+      if (allLegalMoves.length > 0) {
+        console.log(`🤖 OnlineBotService: Bot ${botColor} using fallback move due to timeout`);
+        return allLegalMoves[0]; // Use first available move as fallback
+      }
+      return null; // Only skip if no moves available
     }
 
     if (allLegalMoves.length === 0) {
@@ -176,16 +196,21 @@ class OnlineBotService {
 
     this.botProcessingFlags.set(botColor, true);
 
-    // ⚡ PERFORMANCE FIX: Set a timeout to prevent bot from taking too long
+    // ⚡ SMART TIMEOUT: Adaptive timeout based on game complexity
     const cancellationToken = { cancelled: false };
+    
+    // Calculate adaptive timeout based on game state complexity
+    const pieceCount = gameState.boardState.flat().filter(cell => cell && cell.startsWith(botColor)).length;
+    const adaptiveTimeout = Math.max(1500, Math.min(BOT_CONFIG.BRAIN_TIMEOUT, 2000 + (pieceCount * 100)));
+    
     const moveTimeout = setTimeout(() => {
-      console.warn(`🤖 OnlineBotService: Bot ${botColor} brain overheated after 5 seconds, skipping move`);
+      console.warn(`🤖 OnlineBotService: Bot ${botColor} brain overheated after ${adaptiveTimeout}ms, using fallback`);
       cancellationToken.cancelled = true;
       this.botProcessingFlags.set(botColor, false);
       
-      // Skip bot's turn and advance to next player
-      this.skipBotTurn(gameId, botColor);
-    }, 5000); // 5 second timeout
+      // ✅ SMART FALLBACK: Try to make any available move instead of skipping
+      this.makeFallbackMove(gameId, botColor, gameState);
+    }, adaptiveTimeout);
 
     try {
       // ✅ CRITICAL FIX: Calculate the move WITHOUT applying it to the database first
@@ -200,9 +225,10 @@ class OnlineBotService {
       }
       
       if (!chosenMove) {
-        // No legal moves found (stalemate) - just skip turn
+        // No legal moves found (stalemate) - skip turn and advance to next player
         clearTimeout(moveTimeout);
         this.botProcessingFlags.set(botColor, false);
+        await this.skipBotTurn(gameId, botColor);
         return;
       }
 
@@ -361,6 +387,17 @@ class OnlineBotService {
           timestamp: moveTimestamp,
           capturedPiece: capturedPiece, // ✅ CRITICAL FIX: Include captured piece for proper sound effects
         };
+        
+        // ✅ DEBUG: Log when bot sets lastMove
+        console.log('🤖 OnlineBot: Setting lastMove for bot:', {
+          botColor,
+          from: moveData.from,
+          to: moveData.to,
+          pieceCode: moveData.pieceCode,
+          playerId: `bot_${botColor}`,
+          timestamp: moveTimestamp,
+          capturedPiece
+        });
         gameData.lastActivity = Date.now();
         
         // ✅ CRITICAL FIX: Update move history for bots
@@ -492,6 +529,77 @@ class OnlineBotService {
     this.botMoveTimeouts.set(botColor, timeout);
   }
 
+  // Smart fallback move when bot times out
+  private async makeFallbackMove(gameId: string, botColor: string, gameState: GameState): Promise<void> {
+    try {
+      // Get a simple random move as fallback
+      const allMoves: MoveOption[] = [];
+      const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
+      
+      // Find any piece that can move
+      for (let r = 0; r < boardState.length && allMoves.length === 0; r++) {
+        for (let c = 0; c < boardState[r].length && allMoves.length === 0; c++) {
+          const pieceCode = boardState[r][c];
+          if (pieceCode && pieceCode.startsWith(botColor)) {
+            try {
+              const moves = getValidMoves(pieceCode, { row: r, col: c }, boardState, eliminatedPlayers, hasMoved, enPassantTargets);
+              if (moves.length > 0) {
+                // Use the first available move
+                const move = moves[0];
+                const moveData = {
+                  from: { row: r, col: c },
+                  to: { row: move.row, col: move.col },
+                  pieceCode: pieceCode,
+                  playerColor: botColor,
+                };
+                
+                // Apply the fallback move
+                const gameRef = database().ref(`games/${gameId}`);
+                await gameRef.transaction((gameData) => {
+                  if (!gameData?.gameState) return gameData;
+                  
+                  // Apply the move
+                  gameData.gameState.boardState[move.row][move.col] = pieceCode;
+                  gameData.gameState.boardState[r][c] = null;
+                  
+                  // Update turn
+                  gameData.gameState.currentPlayerTurn = this.getNextPlayer(botColor, gameData.gameState.eliminatedPlayers);
+                  gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
+                  
+                  // Set last move
+                  gameData.lastMove = {
+                    from: { row: r, col: c },
+                    to: { row: move.row, col: move.col },
+                    pieceCode: pieceCode,
+                    playerColor: botColor,
+                    playerId: `bot_${botColor}_fallback`,
+                    timestamp: Date.now(),
+                    capturedPiece: move.isCapture ? gameData.gameState.boardState[move.row][move.col] : null,
+                  };
+                  
+                  return gameData;
+                });
+                
+                console.log(`🤖 OnlineBotService: Bot ${botColor} made fallback move`);
+                return;
+              }
+            } catch (error) {
+              continue; // Try next piece
+            }
+          }
+        }
+      }
+      
+      // If no moves found, skip turn
+      console.log(`🤖 OnlineBotService: Bot ${botColor} has no fallback moves, skipping turn`);
+      await this.skipBotTurn(gameId, botColor);
+      
+    } catch (error) {
+      console.error(`🤖 OnlineBotService: Fallback move failed for bot ${botColor}:`, error);
+      await this.skipBotTurn(gameId, botColor);
+    }
+  }
+
   // Auto-eliminate a checkmated bot
   private async eliminateBot(gameId: string, botColor: string): Promise<void> {
     const gameRef = database().ref(`games/${gameId}`);
@@ -506,6 +614,12 @@ class OnlineBotService {
         if (gameData === null) {
           console.warn(`🤖 OnlineBotService: Game ${gameId} not found during elimination`);
           return null;
+        }
+
+        // ✅ CRITICAL FIX: Check if gameState exists
+        if (!gameData.gameState) {
+          console.warn(`🤖 OnlineBotService: Game ${gameId} has no gameState during elimination`);
+          return gameData;
         }
 
         // Initialize eliminatedPlayers if it doesn't exist
@@ -593,6 +707,12 @@ class OnlineBotService {
         if (gameData === null) {
           console.warn(`🤖 OnlineBotService: Game ${gameId} not found during skip turn`);
           return null;
+        }
+
+        // ✅ CRITICAL FIX: Check if gameState exists
+        if (!gameData.gameState) {
+          console.warn(`🤖 OnlineBotService: Game ${gameId} has no gameState during skip turn`);
+          return gameData;
         }
 
         // Initialize eliminatedPlayers if it doesn't exist

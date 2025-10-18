@@ -2,6 +2,8 @@ import { Alert } from "react-native";
 import onlineGameService from "./onlineGameService";
 import p2pGameService from "./p2pGameService";
 import networkService from "../app/services/networkService";
+import { resetGame } from "../state/gameSlice";
+import { store } from "../state/store";
 
 export interface ModeSwitchOptions {
   currentMode: "online" | "local" | "solo" | "single" | "p2p";
@@ -147,9 +149,13 @@ class ModeSwitchService {
         console.log("ModeSwitchService: Local network game disconnected successfully");
       }
 
+      // ✅ CRITICAL FIX: Reset game state when switching modes
+      console.log("ModeSwitchService: Resetting game state...");
+      store.dispatch(resetGame());
+      
       // ✅ CRITICAL FIX: Add a small delay to ensure all disconnections are complete
       await new Promise(resolve => setTimeout(resolve, 200));
-      console.log("ModeSwitchService: All disconnections completed");
+      console.log("ModeSwitchService: All disconnections and game reset completed");
     } catch (error) {
       console.error("Error disconnecting from current game:", error);
       // Continue with mode switch even if disconnection fails

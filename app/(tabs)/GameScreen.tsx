@@ -420,10 +420,9 @@ export default function GameScreen() {
     
     // Get the effective mode for bot decisions
     const currentSettings = settings;
-    const stableMode = initialModeRef.current || mode || "solo";
     const effectiveGameMode = currentSettings.developer.soloMode
       ? "solo"
-      : (stableMode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
+      : (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
     
     console.log(`🤖 GameScreen Bot Controller:`, {
       currentPlayerTurn,

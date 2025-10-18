@@ -269,6 +269,7 @@ export default function HomeScreen() {
   const handleStartSinglePlayer = () => {
     // Set default bot players and start single player game
     hapticsService.buttonPress();
+    dispatch(resetGame()); // ✅ CRITICAL FIX: Reset game state first
     dispatch(setGameMode("single")); // Set game mode to single player
     dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Yellow, Green)
     router.push("/(tabs)/GameScreen");

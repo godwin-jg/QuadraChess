@@ -2,6 +2,8 @@ import { Alert } from "react-native";
 import onlineGameService from "./onlineGameService";
 import p2pGameService from "./p2pGameService";
 import networkService from "../app/services/networkService";
+import { onlineBotService } from "./onlineBotService";
+import { botService } from "./botService";
 import { resetGame } from "../state/gameSlice";
 import { store } from "../state/store";
 
@@ -51,6 +53,7 @@ class ModeSwitchService {
     onCancel: () => void
   ): Promise<void> {
     const currentMode = this.getCurrentMode();
+    
 
     // If already in the target mode, no need to switch
     if (currentMode === targetMode) {
@@ -79,10 +82,13 @@ class ModeSwitchService {
             text: "Switch Anyway",
             style: "destructive",
             onPress: async () => {
+              console.log("🔄 MODE SWITCH: User confirmed mode switch, starting disconnection");
               // Disconnect FIRST, then confirm
               await this.disconnectFromCurrentGame();
+              console.log("🔄 MODE SWITCH: Disconnection completed, confirming mode switch");
               // Add a small delay to ensure disconnection is complete
               setTimeout(() => {
+                console.log("🔄 MODE SWITCH: Mode switch confirmed and completed");
                 onConfirm();
               }, 100);
             },
@@ -125,17 +131,13 @@ class ModeSwitchService {
     try {
       // ✅ CRITICAL FIX: Always disconnect from online game if it exists
       if (onlineGameService.currentGameId || onlineGameService.isConnected) {
-        console.log("ModeSwitchService: Disconnecting from online game...");
         await onlineGameService.disconnect();
-        console.log("ModeSwitchService: Online game disconnected successfully");
       }
 
       // ✅ CRITICAL FIX: Always disconnect from P2P game if it exists
       if (p2pGameService.isConnected && p2pGameService.currentGameId) {
         try {
-          console.log("ModeSwitchService: Disconnecting from P2P game...");
           await p2pGameService.disconnect();
-          console.log("ModeSwitchService: P2P game disconnected successfully");
         } catch (p2pError) {
           console.warn("P2P disconnect failed during mode switch:", p2pError);
         }
@@ -143,19 +145,20 @@ class ModeSwitchService {
 
       // Disconnect from local network game if connected
       if (networkService.connected && networkService.roomId) {
-        console.log("ModeSwitchService: Disconnecting from local network game...");
         networkService.leaveGame();
         networkService.disconnect();
-        console.log("ModeSwitchService: Local network game disconnected successfully");
       }
 
+      // ✅ CRITICAL FIX: Cancel all bot moves before disconnecting
+      onlineBotService.cancelAllBotMoves();
+      botService.cancelAllBotMoves();
+      
       // ✅ CRITICAL FIX: Reset game state when switching modes
-      console.log("ModeSwitchService: Resetting game state...");
       store.dispatch(resetGame());
       
-      // ✅ CRITICAL FIX: Add a small delay to ensure all disconnections are complete
-      await new Promise(resolve => setTimeout(resolve, 200));
-      console.log("ModeSwitchService: All disconnections and game reset completed");
+      // ✅ CRITICAL FIX: Add a longer delay to ensure all disconnections and state cleanup are complete
+      // This prevents race conditions when switching between modes
+      await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
       console.error("Error disconnecting from current game:", error);
       // Continue with mode switch even if disconnection fails

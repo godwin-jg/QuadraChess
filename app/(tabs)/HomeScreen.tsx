@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "expo-router";
-import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Alert } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,6 +21,7 @@ import { scheduleOnRN } from "react-native-worklets";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
 import { resetGame, setBotPlayers, setGameMode } from '../../state/gameSlice';
+import { useSettings } from "../../hooks/useSettings";
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
@@ -159,6 +160,7 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
 export default function HomeScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
+  const { settings } = useSettings();
   const [isNavigating, setIsNavigating] = useState(false);
   const { height, width } = useWindowDimensions(); // Get screen dimensions
 
@@ -266,6 +268,7 @@ export default function HomeScreen() {
     }, [])
   );
 
+
   const handleStartSinglePlayer = () => {
     // Set default bot players and start single player game
     hapticsService.buttonPress();
@@ -281,6 +284,29 @@ export default function HomeScreen() {
     path: string
   ) => {
     if (isNavigating) return;
+
+    // ✅ Check if solo mode is enabled and prevent mode switching
+    // Get fresh settings from the service to ensure we have the latest state
+    const settingsService = require('../../services/settingsService').settingsService;
+    const currentSettings = settingsService.getSettings();
+    
+    if (currentSettings.developer.soloMode) {
+      Alert.alert(
+        "Solo Mode Active",
+        "Solo mode is currently enabled. Please disable it in Settings to switch to other game modes.",
+        [
+          {
+            text: "Go to Settings",
+            onPress: () => router.push("/settings")
+          },
+          {
+            text: "Cancel",
+            style: "cancel"
+          }
+        ]
+      );
+      return;
+    }
 
     setIsNavigating(true);
 

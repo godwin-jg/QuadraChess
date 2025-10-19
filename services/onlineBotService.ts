@@ -4,7 +4,7 @@
 import database from '@react-native-firebase/database';
 import { getValidMoves } from '../functions/src/logic/gameLogic';
 import { GameState, Position } from '../state/types';
-import { BOT_CONFIG } from '../config/gameConfig';
+import { BOT_CONFIG, getBotConfig } from '../config/gameConfig';
 
 interface MoveOption {
   from: Position;
@@ -31,7 +31,11 @@ class OnlineBotService {
   private botProcessingFlags: Map<string, boolean> = new Map(); // Per-bot processing flags
 
   // Get all legal moves for a bot with smart timeout and early termination
-  private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves: number = 5, cancellationToken?: { cancelled: boolean }): MoveOption[] {
+  private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves?: number, cancellationToken?: { cancelled: boolean }): MoveOption[] {
+    // Get the appropriate bot configuration based on game mode
+    const botConfig = getBotConfig(gameState.gameMode);
+    const maxMovesToCalculate = maxMoves || botConfig.MAX_MOVES_TO_CALCULATE;
+    
     const allMoves: MoveOption[] = [];
     const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
     const startTime = Date.now();
@@ -87,7 +91,7 @@ class OnlineBotService {
         });
         
         // ✅ SMART OPTIMIZATION: Early termination if we have enough good moves
-        if (allMoves.length >= maxMoves) {
+        if (allMoves.length >= maxMovesToCalculate) {
           break;
         }
       } catch (error) {
@@ -97,7 +101,7 @@ class OnlineBotService {
       }
     }
     
-    return allMoves.slice(0, maxMoves); // Ensure we don't exceed the limit
+    return allMoves.slice(0, maxMovesToCalculate); // Ensure we don't exceed the limit
   }
 
   // Choose the best move for a bot with smart fallback strategies
@@ -105,10 +109,13 @@ class OnlineBotService {
     const startTime = Date.now();
     const maxMoveTime = 1500; // Reduced from 2500 to 1500ms for faster move selection
     
+    // Get the appropriate bot configuration based on game mode
+    const botConfig = getBotConfig(gameState.gameMode);
+    
     // ✅ SMART OPTIMIZATION: Start with fewer moves, increase if time allows
-    let maxMoves = 5; // Reduced from 10 to 5 - start very conservative
+    let maxMoves = Math.min(5, botConfig.MAX_MOVES_TO_CALCULATE); // Start conservative, respect config limit
     if (Date.now() - startTime < 500) { // Reduced from 1000 to 500ms
-      maxMoves = 8; // Reduced from 20 to 8 - much smaller increase
+      maxMoves = Math.min(8, botConfig.MAX_MOVES_TO_CALCULATE); // Much smaller increase, respect config limit
     }
     
     const allLegalMoves = this.getAllLegalMoves(botColor, gameState, maxMoves, cancellationToken);
@@ -174,6 +181,9 @@ class OnlineBotService {
   private async processBotMove(gameId: string, botColor: string, gameState: GameState): Promise<void> {
     const startTime = Date.now();
     
+    // Get the appropriate bot configuration based on game mode
+    const botConfig = getBotConfig(gameState.gameMode);
+    
     if (this.botProcessingFlags.get(botColor)) {
       return;
     }
@@ -191,7 +201,7 @@ class OnlineBotService {
     
     // Calculate adaptive timeout based on game state complexity
     const pieceCount = gameState.boardState.flat().filter(cell => cell && cell.startsWith(botColor)).length;
-    const adaptiveTimeout = Math.max(2000, Math.min(BOT_CONFIG.BRAIN_TIMEOUT, 2500 + (pieceCount * 50))); // Reduced base timeout and piece multiplier
+    const adaptiveTimeout = Math.max(2000, Math.min(botConfig.BRAIN_TIMEOUT, 2500 + (pieceCount * 50))); // Reduced base timeout and piece multiplier
     
     const moveTimeout = setTimeout(() => {
       // Bot is thinking hard, show notification and continue
@@ -484,6 +494,7 @@ class OnlineBotService {
 
   // Schedule bot move with delay
   public scheduleBotMove(gameId: string, botColor: string, gameState: GameState): void {
+
     // ✅ CRITICAL FIX: Check if bot is already processing a move
     if (this.botProcessingFlags.get(botColor)) {
       return;
@@ -491,15 +502,14 @@ class OnlineBotService {
 
     // ✅ CRITICAL FIX: Validate game state before scheduling
     if (!gameState || !gameState.boardState || gameState.currentPlayerTurn !== botColor) {
-      // Invalid game state for bot, skipping move
       return;
     }
 
     // ✅ IMMEDIATE EXECUTION: No delay for online bots since Firebase transaction provides natural delay
     // Re-validate game state before processing
     const currentGameState = require('../state/store').store.getState().game;
+
     if (currentGameState.currentPlayerTurn !== botColor) {
-      // Bot turn validation failed during execution
       return;
     }
     

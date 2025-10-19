@@ -70,14 +70,7 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
     };
   }, [player]);
 
-  // Debug logging
-  React.useEffect(() => {
-      useVideo,
-      videoSource,
-      videoError,
-      player: player ? 'Player created' : 'No player'
-    });
-  }, [useVideo, videoSource, videoError, player]);
+  // Video player setup
 
   React.useEffect(() => {
     if (visible) {

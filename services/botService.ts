@@ -5,7 +5,7 @@ import { makeMove, completePromotion, resignGame } from '../state/gameSlice';
 import { getValidMoves } from '../functions/src/logic/gameLogic';
 import { GameState, Position } from '../state/types';
 import p2pGameService from './p2pGameService';
-import { PIECE_VALUES, TURN_ORDER, BOT_CONFIG } from '../config/gameConfig';
+import { PIECE_VALUES, TURN_ORDER, BOT_CONFIG, getBotConfig } from '../config/gameConfig';
 
 // Global lock to prevent multiple bots from moving simultaneously
 let botMoveInProgress = false;
@@ -22,7 +22,11 @@ interface MoveOption {
   // Note: capturedPieceCode removed to avoid stale data in multiplayer
 }
 
-const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: number = BOT_CONFIG.MAX_MOVES_TO_CALCULATE, cancellationToken?: { cancelled: boolean }): MoveOption[] => {
+const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves?: number, cancellationToken?: { cancelled: boolean }): MoveOption[] => {
+  // Get the appropriate bot configuration based on game mode
+  const botConfig = getBotConfig(gameState.gameMode);
+  const maxMovesToCalculate = maxMoves || botConfig.MAX_MOVES_TO_CALCULATE;
+  
   const allMoves: MoveOption[] = [];
   const { boardState, eliminatedPlayers, hasMoved, enPassantTargets } = gameState;
 
@@ -93,12 +97,12 @@ const getAllLegalMoves = (botColor: string, gameState: GameState, maxMoves: numb
     });
     
     // Early termination: Stop if we have enough moves for decision making
-    if (allMoves.length >= maxMoves) {
+    if (allMoves.length >= maxMovesToCalculate) {
       break;
     }
   }
   
-  return allMoves.slice(0, maxMoves); // Ensure we don't exceed the limit
+  return allMoves.slice(0, maxMovesToCalculate); // Ensure we don't exceed the limit
 };
 
 const makeBotMove = (botColor: string) => {
@@ -109,6 +113,9 @@ const makeBotMove = (botColor: string) => {
   }
   
   const gameState = store.getState().game;
+  
+  // Get the appropriate bot configuration based on game mode
+  const botConfig = getBotConfig(gameState.gameMode);
   
   // Safety checks
   if (!gameState || !gameState.boardState || gameState.gameStatus !== 'active') {
@@ -149,9 +156,9 @@ const makeBotMove = (botColor: string) => {
     
     // Skip bot's turn and advance to next player
     skipBotTurn(botColor);
-  }, BOT_CONFIG.BRAIN_TIMEOUT);
+  }, botConfig.BRAIN_TIMEOUT);
   
-  const allLegalMoves = getAllLegalMoves(botColor, gameState, BOT_CONFIG.MAX_MOVES_TO_CALCULATE, cancellationToken);
+  const allLegalMoves = getAllLegalMoves(botColor, gameState, botConfig.MAX_MOVES_TO_CALCULATE, cancellationToken);
 
   // Check if calculation was cancelled due to timeout (brain overheated)
   if (cancellationToken.cancelled) {
@@ -322,4 +329,9 @@ const handleBotPromotion = (botColor: string) => {
 export const botService = {
   makeBotMove,
   handleBotPromotion,
+  cancelAllBotMoves: () => {
+    // For local bot service, we don't need to clear any processing flags
+    // since local bots don't use persistent processing flags
+    console.log("BotService: All bot moves cancelled");
+  },
 };

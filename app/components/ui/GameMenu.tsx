@@ -40,11 +40,8 @@ export default function GameMenu() {
   const canResign =
     !isViewingHistory &&
     (gameStatus === "active" ||
-      gameStatus === "playing" ||
       gameStatus === "waiting") &&
-    gameStatus !== "finished" &&
-    gameStatus !== "checkmate" &&
-    gameStatus !== "stalemate";
+    !["finished", "checkmate", "stalemate"].includes(gameStatus);
 
   const getPlayerName = (playerColor: string) => {
     switch (playerColor) {

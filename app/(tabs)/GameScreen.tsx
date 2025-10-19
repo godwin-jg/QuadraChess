@@ -19,7 +19,7 @@ import { botService } from "../../services/botService";
 import { onlineBotService } from "../../services/onlineBotService";
 import p2pService from "../../services/p2pService";
 import realtimeDatabaseService from "../../services/realtimeDatabaseService";
-import { BOT_CONFIG } from "../../config/gameConfig";
+import { BOT_CONFIG, getBotConfig } from "../../config/gameConfig";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
 import GameNotification from "../components/ui/GameNotification";
@@ -76,6 +76,7 @@ export default function GameScreen() {
     message: string;
     type: 'info' | 'warning' | 'error' | 'success';
   }>>([]);
+  const lastEliminatedRef = useRef<string | null>(null);
 
   // Game utility mode state - toggles between player info and utilities
   const [isUtilityMode, setIsUtilityMode] = useState(false);
@@ -119,8 +120,17 @@ export default function GameScreen() {
     // Determine the effective mode based on settings
     // Use current settings value to avoid dependency issues
     const currentSettings = settings;
-    const effectiveMode = currentSettings.developer.soloMode
-      ? "solo"
+    
+    // ✅ CRITICAL FIX: If user explicitly wants single player, ignore URL parameters
+    // This prevents the game from staying in online mode when user clicks "Single Player"
+    const userWantsSinglePlayer = currentSettings.developer.soloMode || 
+      (stableMode === "single" && !onlineGameService.isConnected) ||
+      // If we're not connected to online but URL says online, user probably wants single player
+      (stableMode === "online" && !onlineGameService.isConnected && !gameId);
+    
+    
+    const effectiveMode = userWantsSinglePlayer
+      ? "single"
       : (stableMode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
     
 
@@ -138,40 +148,33 @@ export default function GameScreen() {
         dispatch(setGameMode(currentMode as any));
       }
 
-      // Handle mode switching with proper disconnection
-      const currentConnectedMode = onlineGameService.isConnected
-        ? "online"
-        : p2pGameService.isConnected
-        ? "p2p"
-        : networkService.connected
-        ? "local"
-        : "solo";
-      
-      // Mode check
+      // ✅ CRITICAL FIX: Handle mode switching with proper disconnection and state cleanup
+      // Use the target mode as the source of truth since Redux state updates are asynchronous
+      const currentGameState = store.getState().game;
+      const currentConnectedMode = currentMode || currentGameState.gameMode || 
+        (onlineGameService.isConnected ? "online" : 
+         p2pGameService.isConnected ? "p2p" : 
+         networkService.connected ? "local" : "solo");
+
 
       // Only show warning if we're actually switching modes
       if (currentConnectedMode !== currentMode) {
-        // Mode switch needed
+        // Mode switch needed - use modeSwitchService for proper cleanup
         await modeSwitchService.handleModeSwitch(
           currentMode as "online" | "p2p" | "local" | "solo" | "single",
           () => {
-            // Confirm: Reset game and continue - bots are set automatically by game mode
-            // Mode switch confirmed - resetting game
-            dispatch(resetGame());
+            // Confirm: Mode switch confirmed - game state already reset by modeSwitchService
           },
           () => {
             // Cancel: Navigate back to previous mode
-            // Mode switch cancelled by user
           }
         );
       } else if (currentMode !== "online" && currentMode !== "p2p") {
-        // Same mode but not online or P2P - don't reset, just ensure game mode is correct
+        // Same mode but not online or P2P - ensure game mode is correct
         const currentState = store.getState().game;
         if (currentState.gameMode !== currentMode) {
           // Updating game mode
           dispatch(setGameMode(currentMode as any));
-        } else {
-          // Game mode already correct
         }
       }
 
@@ -410,11 +413,9 @@ export default function GameScreen() {
       return;
     }
     
-    // Get the effective mode for bot decisions
-    const currentSettings = settings;
-    const effectiveGameMode = currentSettings.developer.soloMode
-      ? "solo"
-      : (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
+    // ✅ CRITICAL FIX: Use the actual game mode from Redux state, not settings
+    const currentGameMode = store.getState().game.gameMode;
+    const effectiveGameMode = currentGameMode || (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
     
     // Bot Controller status
     
@@ -429,9 +430,10 @@ export default function GameScreen() {
       
       // ✅ UNIFIED BOT TIMING: Use consistent timing for all game modes
       // This ensures piece animations (250ms) have time to complete before the next bot move
-      const botThinkTime = BOT_CONFIG.MOVE_DELAY;
+      const botConfig = getBotConfig(effectiveGameMode);
+      const botThinkTime = botConfig.MOVE_DELAY;
       
-      if (effectiveGameMode === 'online') {
+      if (effectiveGameMode === 'online' && onlineGameService.isConnected && onlineGameService.currentGameId) {
         // For online games, use centralized bot service
         const currentGameState = store.getState().game;
         
@@ -441,8 +443,7 @@ export default function GameScreen() {
           lastProcessedTurn.current = null;
           return;
         }
-        
-        onlineBotService.scheduleBotMove(gameId || '', currentPlayerTurn, currentGameState);
+        onlineBotService.scheduleBotMove(onlineGameService.currentGameId, currentPlayerTurn, currentGameState);
       } else {
         // For local modes (solo, p2p, single), use local bot service with same timing
         const timer = setTimeout(() => {
@@ -556,18 +557,19 @@ export default function GameScreen() {
 
   // Clear justEliminated after notification is shown
   useEffect(() => {
-    if (justEliminated) {
-      const timer = setTimeout(async () => {
-        // Clear from local Redux state
+    if (justEliminated && justEliminated !== lastEliminatedRef.current) {
+      // ✅ CRITICAL FIX: Track this elimination to prevent duplicates
+      lastEliminatedRef.current = justEliminated;
+      
+      // Clear after notification duration (not immediately)
+      const timer = setTimeout(() => {
         dispatch(clearJustEliminated());
         
-        // ✅ CRITICAL FIX: Also clear from server for online games
+        // Also clear from server for online games
         if (gameMode === 'online' && gameId) {
-          try {
-            await realtimeDatabaseService.clearJustEliminated(gameId);
-          } catch (error) {
+          realtimeDatabaseService.clearJustEliminated(gameId).catch(error => {
             console.error('Error clearing justEliminated from server:', error);
-          }
+          });
         }
       }, 3000); // Clear after notification duration
       

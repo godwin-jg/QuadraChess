@@ -1,6 +1,6 @@
 import { ConfigContext, ExpoConfig } from "expo/config";
 
-export default ({ config }: ConfigContext): ExpoConfig => {
+export default ({ config }) => {
 
   return {
     ...config,

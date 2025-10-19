@@ -92,13 +92,30 @@ export const NETWORK_CONFIG = {
   MOVE_TIMEOUT: 10000,
 } as const;
 
-// Bot configuration
+// Bot configuration - different settings for single player vs other modes
 export const BOT_CONFIG = {
-  MAX_MOVES_TO_CALCULATE: 5, // Reduced from 10 to 5 for much faster moves
-  BRAIN_TIMEOUT: 5000, 
+  // Single player mode - more moves calculated for better gameplay
+  SINGLE_PLAYER: {
+    MAX_MOVES_TO_CALCULATE: 15, // More moves for better AI in single player
+    BRAIN_TIMEOUT: 8000, // Longer timeout for more complex calculations
+    MOVE_DELAY: 800, // Slightly longer delay for more thoughtful moves
+  },
+  // Other modes (online, P2P, local) - faster moves
+  OTHER_MODES: {
+    MAX_MOVES_TO_CALCULATE: 5, // Reduced from 10 to 5 for much faster moves
+    BRAIN_TIMEOUT: 5000, 
+    MOVE_DELAY: 500, // Reduced from 800 to 500ms for faster bot moves
+  },
   DEFAULT_DIFFICULTY: 'medium',
-  MOVE_DELAY: 500, // Reduced from 800 to 500ms for faster bot moves
 } as const;
+
+// Helper function to get bot config based on game mode
+export const getBotConfig = (gameMode: string) => {
+  if (gameMode === 'single') {
+    return BOT_CONFIG.SINGLE_PLAYER;
+  }
+  return BOT_CONFIG.OTHER_MODES;
+};
 
 // Type definitions for better type safety
 export type PieceValue = keyof typeof PIECE_VALUES;

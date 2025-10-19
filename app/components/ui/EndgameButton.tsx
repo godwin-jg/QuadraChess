@@ -4,6 +4,7 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState, endGame } from "../../../state";
 import { useLocalSearchParams } from "expo-router";
 import soundService from "../../../services/soundService";
+import onlineGameService from "../../../services/onlineGameService";
 
 export default function EndgameButton() {
   const dispatch = useDispatch();
@@ -17,13 +18,19 @@ export default function EndgameButton() {
   );
   
   const isViewingHistory = viewingHistoryIndex !== null;
+  
+  // ✅ CRITICAL FIX: Show endgame button for local games, even if gameMode is "online" but not actually connected
+  const isActuallyOnline = gameMode === "online" && onlineGameService.isConnected && gameId;
+  const isLocalGame = gameMode === "solo" || gameMode === "single" || !isActuallyOnline;
+  
+  
   const canEndGame =
     !isViewingHistory &&
     (gameStatus === "active" ||
       gameStatus === "waiting") &&
     !["finished", "checkmate", "stalemate"].includes(gameStatus) &&
-    // Only show in single player mode
-    (gameMode === "solo" || gameMode === "single");
+    // Show for local games (including online mode without actual connection)
+    isLocalGame;
 
 
   const handleEndgamePress = () => {

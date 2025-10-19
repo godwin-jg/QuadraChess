@@ -359,9 +359,6 @@ const _applyMoveLogic = (
     return; // Don't advance the turn
   }
 
-  // Clear justEliminated flag from previous move (if any)
-  state.justEliminated = null;
-
   // Check if any opponent is in checkmate/stalemate after this move
   // We need to check all other players, not just the next one
   const currentPlayer = state.currentPlayerTurn;
@@ -565,6 +562,9 @@ const gameSlice = createSlice({
         return;
       }
 
+      // Store the current justEliminated flag before processing the move
+      const previousJustEliminated = state.justEliminated;
+
       // Clear move cache when board state changes
       state.moveCache = {};
 
@@ -643,6 +643,12 @@ const gameSlice = createSlice({
         enPassantTarget,
       });
 
+      // ✅ CRITICAL FIX: Clear justEliminated flag only if no elimination occurred in this move
+      // This prevents the flag from being cleared immediately when an elimination happens
+      if (state.justEliminated === previousJustEliminated) {
+        state.justEliminated = null;
+      }
+
       // Cancel any pending bot thinking notifications since a move was made
       try {
         const notificationService = require('../services/notificationService').default;
@@ -712,8 +718,9 @@ const gameSlice = createSlice({
         // This ensures that "Play Again" always maintains the 1 vs 3 bots setup
         state.botPlayers = ['b', 'y', 'g'];
       } else if (currentGameMode === "p2p" || currentGameMode === "online") {
-        // P2P and Online modes: preserve existing bot configuration (set by host in lobby)
-        state.botPlayers = currentBotPlayers;
+        // ✅ CRITICAL FIX: For P2P and Online modes, start with no bots - they will be set by the lobby/host
+        // This prevents stale bot configurations from previous games
+        state.botPlayers = [];
       } else {
         state.botPlayers = []; // Other modes have no bots
       }
@@ -952,6 +959,9 @@ const gameSlice = createSlice({
         enPassantTarget?: EnPassantTarget | null; // ✅ Enhanced type safety
       }>
     ) => {
+      // Store the current justEliminated flag before processing the move
+      const previousJustEliminated = state.justEliminated;
+      
       const { from, to, pieceCode, playerColor, isEnPassant = false, enPassantTarget } = action.payload;
 
       // ✅ Handle resignation messages
@@ -1043,6 +1053,12 @@ const gameSlice = createSlice({
         isEnPassant,
         enPassantTarget,
       });
+
+      // ✅ CRITICAL FIX: Clear justEliminated flag only if no elimination occurred in this move
+      // This prevents the flag from being cleared immediately when an elimination happens
+      if (state.justEliminated === previousJustEliminated) {
+        state.justEliminated = null;
+      }
 
       // Cancel any pending bot thinking notifications since a move was made
       try {

@@ -64,18 +64,6 @@ const P2PLobbyScreen: React.FC = () => {
     botPlayers,
   } = useSelector((state: RootState) => state.game);
 
-  // Debug logging - only when focused
-  if (isFocused) {
-      players: players.length,
-      isHost,
-      canStartGame,
-      currentGame: currentGame ? "present" : "null",
-      isLoading,
-      isConnected,
-      connectionError
-    });
-  }
-
   // ✅ No more event listeners! All state comes from Redux
   // The P2P service now directly updates Redux state
   
@@ -87,12 +75,8 @@ const P2PLobbyScreen: React.FC = () => {
       try {
         router.push(`/(tabs)/GameScreen?gameId=${currentGame.id}&mode=p2p`);
       } catch (navError) {
+        // Navigation error handled silently
       }
-    } else {
-        hasCurrentGame: !!currentGame,
-        gameStatus: currentGame?.status,
-        isHost: isHost
-      });
     }
   }, [currentGame, isHost, router, isFocused]);
 
@@ -310,7 +294,7 @@ const P2PLobbyScreen: React.FC = () => {
     try {
       // 1. Try to disconnect from P2P service (but don't rely on it for state)
       try {
-        p2pService.disconnect(false); // Don't notify UI to avoid connection error
+        (p2pService as any).disconnect(false); // Don't notify UI to avoid connection error
         console.log("P2PLobbyScreen: P2P service disconnected");
       } catch (p2pError) {
         console.warn("P2PLobbyScreen: P2P disconnect failed, continuing with manual reset:", p2pError);

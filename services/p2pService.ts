@@ -22,6 +22,7 @@ export interface P2PGame {
   joinCode?: string; // Simple 4-6 digit code
   timestamp?: number; // ✅ Add timestamp property
   players?: P2PPlayer[]; // ✅ Add players array for state sync
+  currentPlayerTurn?: string; // ✅ Add currentPlayerTurn property
 }
 
 export interface P2PPlayer {
@@ -31,6 +32,7 @@ export interface P2PPlayer {
   isHost: boolean;
   isConnected: boolean;
   connectionState?: string; // ✅ Add this to track the WebRTC connection
+  joinedAt?: number; // ✅ Add joinedAt property
 }
 
 class P2PService {
@@ -41,7 +43,7 @@ class P2PService {
   private connections: Map<string, RTCPeerConnection> = new Map();
   private gameState: P2PGame | null = null;
   private players: Map<string, P2PPlayer> = new Map();
-  private messageHandlers: Map<string, (message: any) => void> = new Map();
+  private messageHandlers: Map<string, ((message: any) => void)[]> = new Map();
   
   // Real-time discovery listeners
   private gameFoundUnsubscribe: (() => void) | null = null;
@@ -444,7 +446,7 @@ class P2PService {
     this.connections.set(hostId, connection);
 
     // ✅ Add a state change listener
-    connection.onconnectionstatechange = () => {
+    (connection as any).onconnectionstatechange = () => {
       console.log(`🔗 P2PService: Connection state changed to: ${connection.connectionState} for host ${hostId}`);
       console.log(`🔗 P2PService: ICE connection state: ${connection.iceConnectionState}`);
       console.log(`🔗 P2PService: ICE gathering state: ${connection.iceGatheringState}`);
@@ -476,7 +478,7 @@ class P2PService {
 
     // Set up data channel listeners
     console.log("🔗 P2PService: Setting up data channel listeners for client connection");
-    this.setupDataChannelListeners(dataChannel, hostId, playerName);
+    this.setupDataChannelListeners(dataChannel as any, hostId, playerName);
     
     // ✅ CRITICAL: Set gameMode to p2p for the client when connecting
     console.log("🎮 P2PService: Setting gameMode to p2p for client connection");
@@ -485,7 +487,7 @@ class P2PService {
     console.log("🎮 P2PService: Current gameMode after setting:", store.getState().game.gameMode);
 
     // ✅ 2. Buffer ICE candidates instead of sending them immediately
-    connection.onicecandidate = (event) => {
+    (connection as any).onicecandidate = (event: any) => {
       if (event.candidate) {
         console.log("P2PService: Buffering ICE candidate locally...");
         localCandidates.push(event.candidate);
@@ -510,7 +512,7 @@ class P2PService {
     console.log("P2PService: Offer created and sent via HTTP to", hostIP);
     
     // Set up ICE candidate sending for any additional candidates discovered after the initial handshake
-    connection.onicecandidate = (event) => {
+    (connection as any).onicecandidate = (event: any) => {
       if (event.candidate) {
         console.log("P2PService: Sending additional ICE candidate to host...");
         this.sendIceCandidateToHost(hostIP, event.candidate);
@@ -724,7 +726,7 @@ class P2PService {
     console.log("🔗 P2PService: Setting up data channel listeners for", playerName, "dataChannel state:", dataChannel.readyState);
     
     // Add state change listener
-    dataChannel.onstatechange = () => {
+    (dataChannel as any).onstatechange = () => {
       console.log(`🔗 P2PService: Data channel state changed to: ${dataChannel.readyState} for ${playerName}`);
     };
     
@@ -825,16 +827,16 @@ class P2PService {
     this.connections.set(peerId, connection);
 
     // Host side: Listen for incoming data channel
-    connection.ondatachannel = (event) => {
+    (connection as any).ondatachannel = (event: any) => {
       const dataChannel = event.channel;
       console.log("P2PService: Received data channel from", peerId);
       
       // Set up data channel listeners
-      this.setupDataChannelListeners(dataChannel, peerId, playerName);
+      this.setupDataChannelListeners(dataChannel as any, peerId, playerName);
     };
 
     // Handle ICE candidates
-    connection.onicecandidate = (event) => {
+    (connection as any).onicecandidate = (event: any) => {
       if (event.candidate) {
         // Send ICE candidate through signaling service
         p2pSignalingService.sendIceCandidate(peerId, event.candidate);
@@ -1224,7 +1226,7 @@ class P2PService {
     const connection = serverlessSignalingService.getConnection(playerId);
     if (connection) {
       console.log(`🔗 P2PService: Setting up connection state tracking for player ${playerName} (${playerId})`);
-      connection.onconnectionstatechange = () => {
+      (connection as any).onconnectionstatechange = () => {
         console.log(`🔗 P2PService: Host-side connection state changed to: ${connection.connectionState} for player ${playerName}`);
         const player = this.players.get(playerId);
         if (player) {
@@ -1252,6 +1254,22 @@ class P2PService {
     console.log('📢 P2PService: syncLobbyStateToClients() completed');
     
     console.log(`P2PService: Player ${playerName} joined. Syncing state.`);
+  }
+
+  // Handle player left event
+  private handlePlayerLeft(data: any): void {
+    console.log("P2PService: Player left:", data);
+    // Remove player from connections and players map
+    if (data.playerId) {
+      this.connections.delete(data.playerId);
+      this.players.delete(data.playerId);
+      
+      // Update game state if host
+      if (this.isHost && this.gameState) {
+        this.gameState = { ...this.gameState, playerCount: this.players.size };
+        this.syncLobbyStateToClients();
+      }
+    }
   }
 
   // Handle player joined message (for non-host players)
@@ -1286,7 +1304,17 @@ class P2PService {
     if (gameState) {
       this.gameState = gameState;
       // ✅ CRITICAL FIX: Update playerCount to match actual players (create new object to avoid mutation)
-      this.gameState = { ...this.gameState, playerCount: players.length };
+      this.gameState = { 
+        ...this.gameState, 
+        playerCount: players.length, 
+        id: this.gameState?.id || this.gameId || 'unknown', 
+        name: this.gameState?.name || 'P2P Game',
+        hostName: this.gameState?.hostName || 'Unknown Host',
+        hostId: this.gameState?.hostId || 'unknown',
+        maxPlayers: this.gameState?.maxPlayers || 4,
+        status: this.gameState?.status || 'waiting',
+        createdAt: this.gameState?.createdAt || Date.now()
+      };
       // ✅ Notify the UI with the complete game state object
       this.notifyHandlers("game-state-update", this.gameState);
     } else {
@@ -1299,7 +1327,7 @@ class P2PService {
 
     console.log("P2PService: Updated player list:", players.length, "players");
     if (gameState) {
-      console.log("P2PService: Updated game state for joining player, playerCount:", this.gameState.playerCount);
+      console.log("P2PService: Updated game state for joining player, playerCount:", this.gameState?.playerCount);
     }
   }
 
@@ -1590,7 +1618,7 @@ class P2PService {
   private notifyHandlers(event: string, data: any): void {
     console.log(`🔔 P2PService: notifyHandlers called with event: ${event}, data:`, data ? "present" : "null");
     const handlers = this.messageHandlers.get(event);
-    console.log(`🔔 P2PService: Found ${handlers ? handlers.size : 0} handlers for event: ${event}`);
+    console.log(`🔔 P2PService: Found ${handlers ? handlers.length : 0} handlers for event: ${event}`);
     if (handlers) {
       handlers.forEach(handler => handler(data));
     }
@@ -1619,10 +1647,6 @@ class P2PService {
     return this.on(event, handler);
   }
 
-  // Get current game state
-  public getGameState(): P2PGame | null {
-    return this.gameState;
-  }
 
   // Get players
   public getPlayers(): P2PPlayer[] {
@@ -1642,10 +1666,6 @@ class P2PService {
     return this.isHost;
   }
 
-  // Get peer ID
-  public getPeerId(): string {
-    return this.peerId;
-  }
 
   // Get join code
   public getJoinCode(): string | undefined {

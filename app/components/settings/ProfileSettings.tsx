@@ -225,7 +225,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
             }
           }}
         >
-          <Text className="text-xl">←</Text>
+          <Text className="text-xl text-white">←</Text>
         </TouchableOpacity>
         <Text className="text-xl font-bold text-white">Settings</Text>
         <View className="w-10" />

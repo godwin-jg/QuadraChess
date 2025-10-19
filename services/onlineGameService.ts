@@ -232,6 +232,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
       
       // ✅ CRITICAL FIX: Clear any cached board state to prevent stale data
       this.cachedProcessedBoardState = null;
+      this.lastProcessedMove = null;
+      
+      console.log("OnlineGameService: Disconnection and cleanup completed");
       
       // Don't re-throw the error to prevent the app from getting stuck
     }
@@ -419,6 +422,10 @@ class OnlineGameServiceImpl implements OnlineGameService {
         // Call the Cloud Function to resign
         await realtimeDatabaseService.resignGame(this.currentGameId!);
 
+        // ✅ CRITICAL FIX: Disconnect after successful resignation to prevent mode switching issues
+        console.log("OnlineGameService: Resignation successful, disconnecting from game");
+        await this.disconnect();
+
         // If we get here, the resign was sent successfully
         return;
       } catch (error) {
@@ -504,6 +511,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
       return;
     }
     
+    // ✅ CRITICAL FIX: Initialize serverBotPlayers at function scope for use in rollback states
+    let serverBotPlayers: string[] = [];
+    
     if (game) {
       
       // Check if game data is complete
@@ -562,7 +572,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
           validMoves: currentLocalState.validMoves,
           // Include all required GameState properties
           gameMode: currentLocalState.gameMode,
-          botPlayers: currentLocalState.botPlayers,
+          botPlayers: serverBotPlayers,
           currentGame: currentLocalState.currentGame,
           discoveredGames: currentLocalState.discoveredGames,
           isDiscovering: currentLocalState.isDiscovering,
@@ -591,25 +601,26 @@ class OnlineGameServiceImpl implements OnlineGameService {
         Array.isArray(game.gameState.boardState) &&
         game.gameState.boardState.length > 0
       ) {
-        // Convert players object to array for Redux state
-        const playersArray = Object.values(game.players || {});
+      // Convert players object to array for Redux state
+      const playersArray = Object.values(game.players || {});
 
-        // Determine if current user is host
-        const user = realtimeDatabaseService.getCurrentUser();
-        const isHost = user ? game.hostId === user.uid : false;
+      // ✅ CRITICAL FIX: Extract bot players for online games from server data
+      serverBotPlayers = playersArray
+        .filter((player: any) => player.isBot === true)
+        .map((player: any) => player.color);
+      
+      
+      // ✅ CRITICAL FIX: Always use server's bot configuration, not local state
+      // This prevents stale bot configurations from previous games
+      store.dispatch(setBotPlayers(serverBotPlayers));
 
-        // Determine if game can start (at least 2 players and waiting status)
-        const canStartGame =
-          playersArray.length >= 2 && game.status === "waiting";
+      // Determine if current user is host
+      const user = realtimeDatabaseService.getCurrentUser();
+      const isHost = user ? game.hostId === user.uid : false;
 
-        // Extract bot players for online games
-        const botPlayers = playersArray
-          .filter((player: any) => player.isBot === true)
-          .map((player: any) => player.color);
-        
-
-        // Update bot players in Redux store
-        store.dispatch(setBotPlayers(botPlayers));
+      // Determine if game can start (at least 2 players and waiting status)
+      const canStartGame =
+        playersArray.length >= 2 && game.status === "waiting";
 
         // Ensure board state is properly copied
         const gameState = {
@@ -760,7 +771,8 @@ class OnlineGameServiceImpl implements OnlineGameService {
             validMoves: currentLocalState.validMoves,
             // Include all required GameState properties
             gameMode: currentLocalState.gameMode,
-            botPlayers: currentLocalState.botPlayers,
+            // ✅ CRITICAL FIX: Use server's bot configuration, not local state
+            botPlayers: serverBotPlayers,
             currentGame: currentLocalState.currentGame,
             discoveredGames: currentLocalState.discoveredGames,
             isDiscovering: currentLocalState.isDiscovering,
@@ -773,7 +785,9 @@ class OnlineGameServiceImpl implements OnlineGameService {
             lastMove: game.lastMove,
           };
           
+          
           store.dispatch(setGameState(gameStateWithLocalSelection));
+          
           
           // Capture event detected - no animation needed
           if (capturedPiece && capturePosition) {
@@ -853,7 +867,7 @@ class OnlineGameServiceImpl implements OnlineGameService {
           validMoves: currentLocalState.validMoves,
           // Include all required GameState properties
           gameMode: currentLocalState.gameMode,
-          botPlayers: currentLocalState.botPlayers,
+          botPlayers: serverBotPlayers,
           currentGame: currentLocalState.currentGame,
           discoveredGames: currentLocalState.discoveredGames,
           isDiscovering: currentLocalState.isDiscovering,

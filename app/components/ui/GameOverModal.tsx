@@ -10,9 +10,9 @@ import Animated, {
   withDelay,
   withTiming,
   withRepeat,
-  withSequence
+  withSequence,
+  Easing
 } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
 
 interface PlayerResult {
   color: string;
@@ -84,8 +84,9 @@ export default function GameOverModal({
   const leaderboard = createLeaderboard();
 
   // Animation values
-  const modalScale = useSharedValue(0.8);
+  const modalScale = useSharedValue(0.9);
   const modalOpacity = useSharedValue(0);
+  const modalTranslateY = useSharedValue(20);
   const titleOpacity = useSharedValue(0);
   const messageOpacity = useSharedValue(0);
   const statsOpacity = useSharedValue(0);
@@ -129,41 +130,41 @@ export default function GameOverModal({
     } catch (error) {
     }
 
-    // Start entrance animation sequence
-    modalOpacity.value = withTiming(1, { duration: 300 });
-    modalScale.value = withSpring(1, { damping: 15, stiffness: 150 });
+    // Start entrance animation sequence – smoother, modern spring + slight slide
+    modalOpacity.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
+    modalScale.value = withSpring(1, { damping: 18, stiffness: 220, mass: 0.9 });
+    modalTranslateY.value = withSpring(0, { damping: 18, stiffness: 220, mass: 0.9 });
     
     // Stagger the content animations
-    titleOpacity.value = withDelay(200, withTiming(1, { duration: 400 }));
-    messageOpacity.value = withDelay(400, withTiming(1, { duration: 400 }));
+    titleOpacity.value = withDelay(160, withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) }));
+    messageOpacity.value = withDelay(320, withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) }));
     
     // Animate player rows from 4th to 1st place (reverse order for dramatic effect)
     leaderboard.forEach((_, index) => {
       const reverseIndex = leaderboard.length - 1 - index;
-      const delay = 600 + (reverseIndex * 150);
-      
-      playerAnimations[reverseIndex].opacity.value = withDelay(delay, withTiming(1, { duration: 300 }));
-      playerAnimations[reverseIndex].translateY.value = withDelay(delay, withSpring(0, { damping: 12, stiffness: 200 }));
-      playerAnimations[reverseIndex].scale.value = withDelay(delay, withSpring(1, { damping: 12, stiffness: 200 }));
+      const delay = 520 + (reverseIndex * 140);
+      playerAnimations[reverseIndex].opacity.value = withDelay(delay, withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }));
+      playerAnimations[reverseIndex].translateY.value = withDelay(delay, withSpring(0, { damping: 16, stiffness: 240 }));
+      playerAnimations[reverseIndex].scale.value = withDelay(delay, withSpring(1, { damping: 16, stiffness: 240 }));
     });
     
     // Animate stats and button
-    statsOpacity.value = withDelay(1200, withTiming(1, { duration: 400 }));
-    buttonOpacity.value = withDelay(1400, withTiming(1, { duration: 400 }));
+    statsOpacity.value = withDelay(1100, withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) }));
+    buttonOpacity.value = withDelay(1280, withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) }));
     
     // Start winner animations after the winner appears
-    const winnerDelay = 600 + ((leaderboard.length - 1) * 150) + 300; // After winner appears
-    winnerGlowOpacity.value = withDelay(winnerDelay, withTiming(1, { duration: 500 }));
+    const winnerDelay = 540 + ((leaderboard.length - 1) * 140) + 300; // After winner appears
+    winnerGlowOpacity.value = withDelay(winnerDelay, withTiming(1, { duration: 420 }));
     winnerPulseScale.value = withDelay(winnerDelay, withRepeat(
       withSequence(
-        withTiming(1.05, { duration: 1000 }),
-        withTiming(1, { duration: 1000 })
+        withTiming(1.03, { duration: 1200, easing: Easing.inOut(Easing.quad) }),
+        withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.quad) })
       ),
       -1, // Infinite repeat
       false // Don't reverse
     ));
-    winnerShimmerTranslate.value = withDelay(winnerDelay + 500, withRepeat(
-      withTiming(200, { duration: 2000 }),
+    winnerShimmerTranslate.value = withDelay(winnerDelay + 420, withRepeat(
+      withTiming(200, { duration: 2200, easing: Easing.inOut(Easing.quad) }),
       -1, // Infinite repeat
       false // Don't reverse
     ));
@@ -231,7 +232,10 @@ export default function GameOverModal({
   // Animation styles
   const modalAnimatedStyle = useAnimatedStyle(() => ({
     opacity: modalOpacity.value,
-    transform: [{ scale: modalScale.value }],
+    transform: [
+      { translateY: modalTranslateY.value },
+      { scale: modalScale.value }
+    ],
   }));
 
   const titleAnimatedStyle = useAnimatedStyle(() => ({
@@ -263,6 +267,42 @@ export default function GameOverModal({
     transform: [{ translateX: winnerShimmerTranslate.value }],
   }));
 
+  // Pre-create player row animated styles to avoid hooks in a render loop
+  const player1RowStyle = useAnimatedStyle(() => ({
+    opacity: player1Opacity.value,
+    transform: [
+      { translateY: player1TranslateY.value },
+      { scale: player1Scale.value },
+    ],
+  }));
+  const player2RowStyle = useAnimatedStyle(() => ({
+    opacity: player2Opacity.value,
+    transform: [
+      { translateY: player2TranslateY.value },
+      { scale: player2Scale.value },
+    ],
+  }));
+  const player3RowStyle = useAnimatedStyle(() => ({
+    opacity: player3Opacity.value,
+    transform: [
+      { translateY: player3TranslateY.value },
+      { scale: player3Scale.value },
+    ],
+  }));
+  const player4RowStyle = useAnimatedStyle(() => ({
+    opacity: player4Opacity.value,
+    transform: [
+      { translateY: player4TranslateY.value },
+      { scale: player4Scale.value },
+    ],
+  }));
+  const playerRowStyles = React.useMemo(() => [
+    player1RowStyle,
+    player2RowStyle,
+    player3RowStyle,
+    player4RowStyle,
+  ].slice(0, leaderboard.length), [leaderboard.length, player1RowStyle, player2RowStyle, player3RowStyle, player4RowStyle]);
+
   return (
     <Modal visible={true} transparent animationType="fade">
       <SafeAreaView className="flex-1 bg-black/70 justify-center items-center px-4 py-8">
@@ -270,7 +310,15 @@ export default function GameOverModal({
         <Animated.View 
           className="w-full max-w-md mx-auto rounded-2xl overflow-hidden"
           style={[
-            { borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.2)' },
+            { 
+              borderWidth: 1, 
+              borderColor: 'rgba(255, 255, 255, 0.12)',
+              shadowColor: '#000',
+              shadowOpacity: 0.3,
+              shadowRadius: 24,
+              shadowOffset: { width: 0, height: 12 },
+              elevation: 12,
+            },
             modalAnimatedStyle
           ]}
         >
@@ -323,15 +371,7 @@ export default function GameOverModal({
                 {leaderboard.map((player, index) => {
                   const colorEmojis = { r: "🔴", b: "🔵", y: "🟡", g: "🟢" };
                   const isWinner = !player.isEliminated && player.color === winner;
-                  const playerAnimation = playerAnimations[index];
-                  
-                  const playerAnimatedStyle = useAnimatedStyle(() => ({
-                    opacity: playerAnimation.opacity.value,
-                    transform: [
-                      { translateY: playerAnimation.translateY.value },
-                      { scale: playerAnimation.scale.value }
-                    ],
-                  }));
+                  const playerAnimatedStyle = playerRowStyles[index];
                   
                   return (
                     <Animated.View
@@ -432,7 +472,7 @@ export default function GameOverModal({
               {/* Game Statistics */}
               <Animated.View style={statsAnimatedStyle} className="mb-6">
                 <Text className="text-lg font-bold text-center mb-3 text-white">
-                  📊 After-Action Report
+                  After-Action Report
                 </Text>
                 <View className="flex-row justify-between gap-2">
                   <View className="flex-1 items-center bg-white/5 p-3 rounded-lg border border-white/10">
@@ -465,7 +505,7 @@ export default function GameOverModal({
                     className="bg-blue-600 py-4 px-8 rounded-xl active:opacity-70"
                   >
                     <Text className="text-white text-lg font-semibold text-center">
-                      🎮 Play Again
+                      Play Again
                     </Text>
                   </Pressable>
 
@@ -482,7 +522,7 @@ export default function GameOverModal({
                     className="bg-gray-600 py-4 px-8 rounded-xl active:opacity-70"
                   >
                     <Text className="text-white text-lg font-semibold text-center">
-                      🏠 Return to Home
+                      Return to Home
                     </Text>
                   </Pressable>
                 </View>

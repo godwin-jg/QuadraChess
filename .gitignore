@@ -116,5 +116,37 @@ dist
 tmp/
 temp/
 
+# Build artifacts and generated files
+*.tgz
+*.tar.gz
+build/
+dist/
 
+# Firebase
 /android/app/google-services.json
+.firebase/
+
+# EAS Build
+.easignore
+
+# Development files
+*.local
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

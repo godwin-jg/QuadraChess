@@ -1,8 +1,8 @@
-# ♟️ QuadChess - Four Player Chess Game
+# ♟️ Quadrachess - Four Player Chess Game
 
 <div align="center">
 
-![QuadChess Logo](./assets/images/chess.png)
+![Quadrachess Logo](./assets/images/chess.png)
 
 **A modern, multiplayer chess experience for 2-4 players**
 
@@ -61,8 +61,8 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/QuadChess.git
-   cd QuadChess
+   git clone https://github.com/yourusername/Quadrachess.git
+   cd Quadrachess
    ```
 
 2. **Install dependencies**
@@ -103,6 +103,10 @@
 ![Multiplayer Lobby](./screenshots/multiplayer-lobby.png)
 *Real-time multiplayer lobby with player management*
 
+### Bots
+![Bots](./screenshots/bots.png)
+*Play with bots*
+
 ### Settings
 ![Settings](./screenshots/settings.png)
 *Comprehensive settings and customization options*
@@ -124,7 +128,7 @@
 ### Project Structure
 
 ```
-QuadChess/
+Quadrachess/
 ├── app/                    # Main application code
 │   ├── (tabs)/            # Tab navigation screens
 │   ├── components/         # Reusable UI components
@@ -138,7 +142,7 @@ QuadChess/
 
 ## 🎯 Game Rules
 
-QuadChess follows traditional chess rules with these adaptations for four players:
+Quadrachess follows traditional chess rules with these adaptations for four players:
 
 - **Players**: Red, Blue, Yellow, Green (2-4 players)
 - **Turn Order**: Red → Blue → Yellow → Green
@@ -211,22 +215,21 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/QuadChess/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/QuadChess/discussions)
-- **Email**: support@quadchess.com
+- **Issues**: [GitHub Issues](https://github.com/yourusername/Quadrachess/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/Quadrachess/discussions)
 
 ## 🔗 Links
 
-- **Website**: [quadchess.com](https://quadchess.com)
-- **App Store**: [Download on App Store](https://apps.apple.com/app/quadchess)
+<!-- - **Website**: [Quadrachess.com](https://Quadrachess.com)
+- **App Store**: [Download on App Store](https://apps.apple.com/app/Quadrachess) -->
 - **Google Play**: [Get it on Google Play](https://play.google.com/store/apps/details?id=com.chess4d)
 
 ---
 
 <div align="center">
 
-**Made with ❤️ by the QuadChess Team**
+**Made with ❤️ by JG**
 
-[⭐ Star this repo](https://github.com/yourusername/QuadChess) | [🐛 Report Bug](https://github.com/yourusername/QuadChess/issues) | [💡 Request Feature](https://github.com/yourusername/QuadChess/issues)
+[⭐ Star this repo](https://github.com/yourusername/Quadrachess) | [🐛 Report Bug](https://github.com/yourusername/Quadrachess/issues) | [💡 Request Feature](https://github.com/yourusername/Quadrachess/issues)
 
 </div>

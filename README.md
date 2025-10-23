@@ -92,23 +92,23 @@
 <div align="center">
 
 ### Home Screen
-![Home Screen](./screenshots/home-screen.png)
+<img src="./screenshots/home-screen.png" width="300" alt="Home Screen">
 *Clean, modern interface with game mode selection*
 
 ### Game Board
-![Game Board](./screenshots/game-board.png)
+<img src="./screenshots/game-board.png" width="350" alt="Game Board">
 *Four-player chess board with intuitive controls*
 
 ### Multiplayer Lobby
-![Multiplayer Lobby](./screenshots/multiplayer-lobby.png)
+<img src="./screenshots/multiplayer-lobby.png" width="300" alt="Multiplayer Lobby">
 *Real-time multiplayer lobby with player management*
 
 ### Bot Gameplay
-![Bot Gameplay](./screenshots/bots.png)
+<img src="./screenshots/bots.png" width="300" alt="Bot Gameplay">
 *Single player mode with AI opponents*
 
 ### Settings
-![Settings](./screenshots/settings.png)
+<img src="./screenshots/settings.png" width="300" alt="Settings">
 *Comprehensive settings and customization options*
 
 

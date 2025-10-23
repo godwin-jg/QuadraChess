@@ -103,13 +103,14 @@
 ![Multiplayer Lobby](./screenshots/multiplayer-lobby.png)
 *Real-time multiplayer lobby with player management*
 
-### Bots
-![Bots](./screenshots/bots.png)
-*Play with bots*
+### Bot Gameplay
+![Bot Gameplay](./screenshots/bots.png)
+*Single player mode with AI opponents*
 
 ### Settings
 ![Settings](./screenshots/settings.png)
 *Comprehensive settings and customization options*
+
 
 </div>
 

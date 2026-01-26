@@ -1,7 +1,69 @@
 import database from "@react-native-firebase/database";
 import auth from "@react-native-firebase/auth";
-import { GameState } from "../state/types";
+import { GameState, SerializedGameState, turnOrder } from "../state/types";
 import { Player } from "../app/services/networkService";
+import { BOT_CONFIG, GAME_BONUSES, PIECE_VALUES } from "../config/gameConfig";
+import { settingsService } from "./settingsService";
+import {
+  createEmptyPieceBitboards,
+  deserializeBitboardPieces,
+  rebuildBitboardStateFromPieces,
+  serializeBitboardPieces,
+} from "../src/logic/bitboardSerialization";
+import {
+  bitboardToArray,
+  getPieceAtFromBitboard,
+  squareBit,
+  PROMOTION_MASKS,
+} from "../src/logic/bitboardUtils";
+import { getPinnedPiecesMask, isKingInCheck } from "../src/logic/bitboardLogic";
+import {
+  getRookCastlingCoords,
+  getRookIdentifier,
+  isCastlingMove,
+  updateAllCheckStatus,
+} from "../state/gameHelpers";
+import { hasAnyLegalMoves } from "../src/logic/gameLogic";
+import { getValidMovesBB } from "../src/logic/moveGeneration";
+import { syncBitboardsFromArray } from "../state/gameSlice";
+
+const DEFAULT_TIME_CONTROL = { baseMs: 5 * 60 * 1000, incrementMs: 0 };
+const CLOCK_COLORS = ["r", "b", "y", "g"] as const;
+type ClockColor = (typeof CLOCK_COLORS)[number];
+const DEFAULT_TEAM_ASSIGNMENTS = { r: "A", y: "A", b: "B", g: "B" } as const;
+const TEAM_IDS = ["A", "B"] as const;
+type TeamId = (typeof TEAM_IDS)[number];
+type TeamAssignments = { r: TeamId; b: TeamId; y: TeamId; g: TeamId };
+
+const normalizeTeamAssignments = (assignments?: TeamAssignments): TeamAssignments => {
+  const base = { ...DEFAULT_TEAM_ASSIGNMENTS } as TeamAssignments;
+  if (!assignments) return base;
+  CLOCK_COLORS.forEach((color) => {
+    const team = assignments[color];
+    base[color] = team === "A" || team === "B" ? team : DEFAULT_TEAM_ASSIGNMENTS[color];
+  });
+  return base;
+};
+
+const getTeamForColor = (assignments: TeamAssignments, color: ClockColor): TeamId =>
+  assignments[color];
+
+const getTeamColors = (assignments: TeamAssignments, teamId: TeamId): ClockColor[] =>
+  CLOCK_COLORS.filter((color) => assignments[color] === teamId);
+
+const getOpposingTeam = (teamId: TeamId): TeamId => (teamId === "A" ? "B" : "A");
+
+const syncTeamClocks = (
+  clocks: { r: number; b: number; y: number; g: number },
+  assignments: TeamAssignments,
+  teamId: TeamId,
+  value: number
+) => {
+  const colors = getTeamColors(assignments, teamId);
+  colors.forEach((color) => {
+    clocks[color] = value;
+  });
+};
 
 export interface RealtimeGame {
   id: string;
@@ -46,29 +108,1066 @@ class RealtimeDatabaseService {
   private generateJoinCode(): string {
     return Math.floor(1000 + Math.random() * 9000).toString();
   }
-  
-  // OPTIMIZATION: Move batching for reduced network calls
-  private moveBatch: any[] = [];
-  private batchTimeout: NodeJS.Timeout | null = null;
-  private readonly BATCH_DELAY = 50; // 50ms batch delay
+
+  private buildBitboardStateFromSnapshot(
+    rawState: SerializedGameState,
+    gameId?: string
+  ): GameState {
+    const eliminatedPlayers = rawState.eliminatedPlayers || [];
+    let pieces = deserializeBitboardPieces(rawState.bitboardState?.pieces);
+
+    if (
+      (!rawState.bitboardState || !rawState.bitboardState.pieces) &&
+      Array.isArray(rawState.boardState)
+    ) {
+      const fallbackBitboards = syncBitboardsFromArray(
+        rawState.boardState,
+        eliminatedPlayers
+      );
+      pieces = fallbackBitboards.pieces;
+
+      if (gameId) {
+        const backfillRef = database().ref(
+          `games/${gameId}/gameState/bitboardState/pieces`
+        );
+        backfillRef.set(serializeBitboardPieces(pieces)).catch((error) => {
+          console.warn("Failed to backfill bitboard pieces:", error);
+        });
+      }
+    }
+
+    const bitboardState = rebuildBitboardStateFromPieces(
+      pieces,
+      eliminatedPlayers,
+      rawState.enPassantTargets || []
+    );
+
+    const boardState = bitboardToArray(
+      bitboardState.pieces,
+      rawState.eliminatedPieceBitboards
+        ? deserializeBitboardPieces(rawState.eliminatedPieceBitboards as any)
+        : undefined
+    );
+    const eliminatedPieceBitboards = rawState.eliminatedPieceBitboards
+      ? deserializeBitboardPieces(rawState.eliminatedPieceBitboards as any)
+      : createEmptyPieceBitboards();
+
+    const baseMs = rawState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    const teamAssignments = normalizeTeamAssignments(rawState.teamAssignments as TeamAssignments);
+    const teamMode = !!rawState.teamMode;
+    const winningTeam = rawState.winningTeam ?? null;
+    const gameState: GameState = {
+      ...(rawState as unknown as GameState),
+      boardState,
+      bitboardState,
+      eliminatedPieceBitboards,
+      eliminatedPlayers,
+      timeControl: rawState.timeControl ?? { baseMs, incrementMs: 0 },
+      clocks: rawState.clocks ?? {
+        r: baseMs,
+        b: baseMs,
+        y: baseMs,
+        g: baseMs,
+      },
+      turnStartedAt: rawState.turnStartedAt ?? null,
+      teamMode,
+      teamAssignments,
+      winningTeam,
+    };
+
+    gameState.checkStatus = updateAllCheckStatus(gameState);
+    gameState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      gameState,
+      gameState.currentPlayerTurn
+    );
+
+    return gameState;
+  }
+
+  private toSerializedGameState(
+    state: GameState,
+    pieces: Record<string, bigint>
+  ): SerializedGameState {
+    const { boardState, eliminatedPieceBitboards, bitboardState, ...rest } = state;
+    return {
+      ...rest,
+      bitboardState: { pieces: serializeBitboardPieces(pieces) },
+      eliminatedPieceBitboards: serializeBitboardPieces(
+        eliminatedPieceBitboards || createEmptyPieceBitboards()
+      ),
+    };
+  }
+
+  private applyMoveWithBitboards(
+    gameData: any,
+    moveData: {
+      from: { row: number; col: number };
+      to: { row: number; col: number };
+      pieceCode: string;
+      playerColor: string;
+      isEnPassant?: boolean;
+      enPassantTarget?: any;
+    },
+    playerId: string
+  ) {
+    const gameState = gameData.gameState as GameState;
+    gameState.eliminatedPlayers = gameState.eliminatedPlayers || [];
+    gameState.enPassantTargets = gameState.enPassantTargets || [];
+    if (!gameState.capturedPieces || typeof gameState.capturedPieces !== "object" || Array.isArray(gameState.capturedPieces)) {
+      gameState.capturedPieces = { r: [], b: [], y: [], g: [] };
+    }
+    (["r", "b", "y", "g"] as const).forEach((color) => {
+      if (!Array.isArray(gameState.capturedPieces[color])) {
+        gameState.capturedPieces[color] = [];
+      }
+    });
+    gameState.scores = gameState.scores || { r: 0, b: 0, y: 0, g: 0 };
+    gameState.hasMoved = gameState.hasMoved || {
+      rK: false, rR1: false, rR2: false,
+      bK: false, bR1: false, bR2: false,
+      yK: false, yR1: false, yR2: false,
+      gK: false, gR1: false, gR2: false,
+    };
+    gameState.gameOverState = gameState.gameOverState || {
+      isGameOver: false,
+      status: null,
+      eliminatedPlayer: null,
+    };
+    gameState.promotionState = gameState.promotionState || {
+      isAwaiting: false,
+      position: null,
+      color: null,
+    };
+    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    const incrementMs =
+      gameState.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementMs;
+    gameState.timeControl = { baseMs, incrementMs };
+    gameState.teamMode = !!gameState.teamMode;
+    gameState.teamAssignments = normalizeTeamAssignments(
+      gameState.teamAssignments as TeamAssignments
+    );
+    if (gameState.winningTeam === undefined) {
+      gameState.winningTeam = null;
+    }
+    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
+      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    }
+    CLOCK_COLORS.forEach((color) => {
+      if (typeof gameState.clocks[color] !== "number") {
+        gameState.clocks[color] = baseMs;
+      }
+    });
+    if (gameState.turnStartedAt === undefined) {
+      gameState.turnStartedAt = null;
+    }
+    gameState.justEliminated = null;
+
+    let pieces = deserializeBitboardPieces(gameState.bitboardState?.pieces);
+    const eliminatedPieceBitboards = gameState.eliminatedPieceBitboards
+      ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
+      : createEmptyPieceBitboards();
+    if (
+      (!gameState.bitboardState || !gameState.bitboardState.pieces) &&
+      Array.isArray(gameState.boardState)
+    ) {
+      const normalizedBoard = this.convertBoardState(gameState.boardState, false);
+      const fallbackBitboards = syncBitboardsFromArray(
+        normalizedBoard,
+        gameState.eliminatedPlayers
+      );
+      pieces = fallbackBitboards.pieces;
+      gameState.bitboardState = {
+        pieces: serializeBitboardPieces(pieces),
+      } as any;
+    }
+    let workingState: GameState = {
+      ...gameState,
+      boardState: bitboardToArray(pieces),
+      bitboardState: rebuildBitboardStateFromPieces(
+        pieces,
+        gameState.eliminatedPlayers,
+        gameState.enPassantTargets
+      ),
+      eliminatedPieceBitboards,
+    };
+
+    workingState.checkStatus = updateAllCheckStatus(workingState);
+    workingState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      workingState,
+      workingState.currentPlayerTurn
+    );
+
+    const { from, to } = moveData;
+    if (
+      from.row < 0 ||
+      from.row >= 14 ||
+      from.col < 0 ||
+      from.col >= 14 ||
+      to.row < 0 ||
+      to.row >= 14 ||
+      to.col < 0 ||
+      to.col >= 14
+    ) {
+      return gameData;
+    }
+
+    if (moveData.playerColor !== workingState.currentPlayerTurn) {
+      return gameData;
+    }
+
+    if (gameState.eliminatedPlayers.includes(moveData.playerColor)) {
+      return gameData;
+    }
+
+    const pieceCode = getPieceAtFromBitboard(pieces, from.row, from.col);
+    if (!pieceCode || pieceCode !== moveData.pieceCode) {
+      return gameData;
+    }
+
+    if (pieceCode[0] !== moveData.playerColor) {
+      return gameData;
+    }
+
+    const now = Date.now();
+    const moverColor = moveData.playerColor as ClockColor;
+    if (!CLOCK_COLORS.includes(moverColor)) {
+      return gameData;
+    }
+    if (gameState.turnStartedAt === null) {
+      gameState.turnStartedAt = now;
+    }
+    const elapsedMs = Math.max(0, now - (gameState.turnStartedAt ?? now));
+    if (gameState.teamMode) {
+      const teamId = getTeamForColor(gameState.teamAssignments as TeamAssignments, moverColor);
+      const teamColors = getTeamColors(gameState.teamAssignments as TeamAssignments, teamId);
+      const baseRemaining = Math.min(
+        ...teamColors.map((color) => gameState.clocks[color])
+      );
+      const remainingMs = Math.max(0, baseRemaining - elapsedMs);
+      syncTeamClocks(
+        gameState.clocks as { r: number; b: number; y: number; g: number },
+        gameState.teamAssignments as TeamAssignments,
+        teamId,
+        remainingMs
+      );
+      if (remainingMs <= 0) {
+        return this.applyTimeoutToGameData(
+          gameData,
+          moverColor,
+          now,
+          pieces,
+          eliminatedPieceBitboards
+        );
+      }
+    } else {
+      const remainingMs = Math.max(0, gameState.clocks[moverColor] - elapsedMs);
+      gameState.clocks[moverColor] = remainingMs;
+      if (remainingMs <= 0) {
+        return this.applyTimeoutToGameData(
+          gameData,
+          moverColor,
+          now,
+          pieces,
+          eliminatedPieceBitboards
+        );
+      }
+    }
+
+    const validMoves = getValidMovesBB(pieceCode, from, workingState);
+    const targetBit = squareBit(to.row * 14 + to.col);
+    if ((validMoves & targetBit) === 0n) {
+      return gameData;
+    }
+
+    gameState.enPassantTargets = gameState.enPassantTargets.filter(
+      (target) => target.createdByTurn !== gameState.currentPlayerTurn
+    );
+
+    const pieceType = pieceCode[1];
+    const isCastling = isCastlingMove(
+      pieceCode,
+      from.row,
+      from.col,
+      to.row,
+      to.col
+    );
+    const enPassantTarget = gameState.enPassantTargets.find(
+      (target) =>
+        target.position.row === to.row &&
+        target.position.col === to.col &&
+        pieceType === "P" &&
+        target.createdBy.charAt(0) !== moveData.playerColor
+    );
+    const isEnPassant = !!enPassantTarget;
+
+    let capturedPiece: string | null = null;
+    let capturedRow = to.row;
+    let capturedCol = to.col;
+
+    if (isEnPassant && enPassantTarget) {
+      switch (enPassantTarget.createdBy.charAt(0)) {
+        case "r":
+          capturedRow = enPassantTarget.position.row - 1;
+          capturedCol = enPassantTarget.position.col;
+          break;
+        case "y":
+          capturedRow = enPassantTarget.position.row + 1;
+          capturedCol = enPassantTarget.position.col;
+          break;
+        case "b":
+          capturedRow = enPassantTarget.position.row;
+          capturedCol = enPassantTarget.position.col + 1;
+          break;
+        case "g":
+          capturedRow = enPassantTarget.position.row;
+          capturedCol = enPassantTarget.position.col - 1;
+          break;
+        default:
+          break;
+      }
+      capturedPiece = getPieceAtFromBitboard(pieces, capturedRow, capturedCol);
+    } else {
+      capturedPiece = getPieceAtFromBitboard(pieces, to.row, to.col);
+    }
+
+    if (capturedPiece && capturedPiece[1] === "K") {
+      const targetColor = capturedPiece[0];
+      if (!gameState.eliminatedPlayers.includes(targetColor)) {
+        return gameData;
+      }
+    }
+
+    const fromIdx = from.row * 14 + from.col;
+    const toIdx = to.row * 14 + to.col;
+    const moveMask = squareBit(fromIdx) | squareBit(toIdx);
+    pieces[pieceCode] ^= moveMask;
+
+    if (capturedPiece) {
+      const capturedMask = squareBit(capturedRow * 14 + capturedCol);
+      pieces[capturedPiece] ^= capturedMask;
+    }
+
+    if (isCastling) {
+      const rookCoords = getRookCastlingCoords(moveData.playerColor, {
+        row: to.row,
+        col: to.col,
+      });
+      if (rookCoords) {
+        const rookCode = `${moveData.playerColor}R`;
+        const rookFromIdx = rookCoords.rookFrom.row * 14 + rookCoords.rookFrom.col;
+        const rookToIdx = rookCoords.rookTo.row * 14 + rookCoords.rookTo.col;
+        pieces[rookCode] ^= squareBit(rookFromIdx) | squareBit(rookToIdx);
+        const rookId = getRookIdentifier(
+          moveData.playerColor,
+          rookCoords.rookFrom.row,
+          rookCoords.rookFrom.col
+        );
+        if (rookId) {
+          gameState.hasMoved[rookId as keyof typeof gameState.hasMoved] = true;
+        }
+      }
+    }
+
+    if (pieceType === "K") {
+      gameState.hasMoved[`${moveData.playerColor}K` as keyof typeof gameState.hasMoved] = true;
+    } else if (pieceType === "R") {
+      const rookId = getRookIdentifier(moveData.playerColor, from.row, from.col);
+      if (rookId) {
+        gameState.hasMoved[rookId as keyof typeof gameState.hasMoved] = true;
+      }
+    }
+
+    if (capturedPiece && capturedPiece[1] === "R") {
+      const capturedRookId = getRookIdentifier(
+        capturedPiece[0],
+        capturedRow,
+        capturedCol
+      );
+      if (capturedRookId) {
+        gameState.hasMoved[capturedRookId as keyof typeof gameState.hasMoved] = true;
+      }
+    }
+
+    if (capturedPiece && !gameState.eliminatedPlayers.includes(capturedPiece[0])) {
+      gameState.capturedPieces[moveData.playerColor as keyof typeof gameState.capturedPieces].push(
+        capturedPiece
+      );
+      const capturedValue =
+        PIECE_VALUES[capturedPiece[1] as keyof typeof PIECE_VALUES] || 0;
+      gameState.scores[moveData.playerColor as keyof typeof gameState.scores] += capturedValue;
+    }
+
+    if (pieceType === "P") {
+      const isTwoSquareMove =
+        (Math.abs(to.row - from.row) === 2 && to.col === from.col) ||
+        (Math.abs(to.col - from.col) === 2 && to.row === from.row);
+      if (isTwoSquareMove) {
+        const skippedSquare = (() => {
+          switch (moveData.playerColor) {
+            case "r":
+              return { row: to.row + 1, col: to.col };
+            case "y":
+              return { row: to.row - 1, col: to.col };
+            case "b":
+              return { row: to.row, col: to.col - 1 };
+            case "g":
+              return { row: to.row, col: to.col + 1 };
+            default:
+              return null;
+          }
+        })();
+        if (skippedSquare) {
+          gameState.enPassantTargets.push({
+            position: skippedSquare,
+            createdBy: pieceCode,
+            createdByTurn: moveData.playerColor,
+          });
+        }
+      }
+    }
+
+    const isPromotion =
+      pieceType === "P" &&
+      (squareBit(to.row * 14 + to.col) & PROMOTION_MASKS[moveData.playerColor]) !== 0n;
+
+    if (isPromotion) {
+      gameState.promotionState = {
+        isAwaiting: true,
+        position: { row: to.row, col: to.col },
+        color: moveData.playerColor,
+      };
+      gameState.gameStatus = "promotion";
+    }
+
+    const rebuiltState = rebuildBitboardStateFromPieces(
+      pieces,
+      gameState.eliminatedPlayers,
+      gameState.enPassantTargets
+    );
+    const hydratedState: GameState = {
+      ...gameState,
+      bitboardState: rebuiltState,
+      boardState: bitboardToArray(rebuiltState.pieces, eliminatedPieceBitboards),
+      eliminatedPieceBitboards,
+    };
+    hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+    hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      hydratedState,
+      hydratedState.currentPlayerTurn
+    );
+
+    if (!hydratedState.promotionState.isAwaiting) {
+      const otherPlayers = turnOrder.filter(
+        (player) =>
+          player !== moveData.playerColor &&
+          !hydratedState.eliminatedPlayers.includes(player)
+      );
+
+      for (const opponent of otherPlayers) {
+        const opponentHasMoves = hasAnyLegalMoves(opponent, hydratedState);
+        if (!opponentHasMoves) {
+          const inCheck = isKingInCheck(opponent, hydratedState);
+          const status = inCheck ? "checkmate" : "stalemate";
+          if (hydratedState.teamMode) {
+            return this.applyTeamEliminationToGameData(
+              gameData,
+              opponent as ClockColor,
+              status,
+              now,
+              rebuiltState.pieces,
+              hydratedState.eliminatedPieceBitboards,
+              {
+                from,
+                to,
+                pieceCode,
+                playerColor: moveData.playerColor,
+                playerId,
+                capturedPiece: capturedPiece ?? null,
+              }
+            );
+          }
+          hydratedState.gameStatus = status;
+          hydratedState.eliminatedPlayers.push(opponent);
+          hydratedState.justEliminated = opponent;
+          this.captureEliminatedPieces(
+            hydratedState.eliminatedPieceBitboards,
+            rebuiltState.pieces,
+            opponent as ClockColor
+          );
+          hydratedState.gameOverState = {
+            isGameOver: true,
+            status,
+            eliminatedPlayer: opponent,
+          };
+
+          if (inCheck) {
+            hydratedState.scores[moveData.playerColor as keyof typeof hydratedState.scores] +=
+              GAME_BONUSES.CHECKMATE;
+          } else {
+            const remainingPlayers = turnOrder.filter(
+              (player) => !hydratedState.eliminatedPlayers.includes(player)
+            );
+            hydratedState.scores[moveData.playerColor as keyof typeof hydratedState.scores] +=
+              remainingPlayers.length * GAME_BONUSES.STALEMATE_PER_PLAYER;
+          }
+          break;
+        }
+      }
+
+      const nextPlayer = this.getNextPlayer(
+        moveData.playerColor,
+        hydratedState.eliminatedPlayers
+      );
+      hydratedState.currentPlayerTurn = nextPlayer;
+      gameData.currentPlayerTurn = nextPlayer;
+
+      if (hydratedState.eliminatedPlayers.length >= 3) {
+        const winner = turnOrder.find(
+          (player) => !hydratedState.eliminatedPlayers.includes(player)
+        );
+        if (winner) {
+          hydratedState.winner = winner;
+          hydratedState.gameStatus = "finished";
+          hydratedState.gameOverState = {
+            isGameOver: true,
+            status: "finished",
+            eliminatedPlayer: null,
+          };
+          gameData.winner = winner;
+          gameData.status = "finished";
+        }
+      } else if (hydratedState.gameStatus !== "promotion") {
+        hydratedState.gameStatus = "active";
+      }
+    }
+
+    if (hydratedState.timeControl.incrementMs > 0) {
+      if (hydratedState.teamMode) {
+        const teamId = getTeamForColor(
+          hydratedState.teamAssignments as TeamAssignments,
+          moverColor
+        );
+        const baseRemaining = Math.min(
+          ...getTeamColors(hydratedState.teamAssignments as TeamAssignments, teamId).map(
+            (color) => hydratedState.clocks[color]
+          )
+        );
+        syncTeamClocks(
+          hydratedState.clocks as { r: number; b: number; y: number; g: number },
+          hydratedState.teamAssignments as TeamAssignments,
+          teamId,
+          Math.max(0, baseRemaining + hydratedState.timeControl.incrementMs)
+        );
+      } else {
+        hydratedState.clocks[moverColor] = Math.max(
+          0,
+          hydratedState.clocks[moverColor] + hydratedState.timeControl.incrementMs
+        );
+      }
+    }
+    if (
+      hydratedState.gameStatus === "finished" ||
+      hydratedState.gameStatus === "checkmate" ||
+      hydratedState.gameStatus === "stalemate"
+    ) {
+      hydratedState.turnStartedAt = null;
+    } else {
+      hydratedState.turnStartedAt = now;
+    }
+
+    const finalBitboards = rebuildBitboardStateFromPieces(
+      rebuiltState.pieces,
+      hydratedState.eliminatedPlayers,
+      hydratedState.enPassantTargets
+    );
+    hydratedState.bitboardState = finalBitboards;
+    hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+    hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      hydratedState,
+      hydratedState.currentPlayerTurn
+    );
+
+    hydratedState.version = (hydratedState.version ?? 0) + 1;
+    gameData.gameState = this.toSerializedGameState(
+      hydratedState,
+      finalBitboards.pieces
+    );
+    gameData.lastMove = {
+      from,
+      to,
+      pieceCode,
+      playerColor: moveData.playerColor,
+      playerId: playerId,
+      timestamp: now,
+      capturedPiece: capturedPiece ?? null,
+    };
+    gameData.lastActivity = now;
+
+    return gameData;
+  }
+
+  private applyTimeoutToGameData(
+    gameData: any,
+    playerColor: ClockColor,
+    now: number,
+    pieces?: Record<string, bigint>,
+    eliminatedPieceBitboards?: Record<string, bigint>
+  ) {
+    const gameState = gameData.gameState as GameState;
+    if (gameState.teamMode) {
+      const resolvedPieces =
+        pieces ?? deserializeBitboardPieces(gameState.bitboardState?.pieces);
+      const resolvedEliminatedPieces =
+        eliminatedPieceBitboards ??
+        (gameState.eliminatedPieceBitboards
+          ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
+          : createEmptyPieceBitboards());
+      return this.applyTeamEliminationToGameData(
+        gameData,
+        playerColor,
+        "finished",
+        now,
+        resolvedPieces,
+        resolvedEliminatedPieces
+      );
+    }
+    gameState.eliminatedPlayers = gameState.eliminatedPlayers || [];
+    gameState.enPassantTargets = gameState.enPassantTargets || [];
+    gameState.scores = gameState.scores || { r: 0, b: 0, y: 0, g: 0 };
+    gameState.hasMoved = gameState.hasMoved || {
+      rK: false, rR1: false, rR2: false,
+      bK: false, bR1: false, bR2: false,
+      yK: false, yR1: false, yR2: false,
+      gK: false, gR1: false, gR2: false,
+    };
+    gameState.gameOverState = gameState.gameOverState || {
+      isGameOver: false,
+      status: null,
+      eliminatedPlayer: null,
+    };
+    gameState.promotionState = { isAwaiting: false, position: null, color: null };
+
+    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    const incrementMs =
+      gameState.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementMs;
+    gameState.timeControl = { baseMs, incrementMs };
+    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
+      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    }
+    CLOCK_COLORS.forEach((color) => {
+      if (typeof gameState.clocks[color] !== "number") {
+        gameState.clocks[color] = baseMs;
+      }
+    });
+
+    let resolvedPieces =
+      pieces ?? deserializeBitboardPieces(gameState.bitboardState?.pieces);
+    if (
+      (!gameState.bitboardState || !gameState.bitboardState.pieces) &&
+      Array.isArray(gameState.boardState)
+    ) {
+      const normalizedBoard = this.convertBoardState(gameState.boardState, false);
+      const fallbackBitboards = syncBitboardsFromArray(
+        normalizedBoard,
+        gameState.eliminatedPlayers
+      );
+      resolvedPieces = fallbackBitboards.pieces;
+      gameState.bitboardState = {
+        pieces: serializeBitboardPieces(resolvedPieces),
+      } as any;
+    }
+
+    const resolvedEliminatedPieces =
+      eliminatedPieceBitboards ??
+      (gameState.eliminatedPieceBitboards
+        ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
+        : createEmptyPieceBitboards());
+
+    gameState.clocks[playerColor] = 0;
+
+    if (!gameState.eliminatedPlayers.includes(playerColor)) {
+      gameState.eliminatedPlayers.push(playerColor);
+      gameState.justEliminated = playerColor;
+      this.captureEliminatedPieces(
+        resolvedEliminatedPieces,
+        resolvedPieces,
+        playerColor,
+        true
+      );
+    }
+
+    // Remove en passant targets created by the eliminated player
+    gameState.enPassantTargets = gameState.enPassantTargets.filter(
+      (target) => target.createdBy?.charAt(0) !== playerColor
+    );
+
+    const finalBitboards = rebuildBitboardStateFromPieces(
+      resolvedPieces,
+      gameState.eliminatedPlayers,
+      gameState.enPassantTargets
+    );
+
+    const hydratedState: GameState = {
+      ...gameState,
+      boardState: bitboardToArray(finalBitboards.pieces, resolvedEliminatedPieces),
+      bitboardState: finalBitboards,
+      eliminatedPieceBitboards: resolvedEliminatedPieces,
+    };
+
+    hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+    hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      hydratedState,
+      hydratedState.currentPlayerTurn
+    );
+
+    if (hydratedState.eliminatedPlayers.length >= 3) {
+      const winner = turnOrder.find(
+        (player) => !hydratedState.eliminatedPlayers.includes(player)
+      );
+      if (winner) {
+        hydratedState.winner = winner;
+        hydratedState.gameStatus = "finished";
+        hydratedState.gameOverState = {
+          isGameOver: true,
+          status: "finished",
+          eliminatedPlayer: null,
+        };
+        gameData.winner = winner;
+        gameData.status = "finished";
+      }
+      hydratedState.turnStartedAt = null;
+    } else {
+      const nextPlayer = this.getNextPlayer(playerColor, hydratedState.eliminatedPlayers);
+      hydratedState.currentPlayerTurn = nextPlayer;
+      gameData.currentPlayerTurn = nextPlayer;
+      hydratedState.gameStatus = "active";
+      hydratedState.turnStartedAt = now;
+    }
+
+    hydratedState.version = (hydratedState.version ?? 0) + 1;
+    gameData.gameState = this.toSerializedGameState(
+      hydratedState,
+      finalBitboards.pieces
+    );
+    gameData.lastActivity = now;
+
+    return gameData;
+  }
+
+  private applyNoMoveEliminationToGameData(
+    gameData: any,
+    playerColor: ClockColor,
+    status: "checkmate" | "stalemate",
+    now: number,
+    pieces?: Record<string, bigint>,
+    eliminatedPieceBitboards?: Record<string, bigint>
+  ) {
+    const gameState = gameData.gameState as GameState;
+    gameState.eliminatedPlayers = gameState.eliminatedPlayers || [];
+    gameState.enPassantTargets = gameState.enPassantTargets || [];
+    gameState.scores = gameState.scores || { r: 0, b: 0, y: 0, g: 0 };
+    gameState.hasMoved = gameState.hasMoved || {
+      rK: false, rR1: false, rR2: false,
+      bK: false, bR1: false, bR2: false,
+      yK: false, yR1: false, yR2: false,
+      gK: false, gR1: false, gR2: false,
+    };
+    gameState.gameOverState = gameState.gameOverState || {
+      isGameOver: false,
+      status: null,
+      eliminatedPlayer: null,
+    };
+    gameState.promotionState = { isAwaiting: false, position: null, color: null };
+
+    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    const incrementMs =
+      gameState.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementMs;
+    gameState.timeControl = { baseMs, incrementMs };
+    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
+      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    }
+    CLOCK_COLORS.forEach((color) => {
+      if (typeof gameState.clocks[color] !== "number") {
+        gameState.clocks[color] = baseMs;
+      }
+    });
+
+    let resolvedPieces =
+      pieces ?? deserializeBitboardPieces(gameState.bitboardState?.pieces);
+    if (
+      (!gameState.bitboardState || !gameState.bitboardState.pieces) &&
+      Array.isArray(gameState.boardState)
+    ) {
+      const normalizedBoard = this.convertBoardState(gameState.boardState, false);
+      const fallbackBitboards = syncBitboardsFromArray(
+        normalizedBoard,
+        gameState.eliminatedPlayers
+      );
+      resolvedPieces = fallbackBitboards.pieces;
+      gameState.bitboardState = {
+        pieces: serializeBitboardPieces(resolvedPieces),
+      } as any;
+    }
+
+    const resolvedEliminatedPieces =
+      eliminatedPieceBitboards ??
+      (gameState.eliminatedPieceBitboards
+        ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
+        : createEmptyPieceBitboards());
+
+    if (gameState.teamMode) {
+      return this.applyTeamEliminationToGameData(
+        gameData,
+        playerColor,
+        status,
+        now,
+        resolvedPieces,
+        resolvedEliminatedPieces
+      );
+    }
+
+    if (!gameState.eliminatedPlayers.includes(playerColor)) {
+      gameState.eliminatedPlayers.push(playerColor);
+      gameState.justEliminated = playerColor;
+      this.captureEliminatedPieces(
+        resolvedEliminatedPieces,
+        resolvedPieces,
+        playerColor,
+        true
+      );
+    }
+
+    // Remove en passant targets created by the eliminated player
+    gameState.enPassantTargets = gameState.enPassantTargets.filter(
+      (target) => target.createdBy?.charAt(0) !== playerColor
+    );
+
+    const scoringPlayer = gameData.lastMove?.playerColor;
+    if (
+      scoringPlayer &&
+      scoringPlayer !== playerColor &&
+      CLOCK_COLORS.includes(scoringPlayer as ClockColor) &&
+      !gameState.eliminatedPlayers.includes(scoringPlayer)
+    ) {
+      if (status === "checkmate") {
+        gameState.scores[scoringPlayer as ClockColor] += GAME_BONUSES.CHECKMATE;
+      } else {
+        const remainingPlayers = turnOrder.filter(
+          (player) => !gameState.eliminatedPlayers.includes(player)
+        );
+        gameState.scores[scoringPlayer as ClockColor] +=
+          remainingPlayers.length * GAME_BONUSES.STALEMATE_PER_PLAYER;
+      }
+    }
+
+    const finalBitboards = rebuildBitboardStateFromPieces(
+      resolvedPieces,
+      gameState.eliminatedPlayers,
+      gameState.enPassantTargets
+    );
+
+    const hydratedState: GameState = {
+      ...gameState,
+      boardState: bitboardToArray(finalBitboards.pieces, resolvedEliminatedPieces),
+      bitboardState: finalBitboards,
+      eliminatedPieceBitboards: resolvedEliminatedPieces,
+    };
+
+    hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+    hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      hydratedState,
+      hydratedState.currentPlayerTurn
+    );
+
+    hydratedState.gameOverState = {
+      isGameOver: true,
+      status,
+      eliminatedPlayer: playerColor,
+    };
+    hydratedState.gameStatus = status;
+
+    if (hydratedState.eliminatedPlayers.length >= 3) {
+      const winner = turnOrder.find(
+        (player) => !hydratedState.eliminatedPlayers.includes(player)
+      );
+      if (winner) {
+        hydratedState.winner = winner;
+        hydratedState.gameStatus = "finished";
+        hydratedState.gameOverState = {
+          isGameOver: true,
+          status: "finished",
+          eliminatedPlayer: null,
+        };
+        gameData.winner = winner;
+        gameData.status = "finished";
+      }
+      hydratedState.turnStartedAt = null;
+    } else {
+      const nextPlayer = this.getNextPlayer(playerColor, hydratedState.eliminatedPlayers);
+      hydratedState.currentPlayerTurn = nextPlayer;
+      gameData.currentPlayerTurn = nextPlayer;
+      hydratedState.gameStatus = "active";
+      hydratedState.turnStartedAt = now;
+    }
+
+    hydratedState.version = (hydratedState.version ?? 0) + 1;
+    gameData.gameState = this.toSerializedGameState(
+      hydratedState,
+      finalBitboards.pieces
+    );
+    gameData.lastActivity = now;
+
+    return gameData;
+  }
+
+  private applyTeamEliminationToGameData(
+    gameData: any,
+    losingColor: ClockColor,
+    status: "checkmate" | "stalemate" | "finished",
+    now: number,
+    pieces: Record<string, bigint>,
+    eliminatedPieceBitboards: Record<string, bigint>,
+    lastMove?: {
+      from: { row: number; col: number };
+      to: { row: number; col: number };
+      pieceCode: string;
+      playerColor: string;
+      playerId: string;
+      capturedPiece?: string | null;
+    }
+  ) {
+    const gameState = gameData.gameState as GameState;
+    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    const incrementMs =
+      gameState.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementMs;
+    gameState.timeControl = { baseMs, incrementMs };
+    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
+      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    }
+    CLOCK_COLORS.forEach((color) => {
+      if (typeof gameState.clocks[color] !== "number") {
+        gameState.clocks[color] = baseMs;
+      }
+    });
+    gameState.teamMode = !!gameState.teamMode;
+    gameState.teamAssignments = normalizeTeamAssignments(
+      gameState.teamAssignments as TeamAssignments
+    );
+    const losingTeam = getTeamForColor(gameState.teamAssignments, losingColor);
+    const winningTeam = getOpposingTeam(losingTeam);
+    const losingColors = getTeamColors(gameState.teamAssignments, losingTeam);
+    const winningColors = getTeamColors(gameState.teamAssignments, winningTeam);
+
+    syncTeamClocks(
+      gameState.clocks as { r: number; b: number; y: number; g: number },
+      gameState.teamAssignments as TeamAssignments,
+      losingTeam,
+      0
+    );
+
+    losingColors.forEach((color) => {
+      if (!gameState.eliminatedPlayers.includes(color)) {
+        gameState.eliminatedPlayers.push(color);
+        this.captureEliminatedPieces(eliminatedPieceBitboards, pieces, color, true);
+      }
+    });
+
+    gameState.justEliminated = losingColor;
+    gameState.winningTeam = winningTeam;
+    gameState.winner = winningColors[0] ?? null;
+    gameState.gameStatus = status;
+    gameState.gameOverState = {
+      isGameOver: true,
+      status,
+      eliminatedPlayer: losingColor,
+    };
+    gameState.currentPlayerTurn = winningColors[0] ?? gameState.currentPlayerTurn;
+    gameState.turnStartedAt = null;
+    gameData.currentPlayerTurn = gameState.currentPlayerTurn;
+    gameData.status = "finished";
+
+    // Remove en passant targets created by losing team
+    gameState.enPassantTargets = gameState.enPassantTargets.filter(
+      (target) => !losingColors.includes(target.createdBy?.charAt(0) as ClockColor)
+    );
+
+    const finalBitboards = rebuildBitboardStateFromPieces(
+      pieces,
+      gameState.eliminatedPlayers,
+      gameState.enPassantTargets
+    );
+
+    const hydratedState: GameState = {
+      ...gameState,
+      boardState: bitboardToArray(finalBitboards.pieces, eliminatedPieceBitboards),
+      bitboardState: finalBitboards,
+      eliminatedPieceBitboards,
+    };
+
+    hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+    hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      hydratedState,
+      hydratedState.currentPlayerTurn
+    );
+    hydratedState.version = (hydratedState.version ?? 0) + 1;
+
+    gameData.gameState = this.toSerializedGameState(
+      hydratedState,
+      finalBitboards.pieces
+    );
+
+    if (lastMove) {
+      gameData.lastMove = {
+        ...lastMove,
+        timestamp: now,
+        capturedPiece: lastMove.capturedPiece ?? null,
+      };
+    }
+    gameData.lastActivity = now;
+
+    return gameData;
+  }
   
   // OPTIMIZATION: Connection keep-alive
-  private keepAliveInterval: NodeJS.Timeout | null = null;
+  private keepAliveInterval: ReturnType<typeof setInterval> | null = null;
   private readonly KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
 
   // Authentication methods with lightweight auth monitoring
   async signInAnonymously(): Promise<string> {
+    const withTimeout = async <T>(
+      promise: Promise<T>,
+      timeoutMs: number,
+      label: string
+    ): Promise<T> => {
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+      });
+      try {
+        return await Promise.race([promise, timeoutPromise]);
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      }
+    };
+
     try {
       
-      // Check if there's a current user before signing out
       const currentUser = auth().currentUser;
       if (currentUser) {
-        await auth().signOut();
+        this.currentUser = currentUser;
+        this.setupLightweightAuthListener();
+        this.startKeepAlive();
+        return currentUser.uid;
       }
-      this.currentUser = null;
       
       // Sign in anonymously
-      const userCredential = await auth().signInAnonymously();
+      const userCredential = await withTimeout(
+        auth().signInAnonymously(),
+        10000,
+        "Authentication"
+      );
       this.currentUser = userCredential.user;
       
       // Set up lightweight auth state listener (minimal overhead)
@@ -184,15 +1283,20 @@ class RealtimeDatabaseService {
     // Import initial board state
     const { initialBoardState } = require("../state/boardState");
 
-    // Create initial game state
-    const flattenedBoardState = initialBoardState.map((row: any) =>
-      row.map((cell: any) => (cell === null ? "" : cell))
-    );
+    const initialBitboards = syncBitboardsFromArray(initialBoardState);
+    const serializedPieces = serializeBitboardPieces(initialBitboards.pieces);
 
-    const newGameState = {
-      boardState: flattenedBoardState,
+    const settings = settingsService.getSettings();
+    const botDifficulty =
+      settings?.game?.botDifficulty ?? BOT_CONFIG.DEFAULT_DIFFICULTY;
+    const botTeamMode = settings?.game?.botTeamMode ?? false;
+
+    const newGameState: SerializedGameState = {
+      bitboardState: { pieces: serializedPieces },
+      eliminatedPieceBitboards: serializeBitboardPieces(createEmptyPieceBitboards()),
       currentPlayerTurn: "r",
       gameStatus: "waiting",
+      version: 0,
       selectedPiece: null,
       validMoves: [],
       capturedPieces: { r: [], b: [], y: [], g: [] },
@@ -201,6 +1305,17 @@ class RealtimeDatabaseService {
       eliminatedPlayers: [],
       justEliminated: null,
       scores: { r: 0, b: 0, y: 0, g: 0 },
+      timeControl: { baseMs: DEFAULT_TIME_CONTROL.baseMs, incrementMs: DEFAULT_TIME_CONTROL.incrementMs },
+      clocks: {
+        r: DEFAULT_TIME_CONTROL.baseMs,
+        b: DEFAULT_TIME_CONTROL.baseMs,
+        y: DEFAULT_TIME_CONTROL.baseMs,
+        g: DEFAULT_TIME_CONTROL.baseMs,
+      },
+      turnStartedAt: null,
+      teamMode: false,
+      teamAssignments: { ...DEFAULT_TEAM_ASSIGNMENTS },
+      winningTeam: null,
       promotionState: { isAwaiting: false, position: null, color: null },
       hasMoved: {
         rK: false,
@@ -224,9 +1339,23 @@ class RealtimeDatabaseService {
       },
       history: [],
       historyIndex: 0,
+      viewingHistoryIndex: null,
+      lastMove: null,
       players: [],
       isHost: true,
       canStartGame: false,
+      gameMode: "online",
+      botPlayers: [],
+      botDifficulty,
+      botTeamMode,
+      currentGame: null,
+      discoveredGames: [],
+      isDiscovering: false,
+      isLoading: false,
+      isConnected: false,
+      connectionError: null,
+      isEditingName: false,
+      tempName: "",
     };
 
     const hostPlayer = {
@@ -321,7 +1450,11 @@ class RealtimeDatabaseService {
         isOnline: true,
       };
 
-      await gameRef.child(`players/${user.uid}`).set(newPlayer);
+      await gameRef.update({
+        [`players/${user.uid}`]: newPlayer,
+        lastActivity: Date.now(),
+        "gameState/version": database.ServerValue.increment(1),
+      });
     } catch (error) {
       console.error("Error joining game:", error);
       throw error;
@@ -421,6 +1554,7 @@ class RealtimeDatabaseService {
             gameData.players[newHostId].isHost = true;
           }
 
+          gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
           gameData.lastActivity = Date.now();
 
           return gameData;
@@ -485,6 +1619,18 @@ class RealtimeDatabaseService {
       await gameRef.update({
         status: "playing",
         "gameState/gameStatus": "active",
+        "gameState/version": database.ServerValue.increment(1),
+        "gameState/timeControl": {
+          baseMs: DEFAULT_TIME_CONTROL.baseMs,
+          incrementMs: DEFAULT_TIME_CONTROL.incrementMs,
+        },
+        "gameState/clocks": {
+          r: DEFAULT_TIME_CONTROL.baseMs,
+          b: DEFAULT_TIME_CONTROL.baseMs,
+          y: DEFAULT_TIME_CONTROL.baseMs,
+          g: DEFAULT_TIME_CONTROL.baseMs,
+        },
+        "gameState/turnStartedAt": Date.now(),
       });
 
     } catch (error) {
@@ -521,6 +1667,12 @@ class RealtimeDatabaseService {
         });
 
         gameData.players = processedPlayers;
+        if (gameData.gameState) {
+          gameData.gameState = this.buildBitboardStateFromSnapshot(
+            gameData.gameState as unknown as SerializedGameState,
+            gameId
+          );
+        }
 
         onUpdate(gameData);
       } else {
@@ -610,28 +1762,50 @@ class RealtimeDatabaseService {
           return gameData;
         }
 
-        // Apply promotion to board state
-        const boardState = gameData.gameState.boardState;
-        const pieceCode = boardState[row][col];
-        
-        // Validate that there's a pawn to promote
-        if (!pieceCode || pieceCode[0] !== promotionData.playerColor || pieceCode[1] !== 'P') {
+        const gameState = gameData.gameState as GameState;
+        let pieces = deserializeBitboardPieces(gameState.bitboardState?.pieces);
+        if (
+          (!gameState.bitboardState || !gameState.bitboardState.pieces) &&
+          Array.isArray(gameState.boardState)
+        ) {
+          const normalizedBoard = this.convertBoardState(gameState.boardState, false);
+          const fallbackBitboards = syncBitboardsFromArray(
+            normalizedBoard,
+            gameState.eliminatedPlayers || []
+          );
+          pieces = fallbackBitboards.pieces;
+          gameState.bitboardState = {
+            pieces: serializeBitboardPieces(pieces),
+          } as any;
+        }
+        const pieceCode = getPieceAtFromBitboard(pieces, row, col);
+
+        if (!pieceCode || pieceCode[0] !== promotionData.playerColor || pieceCode[1] !== "P") {
           console.warn(`Invalid promotion: piece=${pieceCode}, playerColor=${promotionData.playerColor}`);
           return gameData;
         }
 
-        // Replace pawn with promoted piece
-        boardState[row][col] = `${promotionData.playerColor}${promotionData.pieceType}`;
+        if (gameState.promotionState?.color !== promotionData.playerColor) {
+          console.warn(`Promotion color mismatch: state=${gameState.promotionState?.color}`);
+          return gameData;
+        }
+
+        const promotionBit = squareBit(row * 14 + col);
+        pieces[pieceCode] ^= promotionBit;
+        const promotedCode = `${promotionData.playerColor}${promotionData.pieceType}`;
+        pieces[promotedCode] = (pieces[promotedCode] ?? 0n) | promotionBit;
 
         // Clear promotion state
-        gameData.gameState.promotionState = { isAwaiting: false, position: null, color: null };
-        gameData.gameState.gameStatus = "active";
+        gameState.promotionState = { isAwaiting: false, position: null, color: null };
+        gameState.gameStatus = "active";
 
+        const now = Date.now();
         // Update turn
-        const currentTurn = gameData.gameState.currentPlayerTurn;
-        const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
-        gameData.gameState.currentPlayerTurn = nextPlayer;
+        const currentTurn = gameState.currentPlayerTurn;
+        const nextPlayer = this.getNextPlayer(currentTurn, gameState.eliminatedPlayers || []);
+        gameState.currentPlayerTurn = nextPlayer;
         gameData.currentPlayerTurn = nextPlayer;
+        gameState.turnStartedAt = now;
 
         // ✅ CRITICAL FIX: Detect bot moves and set correct playerId for promotions
         // Check if this is a bot move by looking at the player's bot status
@@ -643,12 +1817,28 @@ class RealtimeDatabaseService {
         gameData.lastMove = {
           from: { row: -1, col: -1 }, // Special promotion move
           to: promotionData.position,
-          pieceCode: `${promotionData.playerColor}${promotionData.pieceType}`,
+          pieceCode: promotedCode,
           playerColor: promotionData.playerColor,
           playerId: playerId,
-          timestamp: Date.now(),
+          timestamp: now,
         };
-        gameData.lastActivity = Date.now();
+        gameData.lastActivity = now;
+        gameState.version = (gameState.version ?? 0) + 1;
+        const rebuiltState = rebuildBitboardStateFromPieces(
+          pieces,
+          gameState.eliminatedPlayers || [],
+          gameState.enPassantTargets || []
+        );
+        const hydratedState: GameState = {
+          ...gameState,
+          bitboardState: rebuiltState,
+        };
+        hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+        hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+          hydratedState,
+          hydratedState.currentPlayerTurn
+        );
+        gameData.gameState = this.toSerializedGameState(hydratedState, rebuiltState.pieces);
 
         return gameData;
       });
@@ -665,7 +1855,7 @@ class RealtimeDatabaseService {
     }
   }
 
-  // Ultra-fast move processing (optimized for real-time)
+  // Ultra-fast move processing (bitboard-based)
   async makeMove(
     gameId: string,
     moveData: {
@@ -673,13 +1863,14 @@ class RealtimeDatabaseService {
       to: { row: number; col: number };
       pieceCode: string;
       playerColor: string;
+      isEnPassant?: boolean;
+      enPassantTarget?: any;
     }
   ): Promise<void> {
     try {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      // Ultra-fast database transaction (minimal validation for speed)
       const gameRef = database().ref(`games/${gameId}`);
       const result = await gameRef.transaction((gameData) => {
         if (gameData === null) {
@@ -687,392 +1878,30 @@ class RealtimeDatabaseService {
           return null;
         }
 
-        // Quick player validation
         const player = gameData.players[user.uid];
-        if (!player || player.color !== gameData.gameState.currentPlayerTurn) {
-          console.warn(`Move validation failed: player=${player?.color}, currentTurn=${gameData.gameState.currentPlayerTurn}`);
-          return gameData; // Skip move silently (no logging for speed)
-        }
-
-        // Direct move application (no board state conversion for speed)
-        const boardState = gameData.gameState.boardState;
-        const piece = boardState[moveData.from.row][moveData.from.col];
-        
-        // Validate that the piece exists and belongs to the current player
-        if (!piece || piece[0] !== moveData.playerColor) {
-          console.warn(`Invalid piece move: piece=${piece}, playerColor=${moveData.playerColor}`);
+        const currentTurn = gameData.gameState.currentPlayerTurn;
+        const isTurnBot = Object.values(gameData.players || {}).some(
+          (p: any) => p?.isBot && p?.color === currentTurn
+        );
+        const canActForTurn = player && (player.color === currentTurn || (player.isHost && isTurnBot));
+        if (!canActForTurn) {
+          console.warn(
+            `Move validation failed: player=${player?.color}, currentTurn=${currentTurn}`
+          );
           return gameData;
         }
-        
-        // Validate move coordinates are within bounds
-        if (moveData.from.row < 0 || moveData.from.row >= 14 || 
-            moveData.from.col < 0 || moveData.from.col >= 14 ||
-            moveData.to.row < 0 || moveData.to.row >= 14 || 
-            moveData.to.col < 0 || moveData.to.col >= 14) {
-          console.warn(`Invalid move coordinates: from=(${moveData.from.row},${moveData.from.col}), to=(${moveData.to.row},${moveData.to.col})`);
+        if (moveData.playerColor !== currentTurn) {
+          console.warn(
+            `Move validation failed: payloadColor=${moveData.playerColor}, currentTurn=${currentTurn}`
+          );
           return gameData;
         }
-        
-        // ✅ CRITICAL FIX: Check if this is a capture move
-        const capturedPiece = boardState[moveData.to.row][moveData.to.col];
-        if (capturedPiece && capturedPiece[1] === "K") {
-          // Prevent king capture
-          console.warn(`King capture prevented: trying to capture ${capturedPiece}`);
-          return gameData;
-        }
-        
-        // ✅ CRITICAL FIX: Update scores for captures
-        if (capturedPiece && capturedPiece[0] !== moveData.playerColor) {
-          const capturedPieceType = capturedPiece[1];
-          let points = 0;
-          switch (capturedPieceType) {
-            case "P": // Pawn
-              points = 1;
-              break;
-            case "N": // Knight
-              points = 3;
-              break;
-            case "B": // Bishop
-            case "R": // Rook
-              points = 5;
-              break;
-            case "Q": // Queen
-              points = 9;
-              break;
-            case "K": // King
-              points = 20; // Special bonus for king capture
-              break;
-            default:
-              points = 0;
-          }
-          
-          // Update scores in game state
-          if (!gameData.gameState.scores) {
-            gameData.gameState.scores = { r: 0, b: 0, y: 0, g: 0 };
-          }
-          gameData.gameState.scores[moveData.playerColor as keyof typeof gameData.gameState.scores] += points;
-          
-          // Update captured pieces
-          if (!gameData.gameState.capturedPieces) {
-            gameData.gameState.capturedPieces = { r: [], b: [], y: [], g: [] };
-          }
-          const capturedColor = capturedPiece[0] as keyof typeof gameData.gameState.capturedPieces;
-          if (!gameData.gameState.capturedPieces[capturedColor]) {
-            gameData.gameState.capturedPieces[capturedColor] = [];
-          }
-          gameData.gameState.capturedPieces[capturedColor].push(capturedPiece);
-          
-        }
-        
-        // ✅ CRITICAL FIX: Check if this is a castling move
-        const isCastling = (() => {
-          const pieceType = piece[1];
-          if (pieceType !== "K") return false;
-          
-          const rowDiff = Math.abs(moveData.to.row - moveData.from.row);
-          const colDiff = Math.abs(moveData.to.col - moveData.from.col);
-          
-          return (rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2);
-        })();
-        
-        // Checking castling
-        
-        if (isCastling) {
-          // Handle castling - move both King and Rook
-          const playerColor = piece[0];
-          const kingTargetRow = moveData.to.row;
-          const kingTargetCol = moveData.to.col;
-          
-          // Castling detected
-          
-          // Determine rook positions based on castling direction
-          let rookStartRow: number = 0, rookStartCol: number = 0, rookTargetRow: number = 0, rookTargetCol: number = 0;
-          
-          if (playerColor === "r") {
-            // Red - bottom row (row 13)
-            if (kingTargetCol === 9) {
-              // Kingside castling (right)
-              rookStartRow = 13; rookStartCol = 10; // rR2
-              rookTargetRow = 13; rookTargetCol = 8;
-            } else {
-              // Queenside castling (left)
-              rookStartRow = 13; rookStartCol = 3; // rR1
-              rookTargetRow = 13; rookTargetCol = 5;
-            }
-          } else if (playerColor === "y") {
-            // Yellow - top row (row 0)
-            if (kingTargetCol === 4) {
-              // Kingside castling (right)
-              rookStartRow = 0; rookStartCol = 5; // yR2
-              rookTargetRow = 0; rookTargetCol = 3;
-            } else {
-              // Queenside castling (left)
-              rookStartRow = 0; rookStartCol = 10; // yR1
-              rookTargetRow = 0; rookTargetCol = 8;
-            }
-          } else if (playerColor === "b") {
-            // Blue - left column (col 0)
-            if (kingTargetRow === 4) {
-              // Kingside castling (up)
-              rookStartRow = 5; rookStartCol = 0; // bR2
-              rookTargetRow = 3; rookTargetCol = 0;
-            } else {
-              // Queenside castling (down)
-              rookStartRow = 10; rookStartCol = 0; // bR1
-              rookTargetRow = 8; rookTargetCol = 0;
-            }
-          } else if (playerColor === "g") {
-            // Green - right column (col 13)
-            if (kingTargetRow === 9) {
-              // Kingside castling (up)
-              rookStartRow = 8; rookStartCol = 13; // gR2
-              rookTargetRow = 10; rookTargetCol = 13;
-            } else {
-              // Queenside castling (down)
-              rookStartRow = 3; rookStartCol = 13; // gR1
-              rookTargetRow = 5; rookTargetCol = 13;
-            }
-          }
-          
-          // Move the king
-          boardState[moveData.from.row][moveData.from.col] = "";
-          boardState[kingTargetRow][kingTargetCol] = piece;
-          
-          // Move the rook
-          const rookPiece = boardState[rookStartRow][rookStartCol];
-          boardState[rookStartRow][rookStartCol] = "";
-          boardState[rookTargetRow][rookTargetCol] = rookPiece;
-          
-          // Moved rook
-          
-          // Update hasMoved flags
-          if (!gameData.gameState.hasMoved) {
-            gameData.gameState.hasMoved = {
-              rK: false, rR1: false, rR2: false,
-              bK: false, bR1: false, bR2: false,
-              yK: false, yR1: false, yR2: false,
-              gK: false, gR1: false, gR2: false,
-            };
-          }
-          
-          // Mark king and rook as moved
-          gameData.gameState.hasMoved[`${playerColor}K`] = true;
-          if (playerColor === "r") {
-            gameData.gameState.hasMoved[kingTargetCol === 9 ? "rR2" : "rR1"] = true;
-          } else if (playerColor === "y") {
-            gameData.gameState.hasMoved[kingTargetCol === 4 ? "yR2" : "yR1"] = true;
-          } else if (playerColor === "b") {
-            gameData.gameState.hasMoved[kingTargetRow === 4 ? "bR2" : "bR1"] = true;
-          } else if (playerColor === "g") {
-            gameData.gameState.hasMoved[kingTargetRow === 9 ? "gR2" : "gR1"] = true;
-          }
-          
-          // Updated hasMoved flags
-        } else {
-          // Normal move - just move the piece
-          boardState[moveData.from.row][moveData.from.col] = "";
-          boardState[moveData.to.row][moveData.to.col] = piece;
-          
-          // Update hasMoved flag for king and rook
-          if (!gameData.gameState.hasMoved) {
-            gameData.gameState.hasMoved = {
-              rK: false, rR1: false, rR2: false,
-              bK: false, bR1: false, bR2: false,
-              yK: false, yR1: false, yR2: false,
-              gK: false, gR1: false, gR2: false,
-            };
-          }
-          
-          const pieceType = piece[1];
-          const playerColor = piece[0];
-          
-          if (pieceType === "K") {
-            gameData.gameState.hasMoved[`${playerColor}K`] = true;
-          } else if (pieceType === "R") {
-            // Determine which rook moved based on position
-            if (playerColor === "r") {
-              if (moveData.from.row === 13 && moveData.from.col === 3) gameData.gameState.hasMoved.rR1 = true;
-              if (moveData.from.row === 13 && moveData.from.col === 10) gameData.gameState.hasMoved.rR2 = true;
-            } else if (playerColor === "y") {
-              if (moveData.from.row === 0 && moveData.from.col === 3) gameData.gameState.hasMoved.yR1 = true;
-              if (moveData.from.row === 0 && moveData.from.col === 10) gameData.gameState.hasMoved.yR2 = true;
-            } else if (playerColor === "b") {
-              if (moveData.from.row === 3 && moveData.from.col === 0) gameData.gameState.hasMoved.bR1 = true;
-              if (moveData.from.row === 10 && moveData.from.col === 0) gameData.gameState.hasMoved.bR2 = true;
-            } else if (playerColor === "g") {
-              if (moveData.from.row === 3 && moveData.from.col === 13) gameData.gameState.hasMoved.gR1 = true;
-              if (moveData.from.row === 10 && moveData.from.col === 13) gameData.gameState.hasMoved.gR2 = true;
-            }
-          }
-        }
 
-        // ✅ CRITICAL FIX: Check if this is a promotion move
-        const isPawn = piece?.endsWith("P");
-        let isPromotion = false;
-        
-        // Checking promotion
-        
-        if (isPawn) {
-          // Check if pawn reached promotion rank
-          const { row, col } = moveData.to;
-          const playerColor = piece[0];
-          
-          // Pawn at promotion rank
-          
-          // Promotion ranks: 
-          // 1. NEW UNIVERSAL RULE: Opposing player's first rank
-          //    - Yellow's first rank (row 0, cols 3-10): Red, Blue, Green pawns promote here
-          //    - Red's first rank (row 13, cols 3-10): Yellow, Blue, Green pawns promote here  
-          //    - Blue's first rank (col 0, rows 3-10): Red, Yellow, Green pawns promote here
-          //    - Green's first rank (col 13, rows 3-10): Red, Yellow, Blue pawns promote here
-          // 2. TRADITIONAL RULE: Specific promotion ranks
-          //    - Red pawns promote on row 6
-          //    - Yellow pawns promote on row 7
-          //    - Blue pawns promote on col 7
-          //    - Green pawns promote on col 6
-          
-          const isUniversalPromotion = (
-            (playerColor === 'r' && row === 0 && col >= 3 && col <= 10) || // Red pawn reaches Yellow's back rank
-            (playerColor === 'y' && row === 13 && col >= 3 && col <= 10) || // Yellow pawn reaches Red's back rank
-            (playerColor === 'b' && col === 13 && row >= 3 && row <= 10) || // Blue pawn reaches Green's back rank
-            (playerColor === 'g' && col === 0 && row >= 3 && row <= 10) // Green pawn reaches Blue's back rank
-          );
-          
-          const isTraditionalPromotion = (
-            (playerColor === 'r' && row === 6) || // Red pawns promote on row 6
-            (playerColor === 'y' && row === 7) || // Yellow pawns promote on row 7
-            (playerColor === 'b' && col === 7) || // Blue pawns promote on col 7
-            (playerColor === 'g' && col === 6) // Green pawns promote on col 6
-          );
-          
-          if (isUniversalPromotion || isTraditionalPromotion) {
-            isPromotion = true;
-            // Promotion detected
-          }
-        }
+        const effectivePlayerId = player.isBot
+          ? `bot_${moveData.playerColor}`
+          : user.uid;
 
-        if (isPromotion) {
-          // Set promotion state and pause game
-          gameData.gameState.promotionState = {
-            isAwaiting: true,
-            position: moveData.to,
-            color: moveData.playerColor,
-          };
-          gameData.gameState.gameStatus = "promotion";
-          // Set promotion state
-          // Don't advance turn yet - wait for promotion completion
-        } else {
-          // ✅ CRITICAL FIX: Check for elimination after move
-          const eliminationResult = this.checkForElimination(
-            gameData.gameState.boardState,
-            gameData.gameState.currentPlayerTurn,
-            gameData.gameState.eliminatedPlayers || [],
-            gameData.gameState.hasMoved || {},
-            gameData.gameState.enPassantTargets || []
-          );
-          
-          if (eliminationResult.eliminatedPlayer) {
-            
-            // Initialize eliminatedPlayers array if it doesn't exist
-            if (!gameData.gameState.eliminatedPlayers) {
-              gameData.gameState.eliminatedPlayers = [];
-            }
-            
-            // Add eliminated player to the list
-            if (!gameData.gameState.eliminatedPlayers.includes(eliminationResult.eliminatedPlayer)) {
-              gameData.gameState.eliminatedPlayers.push(eliminationResult.eliminatedPlayer);
-              gameData.gameState.justEliminated = eliminationResult.eliminatedPlayer;
-            }
-            
-            // Award points to the player who made the move
-            if (eliminationResult.reason === 'checkmate') {
-              gameData.gameState.scores[moveData.playerColor as keyof typeof gameData.gameState.scores] += 50; // CHECKMATE bonus
-            } else if (eliminationResult.reason === 'stalemate') {
-              // Award points for stalemating opponent: +10 for each player still in game
-              const remainingPlayers = ['r', 'b', 'y', 'g'].filter(
-                (player) => !gameData.gameState.eliminatedPlayers.includes(player)
-              );
-              const stalematePoints = remainingPlayers.length * 10;
-              gameData.gameState.scores[moveData.playerColor as keyof typeof gameData.gameState.scores] += stalematePoints;
-            }
-            
-            // Check if game is over (3 players eliminated)
-            if (gameData.gameState.eliminatedPlayers.length >= 3) {
-              const turnOrder = ['r', 'b', 'y', 'g'];
-              const winner = turnOrder.find(
-                (color) => !gameData.gameState.eliminatedPlayers.includes(color)
-              );
-              
-              if (winner) {
-                gameData.gameState.winner = winner;
-                gameData.gameState.gameStatus = 'finished';
-                gameData.gameState.gameOverState = {
-                  isGameOver: true,
-                  status: 'finished',
-                  eliminatedPlayer: null,
-                };
-              }
-            } else {
-              // Reset game status to active after elimination (unless game is finished)
-              gameData.gameState.gameStatus = 'active';
-            }
-          }
-          
-          // Update turn in both places for consistency
-          const currentTurn = gameData.gameState.currentPlayerTurn;
-          const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
-          gameData.gameState.currentPlayerTurn = nextPlayer;
-          gameData.currentPlayerTurn = nextPlayer; // Also update top-level turn
-        }
-        
-        // ✅ CRITICAL FIX: Detect bot moves and set correct playerId
-        // Check if this is a bot move by looking at the player's bot status
-        const isBotMove = player && player.isBot;
-        const playerId = isBotMove ? `bot_${moveData.playerColor}` : user.uid;
-        
-        gameData.lastMove = {
-          from: moveData.from,
-          to: moveData.to,
-          pieceCode: moveData.pieceCode,
-          playerColor: moveData.playerColor,
-          playerId: playerId,
-          timestamp: Date.now(),
-        };
-        
-        // Setting lastMove
-        gameData.lastActivity = Date.now();
-        
-        // ✅ CRITICAL FIX: Update move history
-        if (!gameData.gameState.history) {
-          gameData.gameState.history = [];
-        }
-        if (!gameData.gameState.historyIndex) {
-          gameData.gameState.historyIndex = 0;
-        }
-        
-        // Create a snapshot of the current game state for history
-        const historySnapshot = {
-          boardState: gameData.gameState.boardState,
-          currentPlayerTurn: gameData.gameState.currentPlayerTurn,
-          gameStatus: gameData.gameState.gameStatus,
-          scores: gameData.gameState.scores,
-          capturedPieces: gameData.gameState.capturedPieces,
-          eliminatedPlayers: gameData.gameState.eliminatedPlayers,
-          winner: gameData.gameState.winner,
-          justEliminated: gameData.gameState.justEliminated,
-          checkStatus: gameData.gameState.checkStatus,
-          promotionState: gameData.gameState.promotionState,
-          hasMoved: gameData.gameState.hasMoved,
-          enPassantTargets: gameData.gameState.enPassantTargets,
-          gameOverState: gameData.gameState.gameOverState,
-          lastMove: gameData.lastMove,
-        };
-        
-        // Add to history
-        gameData.gameState.history.push(historySnapshot);
-        gameData.gameState.historyIndex = gameData.gameState.history.length - 1;
-
-        return gameData;
+        return this.applyMoveWithBitboards(gameData, moveData, effectivePlayerId);
       });
 
       if (!result.committed) {
@@ -1082,6 +1911,58 @@ class RealtimeDatabaseService {
       
     } catch (error) {
       console.error("Error processing move:", error);
+      throw error;
+    }
+  }
+
+  // Resolve a bot turn with no legal moves (checkmate/stalemate)
+  async resolveNoLegalMoves(
+    gameId: string,
+    playerColor: string,
+    status: "checkmate" | "stalemate"
+  ): Promise<void> {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
+
+      const gameRef = database().ref(`games/${gameId}`);
+      const result = await gameRef.transaction((gameData) => {
+        if (gameData === null) {
+          console.warn(`Game ${gameId} not found`);
+          return null;
+        }
+        if (
+          gameData.gameState.gameStatus === "finished" ||
+          gameData.gameState.gameStatus === "checkmate" ||
+          gameData.gameState.gameStatus === "stalemate"
+        ) {
+          return gameData;
+        }
+        if (gameData.gameState.currentPlayerTurn !== playerColor) {
+          return gameData;
+        }
+        if (gameData.gameState.eliminatedPlayers?.includes(playerColor)) {
+          return gameData;
+        }
+        if (!CLOCK_COLORS.includes(playerColor as ClockColor)) {
+          return gameData;
+        }
+
+        const now = Date.now();
+        return this.applyNoMoveEliminationToGameData(
+          gameData,
+          playerColor as ClockColor,
+          status,
+          now
+        );
+      });
+
+      if (!result.committed) {
+        console.error("No-move resolution failed:", result);
+        throw new Error("No-move resolution failed: Transaction not committed");
+      }
+    } catch (error) {
+      console.error("Error resolving no-legal-moves:", error);
       throw error;
     }
   }
@@ -1097,6 +1978,49 @@ class RealtimeDatabaseService {
       await this.resignGameDirectly(gameId);
     } catch (error) {
       console.error("Error calling resign:", error);
+      throw error;
+    }
+  }
+
+  async timeoutPlayer(gameId: string, playerColor: string): Promise<void> {
+    try {
+      const gameRef = database().ref(`games/${gameId}`);
+      const result = await gameRef.transaction((gameData) => {
+        if (gameData === null) {
+          console.warn(`Game ${gameId} not found`);
+          return null;
+        }
+        if (
+          gameData.gameState.gameStatus === "finished" ||
+          gameData.gameState.gameStatus === "checkmate" ||
+          gameData.gameState.gameStatus === "stalemate"
+        ) {
+          return gameData;
+        }
+        if (gameData.gameState.currentPlayerTurn !== playerColor) {
+          return gameData;
+        }
+        if (gameData.gameState.eliminatedPlayers?.includes(playerColor)) {
+          return gameData;
+        }
+        if (!CLOCK_COLORS.includes(playerColor as ClockColor)) {
+          return gameData;
+        }
+
+        const now = Date.now();
+        return this.applyTimeoutToGameData(
+          gameData,
+          playerColor as ClockColor,
+          now
+        );
+      });
+
+      if (!result.committed) {
+        console.error("Timeout transaction failed:", result);
+        throw new Error("Timeout transaction failed: Transaction not committed");
+      }
+    } catch (error) {
+      console.error("Error processing timeout:", error);
       throw error;
     }
   }
@@ -1148,6 +2072,56 @@ class RealtimeDatabaseService {
             gameData.gameState.eliminatedPlayers.push(player.color);
             gameData.gameState.justEliminated = player.color;
           }
+
+          let pieces = deserializeBitboardPieces(
+            gameData.gameState.bitboardState?.pieces
+          );
+          if (
+            (!gameData.gameState.bitboardState ||
+              !gameData.gameState.bitboardState.pieces) &&
+            Array.isArray(gameData.gameState.boardState)
+          ) {
+            const normalizedBoard = this.convertBoardState(
+              gameData.gameState.boardState,
+              false
+            );
+            const fallbackBitboards = syncBitboardsFromArray(
+              normalizedBoard,
+              gameData.gameState.eliminatedPlayers
+            );
+            pieces = fallbackBitboards.pieces;
+          }
+          const eliminatedPieceBitboards = gameData.gameState.eliminatedPieceBitboards
+            ? deserializeBitboardPieces(gameData.gameState.eliminatedPieceBitboards as any)
+            : createEmptyPieceBitboards();
+          gameData.gameState.teamMode = !!gameData.gameState.teamMode;
+          gameData.gameState.teamAssignments = normalizeTeamAssignments(
+            gameData.gameState.teamAssignments as TeamAssignments
+          );
+          if (gameData.gameState.teamMode && CLOCK_COLORS.includes(player.color as ClockColor)) {
+            return this.applyTeamEliminationToGameData(
+              gameData,
+              player.color as ClockColor,
+              "finished",
+              Date.now(),
+              pieces,
+              eliminatedPieceBitboards
+            );
+          }
+          if (CLOCK_COLORS.includes(player.color as ClockColor)) {
+            this.captureEliminatedPieces(
+              eliminatedPieceBitboards,
+              pieces,
+              player.color as ClockColor,
+              true
+            );
+          }
+          gameData.gameState.eliminatedPieceBitboards = serializeBitboardPieces(
+            eliminatedPieceBitboards
+          );
+          gameData.gameState.bitboardState = {
+            pieces: serializeBitboardPieces(pieces),
+          };
 
           // Remove the player from the game
           delete gameData.players[user.uid];
@@ -1206,8 +2180,12 @@ class RealtimeDatabaseService {
             gameData.gameState.currentPlayerTurn = nextActivePlayer;
           }
 
+          const now = Date.now();
+          gameData.gameState.turnStartedAt =
+            gameData.gameState.gameStatus === "finished" ? null : now;
           gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
-          gameData.lastActivity = Date.now();
+          gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
+          gameData.lastActivity = now;
 
           return gameData;
         });
@@ -1296,92 +2274,6 @@ class RealtimeDatabaseService {
     }
   }
 
-  async runManualCleanup(): Promise<{ cleaned: number; resigned: number }> {
-    try {
-      const user = this.getCurrentUser();
-      if (!user) throw new Error("User not authenticated");
-
-
-      const functions = require("@react-native-firebase/functions").default;
-      const manualCleanupFunction = functions().httpsCallable("manualCleanup");
-
-      const result = await manualCleanupFunction({});
-
-      return {
-        cleaned: result.data.cleaned || 0,
-        resigned: result.data.resigned || 0,
-      };
-    } catch (error) {
-      console.error("Error calling manual cleanup Cloud Function:", error);
-      throw error;
-    }
-  }
-
-  // OPTIMIZATION: Instant move processing for lowest latency
-  private addToMoveBatch(gameId: string, moveRequest: any): void {
-    // Process move immediately for instant feedback
-    this.processMoveImmediately(gameId, moveRequest);
-  }
-
-  private async processMoveImmediately(gameId: string, moveRequest: any): Promise<void> {
-    try {
-      // Send move directly without batching for instant response
-      const moveRequestRef = database().ref(`move-requests/${gameId}`).push();
-      await moveRequestRef.set(moveRequest);
-    } catch (error) {
-      console.error("Error sending immediate move:", error);
-      throw error;
-    }
-  }
-
-  private async processMoveBatch(): Promise<void> {
-    if (this.moveBatch.length === 0) return;
-    
-    const batch = [...this.moveBatch];
-    this.moveBatch = [];
-    this.batchTimeout = null;
-    
-    try {
-      // Group moves by gameId
-      const movesByGame = new Map<string, any[]>();
-      batch.forEach(({ gameId, moveRequest }) => {
-        if (!movesByGame.has(gameId)) {
-          movesByGame.set(gameId, []);
-        }
-        movesByGame.get(gameId)!.push(moveRequest);
-      });
-      
-      // Process each game's moves
-      for (const [gameId, moves] of movesByGame) {
-        if (moves.length === 1) {
-          // Single move - send directly
-          const moveRequestRef = database().ref(`move-requests/${gameId}`).push();
-          await moveRequestRef.set(moves[0]);
-        } else {
-          // Multiple moves - batch them
-          const batchRef = database().ref(`move-batches/${gameId}`).push();
-          await batchRef.set({
-            moves: moves,
-            timestamp: Date.now(),
-            batchSize: moves.length
-          });
-        }
-      }
-      
-    } catch (error) {
-      console.error("Error processing move batch:", error);
-      // Fallback: send moves individually
-      for (const { gameId, moveRequest } of batch) {
-        try {
-          const moveRequestRef = database().ref(`move-requests/${gameId}`).push();
-          await moveRequestRef.set(moveRequest);
-        } catch (fallbackError) {
-          console.error("Error sending individual move:", fallbackError);
-        }
-      }
-    }
-  }
-
   // OPTIMIZATION: Connection keep-alive methods
   private startKeepAlive(): void {
     if (this.keepAliveInterval) {
@@ -1436,57 +2328,23 @@ class RealtimeDatabaseService {
     return nextPlayer;
   }
 
-  // ✅ CRITICAL FIX: Check for elimination after a move
-  private checkForElimination(
-    boardState: string[][],
-    currentPlayerTurn: string,
-    eliminatedPlayers: string[],
-    hasMoved: any,
-    enPassantTargets: any[]
-  ): { eliminatedPlayer: string | null; reason: string | null } {
-    try {
-      // Import game logic functions
-      const { hasAnyLegalMoves, isKingInCheck } = require('../functions/src/logic/gameLogic');
-      
-      // Check each opponent for checkmate/stalemate
-      const turnOrder = ['r', 'b', 'y', 'g'];
-      const otherPlayers = turnOrder.filter(
-        (player) => player !== currentPlayerTurn && !eliminatedPlayers.includes(player)
-      );
-      
-      for (const opponent of otherPlayers) {
-        const opponentHasMoves = hasAnyLegalMoves(
-          opponent,
-          boardState,
-          eliminatedPlayers,
-          hasMoved,
-          enPassantTargets
-        );
-        
-        if (!opponentHasMoves) {
-          // This opponent has no legal moves
-          const isInCheck = isKingInCheck(
-            opponent,
-            boardState,
-            eliminatedPlayers,
-            hasMoved
-          );
-          
-          if (isInCheck) {
-            // Checkmate - eliminate the player
-            return { eliminatedPlayer: opponent, reason: 'checkmate' };
-          } else {
-            // Stalemate - eliminate the player
-            return { eliminatedPlayer: opponent, reason: 'stalemate' };
-          }
-        }
+  private captureEliminatedPieces(
+    eliminatedPieceBitboards: Record<string, bigint>,
+    pieces: Record<string, bigint>,
+    playerColor: ClockColor,
+    clearFromPieces = false
+  ) {
+    Object.keys(pieces).forEach((code) => {
+      if (!code.startsWith(playerColor)) return;
+      const bb = pieces[code] ?? 0n;
+      if (bb && bb !== 0n) {
+        eliminatedPieceBitboards[code] =
+          (eliminatedPieceBitboards[code] ?? 0n) | bb;
       }
-      
-      return { eliminatedPlayer: null, reason: null };
-    } catch (error) {
-      console.error('Error checking for elimination:', error);
-      return { eliminatedPlayer: null, reason: null };
-    }
+      if (clearFromPieces) {
+        pieces[code] = 0n;
+      }
+    });
   }
 
   // Create a rematch game with the same players and bots
@@ -1507,13 +2365,19 @@ class RealtimeDatabaseService {
       if (!newGameId) throw new Error("Failed to generate game ID");
       const newGameRef = database().ref(`games/${newGameId}`);
       
-      // Import initial board state
       const { initialBoardState } = require("../state/boardState");
-      const flattenedBoardState = initialBoardState.map((row: any) =>
-        row.map((cell: any) => (cell === null ? "" : cell))
-      );
+      const initialBitboards = syncBitboardsFromArray(initialBoardState);
+      const serializedPieces = serializeBitboardPieces(initialBitboards.pieces);
       
       // Prepare new game data
+      const settings = settingsService.getSettings();
+      const botDifficulty =
+        currentGame.gameState?.botDifficulty ??
+        settings?.game?.botDifficulty ??
+        BOT_CONFIG.DEFAULT_DIFFICULTY;
+      const botTeamMode =
+        currentGame.gameState?.botTeamMode ?? settings?.game?.botTeamMode ?? false;
+
       const newGameData = {
         id: newGameId,
         hostId: currentGame.hostId,
@@ -1523,10 +2387,25 @@ class RealtimeDatabaseService {
         players: {},
         joinCode: this.generateJoinCode(), // Generate new 4-digit join code for rematch
         gameState: {
-          boardState: flattenedBoardState,
+          bitboardState: { pieces: serializedPieces },
+          eliminatedPieceBitboards: serializeBitboardPieces(createEmptyPieceBitboards()),
           currentPlayerTurn: "r",
           gameStatus: "waiting",
+          version: 0,
+          selectedPiece: null,
+          validMoves: [],
           scores: { r: 0, b: 0, y: 0, g: 0 },
+          timeControl: { baseMs: DEFAULT_TIME_CONTROL.baseMs, incrementMs: DEFAULT_TIME_CONTROL.incrementMs },
+          clocks: {
+            r: DEFAULT_TIME_CONTROL.baseMs,
+            b: DEFAULT_TIME_CONTROL.baseMs,
+            y: DEFAULT_TIME_CONTROL.baseMs,
+            g: DEFAULT_TIME_CONTROL.baseMs,
+          },
+          turnStartedAt: null,
+          teamMode: !!currentGame.gameState?.teamMode,
+          teamAssignments: normalizeTeamAssignments(currentGame.gameState?.teamAssignments as TeamAssignments),
+          winningTeam: null,
           capturedPieces: { r: [], b: [], y: [], g: [] },
           eliminatedPlayers: [],
           justEliminated: null,
@@ -1547,6 +2426,23 @@ class RealtimeDatabaseService {
           },
           history: [],
           historyIndex: 0,
+          viewingHistoryIndex: null,
+          lastMove: null,
+          players: [],
+          isHost: false,
+          canStartGame: false,
+          gameMode: "online",
+          botPlayers: [],
+          botDifficulty,
+          botTeamMode,
+          currentGame: null,
+          discoveredGames: [],
+          isDiscovering: false,
+          isLoading: false,
+          isConnected: false,
+          connectionError: null,
+          isEditingName: false,
+          tempName: "",
         }
       };
       
@@ -1591,6 +2487,7 @@ class RealtimeDatabaseService {
         
         // Clear the justEliminated flag
         gameData.gameState.justEliminated = null;
+        gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
         
         return gameData;
       });
@@ -1679,9 +2576,51 @@ class RealtimeDatabaseService {
         };
       }
 
+      updates["gameState/version"] = database.ServerValue.increment(1);
+      updates.lastActivity = Date.now();
       await gameRef.update(updates);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
+      throw error;
+    }
+  }
+
+  async updateTeamConfiguration(
+    gameId: string,
+    teamMode: boolean,
+    teamAssignments: TeamAssignments
+  ): Promise<void> {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
+
+      const gameRef = database().ref(`games/${gameId}`);
+      const snapshot = await gameRef.once("value");
+
+      if (!snapshot.exists()) {
+        throw new Error("Game not found");
+      }
+
+      const gameData = snapshot.val();
+      if (gameData.hostId !== user.uid) {
+        throw new Error("Only host can update team configuration");
+      }
+
+      if (gameData.status !== "waiting") {
+        throw new Error("Cannot change teams after game has started");
+      }
+
+      const normalizedAssignments = normalizeTeamAssignments(teamAssignments);
+
+      await gameRef.update({
+        "gameState/teamMode": teamMode,
+        "gameState/teamAssignments": normalizedAssignments,
+        "gameState/winningTeam": null,
+        "gameState/version": database.ServerValue.increment(1),
+        lastActivity: Date.now(),
+      });
+    } catch (error) {
+      console.error("Error updating team configuration:", error);
       throw error;
     }
   }
@@ -1695,13 +2634,6 @@ class RealtimeDatabaseService {
       this.movesUnsubscribe();
       this.movesUnsubscribe = null;
     }
-    
-    // OPTIMIZATION: Process any remaining moves in batch
-    if (this.batchTimeout) {
-      clearTimeout(this.batchTimeout);
-      this.processMoveBatch();
-    }
-    
     // OPTIMIZATION: Stop keep-alive
     this.stopKeepAlive();
   }
@@ -1777,8 +2709,8 @@ class RealtimeDatabaseService {
         }
 
         // Clean up games with invalid game state structure
-        if (!gameData.gameState.boardState || 
-            !Array.isArray(gameData.gameState.boardState) ||
+        if (!gameData.gameState.bitboardState ||
+            !gameData.gameState.bitboardState.pieces ||
             !gameData.gameState.currentPlayerTurn ||
             !gameData.gameState.gameStatus) {
           corruptedGames.push(gameId);

@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { RootState } from "../../state/store";
 import { 
@@ -27,7 +27,8 @@ import {
   setPlayers,
   setIsHost,
   setCanStartGame,
-  setBotPlayers
+  setBotPlayers,
+  setTeamConfig
 } from "../../state/gameSlice";
 import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
@@ -36,18 +37,16 @@ import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
 import { hapticsService } from "../../services/hapticsService";
 
+type TeamAssignments = { r: "A" | "B"; b: "A" | "B"; y: "A" | "B"; g: "A" | "B" };
+const DEFAULT_TEAM_ASSIGNMENTS: TeamAssignments = { r: "A", y: "A", b: "B", g: "B" };
+
 const P2PLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
   const router = useRouter();
   const { settings, updateProfile } = useSettings();
   const insets = useSafeAreaInsets();
   
-  // Track if this screen is actually focused/visible
-  const [isFocused, setIsFocused] = useState(false);
-  
-  // Only log when actually focused
-  if (isFocused) {
-  }
+  const isFocused = useIsFocused();
 
   // ✅ All state now comes from Redux
   const {
@@ -62,6 +61,8 @@ const P2PLobbyScreen: React.FC = () => {
     isEditingName,
     tempName,
     botPlayers,
+    teamMode,
+    teamAssignments,
   } = useSelector((state: RootState) => state.game);
 
   // ✅ No more event listeners! All state comes from Redux
@@ -80,32 +81,9 @@ const P2PLobbyScreen: React.FC = () => {
     }
   }, [currentGame, isHost, router, isFocused]);
 
-  // Auto-discover games on mount - only when focused
-  useEffect(() => {
-    if (!isFocused) return; // Only run when screen is actually focused
-    
-    // Start real-time discovery - P2P service handles updates automatically
-    p2pService.discoverGames().catch(error => {
-      console.error("Error starting discovery:", error);
-    });
-
-    // Cleanup: Stop discovery when component unmounts or loses focus
-    return () => {
-      try {
-        networkDiscoveryService.stopDiscovery();
-        p2pService.stopDiscovery();
-      } catch (error) {
-        console.error("Error stopping discovery:", error);
-      }
-    };
-  }, [isFocused]);
-
   // Handle discovery when screen gains/loses focus
   useFocusEffect(
     React.useCallback(() => {
-      // Screen is focused - set focus state and start discovery
-      setIsFocused(true);
-      
       try {
         p2pService.discoverGames().catch(error => {
           console.error("Error restarting discovery on focus:", error);
@@ -123,7 +101,6 @@ const P2PLobbyScreen: React.FC = () => {
       
       // Return cleanup function when screen loses focus
       return () => {
-        setIsFocused(false);
         clearInterval(refreshInterval);
         try {
           networkDiscoveryService.stopDiscovery();
@@ -159,6 +136,14 @@ const P2PLobbyScreen: React.FC = () => {
       : [...botPlayers, color];
     
     dispatch(setBotPlayers(newBotPlayers));
+  };
+
+  const updateTeamConfiguration = (nextTeamMode: boolean, nextAssignments: TeamAssignments) => {
+    if (!isHost) {
+      return;
+    }
+    dispatch(setTeamConfig({ teamMode: nextTeamMode, teamAssignments: nextAssignments }));
+    p2pService.updateTeamConfiguration(nextTeamMode, nextAssignments);
   };
 
   // Create a new P2P game
@@ -475,7 +460,7 @@ const P2PLobbyScreen: React.FC = () => {
               return allPlayers.length > 0 ? (
                 allPlayers.map((player, index) => (
                   <View
-                    key={player.id}
+                    key={player.id || `player-${index}`}
                     className="flex-row items-center justify-between"
                   >
                     <Text className="text-white text-lg">
@@ -543,6 +528,72 @@ const P2PLobbyScreen: React.FC = () => {
                     );
                   })}
                 </View>
+              </View>
+            )}
+            {isHost && (
+              <View className="mt-4 pt-4 border-t border-white/20">
+                <View className="flex-row items-center justify-between mb-2">
+                  <Text className="text-white text-base font-semibold">Team Play</Text>
+                  <View className="flex-row bg-white/5 rounded-full p-1">
+                    <TouchableOpacity
+                      className={`px-3 py-1 rounded-full ${
+                        !teamMode ? "bg-red-500/30" : "bg-transparent"
+                      }`}
+                      onPress={() => updateTeamConfiguration(false, teamAssignments || DEFAULT_TEAM_ASSIGNMENTS)}
+                    >
+                      <Text className={`text-xs ${!teamMode ? "text-red-200 font-semibold" : "text-gray-400"}`}>
+                        Off
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      className={`ml-1 px-3 py-1 rounded-full ${
+                        teamMode ? "bg-green-500/30" : "bg-transparent"
+                      }`}
+                      onPress={() => updateTeamConfiguration(true, teamAssignments || DEFAULT_TEAM_ASSIGNMENTS)}
+                    >
+                      <Text className={`text-xs ${teamMode ? "text-green-200 font-semibold" : "text-gray-400"}`}>
+                        On
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                {teamMode && (
+                  <View className="flex-row flex-wrap -mx-2">
+                    {(['r', 'b', 'y', 'g'] as const).map((color) => {
+                      const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
+                      const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
+                      const assignments = teamAssignments || DEFAULT_TEAM_ASSIGNMENTS;
+                      return (
+                        <View key={color} className="w-1/2 px-2 mb-2">
+                          <View className="flex-row items-center justify-between bg-white/5 rounded-lg px-2 py-2">
+                            <View className="flex-row items-center">
+                              <View className={`w-2.5 h-2.5 rounded-full mr-2 ${colorClass}`} />
+                              <Text className="text-white text-sm">{colorName}</Text>
+                            </View>
+                            <View className="flex-row">
+                              {(['A', 'B'] as const).map((teamId) => {
+                                const active = assignments[color] === teamId;
+                                return (
+                                  <TouchableOpacity
+                                    key={`${color}-${teamId}`}
+                                    className={`px-2 py-1 rounded-full border ml-1 ${
+                                      active ? "border-blue-400 bg-blue-500/20" : "border-white/20 bg-white/5"
+                                    }`}
+                                    onPress={() => updateTeamConfiguration(teamMode, { ...assignments, [color]: teamId })}
+                                  >
+                                    <Text className={`text-xs ${active ? "text-blue-200 font-semibold" : "text-gray-400"}`}>
+                                      {teamId}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -725,6 +776,9 @@ const P2PLobbyScreen: React.FC = () => {
             <FlatList
               data={discoveredGames
                 .slice()
+                .filter((game, index, self) => 
+                  game.id && self.findIndex(g => g.id === game.id) === index
+                )
                 .sort((a, b) => {
                   // Sort by timestamp (newest first), with createdAt as fallback
                   const timestampA = a.timestamp || a.createdAt || 0;
@@ -732,7 +786,7 @@ const P2PLobbyScreen: React.FC = () => {
                   return timestampB - timestampA;
                 })}
               renderItem={renderGameItem}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => item.id || `game-${index}`}
               showsVerticalScrollIndicator={false}
               style={{ 
                 width: '100%',

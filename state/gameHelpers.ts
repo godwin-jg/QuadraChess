@@ -1,21 +1,16 @@
-import { isKingInCheck } from "../functions/src/logic/gameLogic";
-import { turnOrder } from "./types";
+import { isKingInCheck } from "../src/logic/bitboardLogic";
+import { GameState, Position, turnOrder } from "./types";
 
 // Helper function to update check status for all players
-export const updateAllCheckStatus = (
-  boardState: (string | null)[][],
-  eliminatedPlayers: string[],
-  hasMoved?: any
-) => {
+export const updateAllCheckStatus = (state: GameState) => {
   const checkStatus = { r: false, b: false, y: false, g: false };
+  const eliminated = state.eliminatedPlayers ?? [];
 
   turnOrder.forEach((playerColor) => {
-    if (!eliminatedPlayers.includes(playerColor)) {
+    if (!eliminated.includes(playerColor)) {
       checkStatus[playerColor as keyof typeof checkStatus] = isKingInCheck(
         playerColor,
-        boardState,
-        eliminatedPlayers,
-        hasMoved
+        state
       );
     }
   });
@@ -55,6 +50,61 @@ export const getRookIdentifier = (
       }
       break;
   }
+  return null;
+};
+
+export const getRookCastlingCoords = (
+  playerColor: string,
+  kingTarget: Position
+): { rookFrom: Position; rookTo: Position } | null => {
+  const { row: targetRow, col: targetCol } = kingTarget;
+
+  if (playerColor === "r") {
+    if (targetCol === 9)
+      return {
+        rookFrom: { row: 13, col: 10 },
+        rookTo: { row: 13, col: 8 },
+      };
+    if (targetCol === 5)
+      return {
+        rookFrom: { row: 13, col: 3 },
+        rookTo: { row: 13, col: 6 },
+      };
+  } else if (playerColor === "b") {
+    if (targetRow === 9)
+      return {
+        rookFrom: { row: 10, col: 0 },
+        rookTo: { row: 8, col: 0 },
+      };
+    if (targetRow === 5)
+      return {
+        rookFrom: { row: 3, col: 0 },
+        rookTo: { row: 6, col: 0 },
+      };
+  } else if (playerColor === "y") {
+    if (targetCol === 4)
+      return {
+        rookFrom: { row: 0, col: 3 },
+        rookTo: { row: 0, col: 5 },
+      };
+    if (targetCol === 8)
+      return {
+        rookFrom: { row: 0, col: 10 },
+        rookTo: { row: 0, col: 7 },
+      };
+  } else if (playerColor === "g") {
+    if (targetRow === 4)
+      return {
+        rookFrom: { row: 3, col: 13 },
+        rookTo: { row: 5, col: 13 },
+      };
+    if (targetRow === 8)
+      return {
+        rookFrom: { row: 10, col: 13 },
+        rookTo: { row: 7, col: 13 },
+      };
+  }
+
   return null;
 };
 

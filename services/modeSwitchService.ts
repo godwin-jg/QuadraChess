@@ -1,8 +1,7 @@
 import { Alert } from "react-native";
-import onlineGameService from "./onlineGameService";
+import { onlineSessionMachine as onlineGameService } from "./onlineSessionMachine";
 import p2pGameService from "./p2pGameService";
 import networkService from "../app/services/networkService";
-import { onlineBotService } from "./onlineBotService";
 import { botService } from "./botService";
 import { resetGame } from "../state/gameSlice";
 import { store } from "../state/store";
@@ -150,7 +149,6 @@ class ModeSwitchService {
       }
 
       // ✅ CRITICAL FIX: Cancel all bot moves before disconnecting
-      onlineBotService.cancelAllBotMoves();
       botService.cancelAllBotMoves();
       
       // ✅ CRITICAL FIX: Reset game state when switching modes

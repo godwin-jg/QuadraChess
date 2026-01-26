@@ -10,6 +10,10 @@ import { getPieceAsset, getPieceColor } from "./PieceAssets";
 import { PIECE_CONFIG } from "./PieceConfig";
 import { useSettings } from "../../../context/SettingsContext";
 import { getPieceStyle, getPieceSize } from "./PieceStyleConfig";
+import SkiaPiece from "./SkiaPiece";
+
+// Set to true to use GPU-accelerated Skia rendering for pieces
+const USE_SKIA_PIECES = true;
 
 interface PieceProps {
   piece: string;
@@ -32,6 +36,21 @@ const Piece = React.memo(function Piece({
   animationDelay = 0,
   previewStyle,
 }: PieceProps) {
+  const { settings } = useSettings();
+  
+  // Use Skia for GPU-accelerated rendering (except for wooden style which needs gradients)
+  const currentStyle = previewStyle || settings.pieces.style;
+  if (USE_SKIA_PIECES && useSVG && currentStyle !== "wooden") {
+    return (
+      <SkiaPiece
+        piece={piece}
+        size={size}
+        isEliminated={isEliminated}
+        isSelected={isSelected}
+        previewStyle={previewStyle}
+      />
+    );
+  }
   // Selection animation
   const scale = useSharedValue(1);
 
@@ -91,10 +110,8 @@ const Piece = React.memo(function Piece({
   const pieceColor = getPieceColor(piece);
   const pieceType = getPieceType(piece);
   const pieceAsset = getPieceAsset(piece);
-  const { settings } = useSettings();
   
-  // Use preview style if provided, otherwise use settings
-  const currentStyle = previewStyle || settings.pieces.style;
+  // Use preview style if provided, otherwise use settings (settings already declared above)
   const pieceStyle = previewStyle 
     ? getPieceStyle({ ...settings, pieces: { ...settings.pieces, style: previewStyle as any } }, pieceColorCode)
     : getPieceStyle(settings, pieceColorCode);

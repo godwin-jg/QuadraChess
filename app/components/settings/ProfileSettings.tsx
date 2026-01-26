@@ -333,6 +333,71 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
           <Text className="text-xl font-bold text-white mb-4 tracking-wide">🎮 Game Settings</Text>
           <View>
+            <View className="py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300">AI Difficulty</Text>
+              <Text className="text-sm text-gray-400 mt-1">
+                Applies to single player bots
+              </Text>
+              <View className="flex-row bg-gray-800 rounded-lg p-1 mt-4">
+                {[
+                  { key: "easy", label: "Easy" },
+                  { key: "medium", label: "Medium" },
+                  { key: "hard", label: "Hard" },
+                ].map((level) => (
+                  <TouchableOpacity
+                    key={level.key}
+                    onPress={async () => {
+                      await hapticsService.selection();
+                      updateGame({ botDifficulty: level.key as "easy" | "medium" | "hard" });
+                      try {
+                        await saveSettings();
+                        console.log("✅ Bot difficulty auto-saved successfully");
+                      } catch (error) {
+                        console.error("❌ Failed to auto-save bot difficulty:", error);
+                      }
+                    }}
+                    className={`flex-1 items-center py-2 rounded-md ${
+                      settings.game.botDifficulty === level.key
+                        ? "bg-blue-600"
+                        : "bg-transparent"
+                    }`}
+                  >
+                    <Text
+                      className={`font-bold ${
+                        settings.game.botDifficulty === level.key
+                          ? "text-white"
+                          : "text-gray-400"
+                      }`}
+                    >
+                      {level.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <View className="flex-1">
+                <Text className="text-lg font-semibold text-gray-300">Bot Team Mode</Text>
+                <Text className="text-sm text-gray-400 mt-1">
+                  All bots cooperate against you
+                </Text>
+              </View>
+              <Switch
+                value={settings.game.botTeamMode}
+                onValueChange={async (value) => {
+                  await hapticsService.selection();
+                  updateGame({ botTeamMode: value });
+                  try {
+                    await saveSettings();
+                    console.log("✅ Bot team mode auto-saved successfully");
+                  } catch (error) {
+                    console.error("❌ Failed to auto-save bot team mode:", error);
+                  }
+                }}
+                trackColor={{ false: "#374151", true: "#ef4444" }}
+                thumbColor={settings.game.botTeamMode ? "#fca5a5" : "#9ca3af"}
+              />
+            </View>
             <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Sound Effects</Text>
               <Switch
@@ -407,6 +472,42 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 thumbColor={
                   settings.game.animationsEnabled ? "#FFFFFF" : "#9CA3AF"
                 }
+              />
+            </View>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Tap to Move</Text>
+              <Switch
+                value={settings.game.tapToMoveEnabled}
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
+                  updateGame({ tapToMoveEnabled: value });
+                  try {
+                    await saveSettings();
+                    console.log("✅ Tap to move setting auto-saved successfully");
+                  } catch (error) {
+                    console.error("❌ Failed to auto-save tap to move setting:", error);
+                  }
+                }}
+                trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
+                thumbColor={settings.game.tapToMoveEnabled ? "#FFFFFF" : "#9CA3AF"}
+              />
+            </View>
+            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+              <Text className="text-lg font-semibold text-gray-300 flex-1">Drag to Move</Text>
+              <Switch
+                value={settings.game.dragToMoveEnabled}
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
+                  updateGame({ dragToMoveEnabled: value });
+                  try {
+                    await saveSettings();
+                    console.log("✅ Drag to move setting auto-saved successfully");
+                  } catch (error) {
+                    console.error("❌ Failed to auto-save drag to move setting:", error);
+                  }
+                }}
+                trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
+                thumbColor={settings.game.dragToMoveEnabled ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
             <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
@@ -536,39 +637,12 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         <View className="h-24" />
       </ScrollView>
 
-      {/* Sticky Footer */}
-      {hasUnsavedChanges && (
-        <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/60 border-t border-gray-600">
-          <Text className="text-sm text-amber-500 text-center mb-3 font-medium">
-            You have unsaved changes
-          </Text>
-          <View className="flex-row gap-3">
-            <TouchableOpacity
-              className={`flex-1 bg-emerald-600 rounded-lg py-3 px-5 items-center ${
-                isSaving ? 'bg-gray-700 border border-gray-600 opacity-60' : ''
-              }`}
-              onPress={async () => {
-                await hapticsService.selection();
-                handleSaveSettings();
-              }}
-              disabled={isSaving}
-            >
-              <Text className="text-base font-semibold text-white">
-                {isSaving ? "Saving..." : "Save Changes"}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="flex-1 bg-gray-600 rounded-lg py-3 px-5 items-center"
-              onPress={async () => {
-                await hapticsService.selection();
-                handleDiscardChanges();
-              }}
-            >
-              <Text className="text-base font-semibold text-white">Discard</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+      {/* Auto-save status */}
+      <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/60 border-t border-gray-600">
+        <Text className="text-sm text-gray-400 text-center font-medium">
+          {isSaving ? "Saving changes..." : "Changes are saved automatically"}
+        </Text>
+      </View>
     </View>
   );
 }

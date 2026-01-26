@@ -6,7 +6,7 @@ import networkDiscoveryService from "./networkDiscoveryService";
 import networkAdvertiserService from "./networkAdvertiserService";
 import serverlessSignalingService from "./serverlessSignalingService";
 import { store } from "../state/store";
-import { syncP2PGameState, setIsConnected, setConnectionError, setIsLoading, setDiscoveredGames, setIsDiscovering, applyNetworkMove, setGameState, setGameMode } from "../state/gameSlice";
+import { syncP2PGameState, setIsConnected, setConnectionError, setIsLoading, setDiscoveredGames, setIsDiscovering, applyNetworkMove, setGameState, setGameMode, timeoutPlayer, setTeamConfig } from "../state/gameSlice";
 
 export interface P2PGame {
   id: string;
@@ -884,7 +884,10 @@ class P2PService {
         this.handleGameStateUpdate(message.gameState);
         break;
       case "move":
-        this.handleMove(message.payload);
+        this.handleMove({ ...message.payload, timestamp: message.timestamp });
+        break;
+      case "timeout":
+        this.handleTimeout(message.payload);
         break;
       case "player-joined":
         this.handlePlayerJoined(message);
@@ -933,6 +936,18 @@ class P2PService {
       timestamp: Date.now(),
     };
 
+    this.connections.forEach((connection, peerId) => {
+      this.sendMessage(peerId, message);
+    });
+  }
+
+  public sendTimeout(playerColor: string): void {
+    const now = Date.now();
+    const message = {
+      type: 'timeout',
+      payload: { playerColor, timestamp: now },
+      timestamp: now,
+    };
     this.connections.forEach((connection, peerId) => {
       this.sendMessage(peerId, message);
     });
@@ -1001,6 +1016,8 @@ class P2PService {
       gameState: {
         // Core game state
         boardState: currentReduxState.boardState,
+        bitboardState: currentReduxState.bitboardState,
+        eliminatedPieceBitboards: currentReduxState.eliminatedPieceBitboards,
         currentPlayerTurn: currentReduxState.currentPlayerTurn,
         gameStatus: currentReduxState.gameStatus,
         scores: currentReduxState.scores,
@@ -1013,6 +1030,12 @@ class P2PService {
         hasMoved: currentReduxState.hasMoved,
         enPassantTargets: currentReduxState.enPassantTargets,
         gameOverState: currentReduxState.gameOverState,
+        timeControl: currentReduxState.timeControl,
+        clocks: currentReduxState.clocks,
+        turnStartedAt: currentReduxState.turnStartedAt,
+        teamMode: currentReduxState.teamMode,
+        teamAssignments: currentReduxState.teamAssignments,
+        winningTeam: currentReduxState.winningTeam,
         // Multiplayer state
         players: currentReduxState.players,
         isHost: currentReduxState.isHost,
@@ -1090,6 +1113,8 @@ class P2PService {
       gameState: {
         // Core game state
         boardState: currentReduxState.boardState,
+        bitboardState: currentReduxState.bitboardState,
+        eliminatedPieceBitboards: currentReduxState.eliminatedPieceBitboards,
         currentPlayerTurn: currentReduxState.currentPlayerTurn,
         gameStatus: currentReduxState.gameStatus,
         scores: currentReduxState.scores,
@@ -1102,6 +1127,12 @@ class P2PService {
         hasMoved: currentReduxState.hasMoved,
         enPassantTargets: currentReduxState.enPassantTargets,
         gameOverState: currentReduxState.gameOverState,
+        timeControl: currentReduxState.timeControl,
+        clocks: currentReduxState.clocks,
+        turnStartedAt: currentReduxState.turnStartedAt,
+        teamMode: currentReduxState.teamMode,
+        teamAssignments: currentReduxState.teamAssignments,
+        winningTeam: currentReduxState.winningTeam,
         // Multiplayer state
         players: currentReduxState.players,
         isHost: currentReduxState.isHost,
@@ -1124,6 +1155,12 @@ class P2PService {
     });
 
     this.broadcastMessage(gameStateMessage);
+  }
+
+  public updateTeamConfiguration(teamMode: boolean, teamAssignments: any): void {
+    if (!this.isHost) return;
+    store.dispatch(setTeamConfig({ teamMode, teamAssignments }));
+    this.syncGameStateToClients();
   }
 
   // ✅ Helper method for serverlessSignalingService to add a player
@@ -1486,6 +1523,18 @@ class P2PService {
     });
   }
 
+  private handleTimeout(payload: { playerColor?: string; timestamp?: number } | null): void {
+    if (!payload?.playerColor) {
+      return;
+    }
+    if (!this.isHost) {
+      return;
+    }
+    const now = payload.timestamp ?? Date.now();
+    store.dispatch(timeoutPlayer({ playerColor: payload.playerColor, timestamp: now }));
+    this.syncGameStateToClients();
+  }
+
   // Handle game state updates
   private handleGameStateUpdate(gameState: any): void {
     this.gameState = gameState;
@@ -1564,6 +1613,9 @@ class P2PService {
       console.log("🎮 P2PService: Handling promotion move:", move.promotionPieceType);
       const { completePromotion } = require("../state/gameSlice");
       store.dispatch(completePromotion({ pieceType: move.promotionPieceType }));
+      if (this.isHost) {
+        this.syncGameStateToClients();
+      }
       return;
     }
     
@@ -1600,6 +1652,10 @@ class P2PService {
       console.log("🎮 P2PService: Game over state:", newState.gameOverState);
       
       // Sync the complete game state to all clients
+      this.syncGameStateToClients();
+    }
+    
+    if (this.isHost && !eliminationOccurred && !gameEnded) {
       this.syncGameStateToClients();
     }
     

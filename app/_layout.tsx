@@ -1,3 +1,4 @@
+import "react-native-gesture-handler";
 import { useColorScheme } from "@/components/useColorScheme";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
@@ -10,6 +11,7 @@ import { Stack } from "expo-router";
 import { useEffect, useState } from "react";
 import { Provider } from "react-redux";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as ScreenOrientation from 'expo-screen-orientation';
 import "../global.css";
 import { store } from "../state";
@@ -20,6 +22,8 @@ import CustomSplashScreen from "./components/ui/SplashScreen";
 import "../services/firebaseInit";
 // Start game cleanup service
 import soundService from "../services/soundService";
+import { startBotStateMachine, stopBotStateMachine } from "../services/botStateMachine";
+import { startGameFlowMachine, stopGameFlowMachine } from "../services/gameFlowService";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -46,6 +50,8 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
+      startGameFlowMachine();
+      startBotStateMachine();
       // Lock screen orientation to portrait
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(error => {
         console.warn('Failed to lock screen orientation:', error);
@@ -64,6 +70,10 @@ export default function RootLayout() {
         }, 500); // 500ms transition duration
       }, 3600); // 3.6 seconds - slightly longer to prevent flash
     }
+    return () => {
+      stopGameFlowMachine();
+      stopBotStateMachine();
+    };
   }, [loaded]);
 
   if (!loaded) {
@@ -71,19 +81,21 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <SettingsProvider>
-        <Provider store={store}>
-          {!showCustomSplash && <RootLayoutNav />}
-          <CustomSplashScreen 
-            visible={showCustomSplash} 
-            transitioning={splashTransitioning}
-            useVideo={true} // ✅ Auto-enabled when video is added
-            videoSource={require('../assets/videos/splash-video.mp4')} // ✅ Direct require
-          />
-        </Provider>
-      </SettingsProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <SettingsProvider>
+          <Provider store={store}>
+            {!showCustomSplash && <RootLayoutNav />}
+            <CustomSplashScreen 
+              visible={showCustomSplash} 
+              transitioning={splashTransitioning}
+              useVideo={true} // ✅ Auto-enabled when video is added
+              videoSource={require('../assets/videos/splash-video.mp4')} // ✅ Direct require
+            />
+          </Provider>
+        </SettingsProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

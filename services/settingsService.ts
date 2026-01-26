@@ -48,6 +48,10 @@ export interface UserSettings {
     animationsEnabled: boolean;
     showMoveHints: boolean;
     hapticsEnabled: boolean;
+    botDifficulty: "easy" | "medium" | "hard";
+    botTeamMode: boolean; // If true, all bots cooperate against human
+    tapToMoveEnabled: boolean;
+    dragToMoveEnabled: boolean;
   };
   accessibility: {
     highContrast: boolean;
@@ -82,6 +86,10 @@ const DEFAULT_SETTINGS: UserSettings = {
     animationsEnabled: true,
     showMoveHints: true,
     hapticsEnabled: true,
+    botDifficulty: "easy",
+    botTeamMode: false, // Default: bots play independently
+    tapToMoveEnabled: true,
+    dragToMoveEnabled: true,
   },
   accessibility: {
     highContrast: false,
@@ -110,7 +118,23 @@ export class SettingsService {
     try {
       const stored = await AsyncStorage.getItem(SETTINGS_KEY);
       if (stored) {
-        this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+        const parsed = JSON.parse(stored);
+        this.settings = {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          profile: { ...DEFAULT_SETTINGS.profile, ...(parsed.profile || {}) },
+          board: { ...DEFAULT_SETTINGS.board, ...(parsed.board || {}) },
+          pieces: { ...DEFAULT_SETTINGS.pieces, ...(parsed.pieces || {}) },
+          game: { ...DEFAULT_SETTINGS.game, ...(parsed.game || {}) },
+          accessibility: {
+            ...DEFAULT_SETTINGS.accessibility,
+            ...(parsed.accessibility || {}),
+          },
+          developer: {
+            ...DEFAULT_SETTINGS.developer,
+            ...(parsed.developer || {}),
+          },
+        };
       }
       return this.settings;
     } catch (error) {

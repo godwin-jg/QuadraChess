@@ -33,15 +33,15 @@ export default function PromotionModal({
   const getPlayerAccentColor = (color: string) => {
     switch (color) {
       case "r":
-        return "bg-red-500";
+        return "#ef4444";
       case "b":
-        return "bg-blue-500";
+        return "#3b82f6";
       case "y":
-        return "bg-purple-500";
+        return "#a855f7";
       case "g":
-        return "bg-green-500";
+        return "#10b981";
       default:
-        return "bg-gray-500";
+        return "#6b7280";
     }
   };
 
@@ -59,31 +59,40 @@ export default function PromotionModal({
       animationType="fade"
       statusBarTranslucent={true}
     >
-      <View className="flex-1 bg-black/50 justify-center items-center">
+      <View className="flex-1 bg-black/70 justify-center items-center">
         <View
-          className="bg-white rounded-xl shadow-2xl border border-gray-200 p-4 mx-4"
-          style={{ maxWidth: width * 0.8 }}
+          className="bg-gray-900 rounded-xl shadow-2xl border border-gray-700 p-6 mx-4"
+          style={{ maxWidth: width * 0.9 }}
         >
           {/* Header */}
           <View className="items-center mb-4">
-            <Text className="text-xl font-bold text-gray-800 mb-1">
+            <Text className="text-xl font-bold text-white mb-1">
               Pawn Promotion
             </Text>
-            <Text className="text-base text-gray-600">
-              Choose a piece for {getPlayerName(playerColor)} player
+            <Text className="text-base text-gray-400">
+              Choose a piece for {getPlayerName(playerColor)}
             </Text>
+            <View className="flex-row items-center mt-2">
+              <View
+                className="w-2 h-2 rounded-full mr-2"
+                style={{ backgroundColor: getPlayerAccentColor(playerColor) }}
+              />
+              <Text className="text-xs text-gray-400">Promoting pawn</Text>
+            </View>
           </View>
 
           {/* Promotion Options */}
-          <View className="flex-row justify-center gap-6 mb-4">
+          <View className="flex-row justify-center gap-4 mb-4">
             {promotionOptions.map((option) => (
               <Pressable
                 key={option.type}
                 onPress={() => onSelectPiece(option.type)}
                 className="items-center active:opacity-70"
               >
-                <Piece piece={`${playerColor}${option.type}`} size={45} />
-                <Text className="text-xs font-medium text-gray-600 mt-1">
+                <View className="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                  <Piece piece={`${playerColor}${option.type}`} size={60} />
+                </View>
+                <Text className="text-sm font-medium text-gray-300 mt-2">
                   {option.name}
                 </Text>
               </Pressable>

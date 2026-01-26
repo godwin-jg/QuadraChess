@@ -30,14 +30,14 @@ export const PIECE_CONFIG = {
     EFFECTS: {
       // Drop shadow for 3D effect
       DROP_SHADOW: {
-        enabled: true,
+        enabled: false,
         color: "rgba(0, 0, 0, 0.4)",
         offset: { width: 2, height: 4 },
         blur: 6,
       },
       // Glow effect for selected pieces
       GLOW: {
-        enabled: true,
+        enabled: false,
         color: "rgba(59, 130, 246, 0.5)", // Blue glow
         radius: 8,
       },
@@ -69,14 +69,14 @@ export const PIECE_CONFIG = {
     EFFECTS: {
       // Drop shadow for 3D effect
       DROP_SHADOW: {
-        enabled: true,
+        enabled: false,
         color: "rgba(0, 0, 0, 0.5)",
         offset: { width: 2, height: 3 },
         blur: 4,
       },
       // Glow effect for selected pieces
       GLOW: {
-        enabled: true,
+        enabled: false,
         color: "rgba(59, 130, 246, 0.6)",
         radius: 6,
       },

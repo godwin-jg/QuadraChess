@@ -1,25 +1,20 @@
 import { Text, View } from "@/components/Themed";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { ActivityIndicator } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
-import { useSettings } from "../../context/SettingsContext";
-import modeSwitchService from "../../services/modeSwitchService";
+import { useGameConnection } from "../../hooks/useGameConnection";
 import onlineGameService from "../../services/onlineGameService";
 import p2pGameService from "../../services/p2pGameService";
-import { RootState, completePromotion, resetGame, store } from "../../state";
+import { RootState, completePromotion, resetGame } from "../../state";
 import {
-  applyNetworkMove,
-  setGameMode,
-  setGameState,
   clearJustEliminated,
   clearGameOver,
+  stepHistory,
+  selectDerivedBoardState,
+  timeoutPlayer,
 } from "../../state/gameSlice";
-import { botService } from "../../services/botService";
-import { onlineBotService } from "../../services/onlineBotService";
-import p2pService from "../../services/p2pService";
 import realtimeDatabaseService from "../../services/realtimeDatabaseService";
-import { BOT_CONFIG, getBotConfig } from "../../config/gameConfig";
 import Board from "../components/board/Board";
 import ResignButton from "../components/ui/ResignButton";
 import GameNotification from "../components/ui/GameNotification";
@@ -30,11 +25,20 @@ import GameUtilityPanel from "../components/ui/GameUtilityPanel";
 import PromotionModal from "../components/ui/PromotionModal";
 import notificationService from "../../services/notificationService";
 import SimpleNotification from "../components/ui/SimpleNotification";
-import networkService from "../services/networkService";
+import { useGameFlowMachine } from "../../hooks/useGameFlowMachine";
+import { useGameFlowReady } from "../components/board/useGameFlowReady";
+import { useTurnClock } from "../../hooks/useTurnClock";
+import { buildMoveKey, consumeSkipNextMoveAnimation } from "../../services/gameFlowService";
+import {
+  getBotStateMachineSnapshot,
+  subscribeBotStateMachine,
+  type BotMachineSnapshot,
+} from "../../services/botStateMachine";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
 import { TouchableOpacity, StyleSheet } from "react-native";
 import { FontAwesome } from "@expo/vector-icons";
+import { getHudHeight, getBottomPadding } from "../utils/responsive";
 import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
 import Animated, { 
@@ -42,11 +46,17 @@ import Animated, {
   useAnimatedStyle, 
   withSpring, 
   withTiming,
-  SlideInLeft,
-  SlideOutLeft,
-  SlideInRight,
-  SlideOutRight
 } from "react-native-reanimated";
+
+const PLAYER_NAMES: Record<string, string> = {
+  r: "Red",
+  b: "Blue",
+  y: "Yellow",
+  g: "Green",
+};
+
+const getPlayerName = (playerColor: string) =>
+  PLAYER_NAMES[playerColor] ?? "Unknown";
 
 export default function GameScreen() {
   // Get dispatch function
@@ -56,19 +66,15 @@ export default function GameScreen() {
     gameId?: string;
     mode?: string;
   }>();
-  const { settings } = useSettings();
   const insets = useSafeAreaInsets();
-  const [isOnlineMode, setIsOnlineMode] = useState(false);
-  const [isP2PMode, setIsP2PMode] = useState(false);
-  const [connectionStatus, setConnectionStatus] =
-    useState<string>("Connecting...");
   
-
-  // Bot turn tracking to prevent multiple rapid triggers
-  const lastProcessedTurn = useRef<string | null>(null);
+  // Responsive layout values
+  const hudHeight = getHudHeight();
+  const bottomPadding = getBottomPadding();
   
-  // ✅ CRITICAL FIX: Store initial mode to prevent unwanted mode switching
-  const initialModeRef = useRef<string | null>(null);
+  const { connectionStatus, isOnline: isOnlineMode, isP2P: isP2PMode } =
+    useGameConnection(mode, gameId);
+  
 
   // Simple notifications state
   const [notifications, setNotifications] = useState<Array<{
@@ -76,7 +82,21 @@ export default function GameScreen() {
     message: string;
     type: 'info' | 'warning' | 'error' | 'success';
   }>>([]);
+  const [botMachineDebug, setBotMachineDebug] = useState<BotMachineSnapshot | null>(
+    __DEV__ ? getBotStateMachineSnapshot() : null
+  );
   const lastEliminatedRef = useRef<string | null>(null);
+  const lastMoveKeyRef = useRef<string | null>(null);
+  const promotionAwaitingRef = useRef<boolean>(false);
+  const viewingHistoryRef = useRef<boolean>(false);
+  const gameReadyRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!__DEV__) return;
+    const update = () => setBotMachineDebug(getBotStateMachineSnapshot());
+    update();
+    const unsubscribe = subscribeBotStateMachine(update);
+    return () => unsubscribe();
+  }, []);
 
   // Game utility mode state - toggles between player info and utilities
   const [isUtilityMode, setIsUtilityMode] = useState(false);
@@ -86,280 +106,98 @@ export default function GameScreen() {
   
   // Animation values for the toggle button
   const toggleScale = useSharedValue(1);
-  const toggleRotation = useSharedValue(0);
   const toggleOpacity = useSharedValue(0.7);
 
   // Animated styles for the toggle button
   const toggleAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: withSpring(toggleScale.value, { damping: 15, stiffness: 200 }) },
-      { rotate: withTiming(`${toggleRotation.value}deg`, { duration: 300 }) }
-    ],
+    transform: [{ scale: withSpring(toggleScale.value, { damping: 15, stiffness: 200 }) }],
     opacity: withSpring(toggleOpacity.value, { damping: 15, stiffness: 200 }),
   }));
-
-  // Master connection management - single useEffect to prevent race conditions
-  useEffect(() => {
-    // This function will be returned by the effect to clean up everything
-    let cleanupFunction = () => {};
-
-    // ✅ CRITICAL FIX: Prevent mode switching during gameplay
-    // Store the initial mode on first run to prevent unwanted changes
-    // BUT allow mode changes when explicitly navigating to a different mode
-    if (initialModeRef.current === null && mode) {
-      initialModeRef.current = mode;
-    } else if (mode && initialModeRef.current && mode !== initialModeRef.current) {
-      // Allow mode change if explicitly navigating to a different mode
-      initialModeRef.current = mode;
-    }
-    
-    // Use the locked initial mode, fallback to current mode, then to current Redux gameMode, then to "solo"
-    const currentReduxGameMode = store.getState().game.gameMode;
-    const stableMode = initialModeRef.current || mode || currentReduxGameMode || "solo";
-    
-    // Determine the effective mode based on settings
-    // Use current settings value to avoid dependency issues
-    const currentSettings = settings;
-    
-    // ✅ CRITICAL FIX: If user explicitly wants single player, ignore URL parameters
-    // This prevents the game from staying in online mode when user clicks "Single Player"
-    const userWantsSinglePlayer = currentSettings.developer.soloMode || 
-      (stableMode === "single" && !onlineGameService.isConnected) ||
-      // If we're not connected to online but URL says online, user probably wants single player
-      (stableMode === "online" && !onlineGameService.isConnected && !gameId);
-    
-    
-    const effectiveMode = userWantsSinglePlayer
-      ? "single"
-      : (stableMode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
-    
-
-    const setupConnectionForMode = async (currentMode: string) => {
-      
-      // Update mode flags
-      setIsOnlineMode(currentMode === "online" && !!gameId);
-      setIsP2PMode(currentMode === "p2p");
-
-      
-      // ✅ Don't override P2P mode if it's already set
-      if (store.getState().game.gameMode === "p2p" && currentMode !== "p2p") {
-        // Skip mode change
-      } else {
-        dispatch(setGameMode(currentMode as any));
-      }
-
-      // ✅ CRITICAL FIX: Handle mode switching with proper disconnection and state cleanup
-      // Use the target mode as the source of truth since Redux state updates are asynchronous
-      const currentGameState = store.getState().game;
-      const currentConnectedMode = currentMode || currentGameState.gameMode || 
-        (onlineGameService.isConnected ? "online" : 
-         p2pGameService.isConnected ? "p2p" : 
-         networkService.connected ? "local" : "solo");
-
-
-      // Only show warning if we're actually switching modes
-      if (currentConnectedMode !== currentMode) {
-        // Mode switch needed - use modeSwitchService for proper cleanup
-        await modeSwitchService.handleModeSwitch(
-          currentMode as "online" | "p2p" | "local" | "solo" | "single",
-          () => {
-            // Confirm: Mode switch confirmed - game state already reset by modeSwitchService
-          },
-          () => {
-            // Cancel: Navigate back to previous mode
-          }
-        );
-      } else if (currentMode !== "online" && currentMode !== "p2p") {
-        // Same mode but not online or P2P - ensure game mode is correct
-        const currentState = store.getState().game;
-        if (currentState.gameMode !== currentMode) {
-          // Updating game mode
-          dispatch(setGameMode(currentMode as any));
-        }
-      }
-
-      // Set up connection based on mode
-      if (currentMode === "online" && gameId) {
-        // Online game connection
-        try {
-          setConnectionStatus("Connecting to game...");
-          // Attempting to connect to online game
-          
-          // ✅ CRITICAL FIX: Ensure game mode is set to "online" BEFORE connecting to the service
-          // This prevents the race condition where game updates are skipped because mode is still "single"
-          const currentState = store.getState().game;
-          if (currentState.gameMode !== "online") {
-            // Setting game mode to online before connecting
-            dispatch(setGameMode("online"));
-            // Give Redux a moment to update the state
-            await new Promise(resolve => setTimeout(resolve, 10));
-          }
-          
-          await onlineGameService.connectToGame(gameId);
-          // Successfully connected to online game
-          setConnectionStatus("Connected");
-
-          // Set up online game listeners
-          const unsubscribeGame = onlineGameService.onGameUpdate((game) => {
-            if (game) {
-              // onlineGameService handles all state management including history
-            } else {
-              // Game not found or ended
-              setConnectionStatus("Game not found");
-            }
-          });
-
-          const unsubscribeMoves = onlineGameService.onMoveUpdate((move) => {
-            // The service handles move application internally
-          });
-
-          cleanupFunction = () => {
-              // Cleaning up online game connection
-            // Cleanup function call stack
-            unsubscribeGame();
-            unsubscribeMoves();
-            
-            // ✅ CRITICAL FIX: Only disconnect if we're actually changing modes or unmounting
-            // Don't disconnect if we're just changing gameId within online mode
-            const isStillOnlineMode = mode === "online";
-            if (!isStillOnlineMode) {
-            // Mode changed from online, disconnecting
-              onlineGameService.disconnect();
-            } else {
-              // Still in online mode, skipping disconnect
-            }
-          };
-        } catch (error) {
-          console.error("Failed to connect to online game:", error);
-          setConnectionStatus("Connection failed");
-        }
-      } else if (currentMode === "p2p") {
-        // P2P game connection
-        try {
-          setConnectionStatus("Connecting to P2P game...");
-          // Attempting to connect to P2P game
-          await p2pGameService.connectToGame("p2p-game");
-          // Successfully connected to P2P game
-          setConnectionStatus("Connected");
-
-          // Set up P2P game listeners
-          const unsubscribeGame = p2pGameService.onGameUpdate((game) => {
-            if (game) {
-              // P2P Game updated
-            } else {
-              // P2P Game not found or ended
-              setConnectionStatus("Game not found");
-            }
-          });
-
-          const unsubscribeMoves = p2pGameService.onMoveUpdate((move) => {
-            // P2P Move received
-          });
-
-          cleanupFunction = () => {
-            // Cleaning up P2P game connection
-            unsubscribeGame();
-            unsubscribeMoves();
-            
-            // ✅ CRITICAL FIX: Only disconnect if we're actually changing modes or unmounting
-            const isStillP2PMode = mode === "p2p";
-            if (!isStillP2PMode) {
-              // Mode changed from P2P, disconnecting
-              p2pGameService.disconnect();
-            } else {
-              // Still in P2P mode, skipping disconnect
-            }
-          };
-        } catch (error) {
-          console.error("Failed to connect to P2P game:", error);
-          setConnectionStatus("Connection failed");
-        }
-      } else {
-        // Local multiplayer or solo mode
-        if (currentMode !== "solo") {
-          // Set up local network listeners for local multiplayer
-          const handleMoveMade = (data: any) => {
-            dispatch(applyNetworkMove(data.move));
-            if (data.gameState) {
-              dispatch(setGameState(data.gameState));
-            }
-          };
-
-          const handleGameStateUpdated = (data: any) => {
-            dispatch(setGameState(data.gameState));
-          };
-
-          const handleMoveRejected = (data: any) => {
-            // Move was rejected by server
-          };
-
-          const handleGameDestroyed = (data: { reason: string }) => {
-            dispatch(resetGame());
-          };
-
-          networkService.on("move-made", handleMoveMade);
-          networkService.on("game-state-updated", handleGameStateUpdated);
-          networkService.on("move-rejected", handleMoveRejected);
-          networkService.on("game-destroyed", handleGameDestroyed);
-
-          cleanupFunction = () => {
-            // Cleaning up local network listeners
-            networkService.off("move-made", handleMoveMade);
-            networkService.off("game-state-updated", handleGameStateUpdated);
-            networkService.off("move-rejected", handleMoveRejected);
-            networkService.off("game-destroyed", handleGameDestroyed);
-          };
-        } else {
-          // Solo mode - ensure all connections are cleaned up
-          cleanupFunction = () => {
-            // Cleaning up for solo mode
-            if (onlineGameService.isConnected) {
-              onlineGameService.disconnect();
-            }
-            if (p2pGameService.isConnected) {
-              p2pGameService.disconnect();
-            }
-          };
-        }
-      }
-    };
-
-    setupConnectionForMode(effectiveMode);
-
-    // The single return function ensures the previous mode's
-    // connections and listeners are ALWAYS torn down before the
-    // next mode's effect runs.
-    return () => {
-      // Cleaning up connections for previous mode
-      // useEffect cleanup call stack
-      
-      // ✅ CRITICAL FIX: Always run cleanup to ensure proper connection management
-      // The cleanup function is designed to be safe to call multiple times
-      cleanupFunction();
-    };
-  }, [mode, gameId]); // Removed settings.developer.soloMode and dispatch to prevent unnecessary re-runs
-
-  // ✅ CRITICAL FIX: Removed conflicting useEffect that was overriding mode setup
-  // The main useEffect already handles all mode setup correctly
 
   // Get granular pieces of state - only re-render when specific data changes
   const history = useSelector((state: RootState) => state.game.history);
   const viewingHistoryIndex = useSelector((state: RootState) => state.game.viewingHistoryIndex);
-  const boardState = useSelector((state: RootState) => state.game.boardState);
+  // ✅ BITBOARD ONLY: Use selector that derives board from bitboards
+  const boardState = useSelector(selectDerivedBoardState);
+  const lastMove = useSelector((state: RootState) => state.game.lastMove);
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
   
   const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
   const winner = useSelector((state: RootState) => state.game.winner);
   const capturedPieces = useSelector((state: RootState) => state.game.capturedPieces);
   const scores = useSelector((state: RootState) => state.game.scores);
+  const clocks = useSelector((state: RootState) => state.game.clocks);
+  const turnStartedAt = useSelector((state: RootState) => state.game.turnStartedAt);
+  const teamMode = useSelector((state: RootState) => state.game.teamMode);
+  const teamAssignments = useSelector((state: RootState) => state.game.teamAssignments);
+  const winningTeam = useSelector((state: RootState) => state.game.winningTeam);
   const promotionState = useSelector((state: RootState) => state.game.promotionState);
   const justEliminated = useSelector((state: RootState) => state.game.justEliminated);
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
-  const botPlayers = useSelector((state: RootState) => state.game.botPlayers);
   const gameMode = useSelector((state: RootState) => state.game.gameMode);
+  const bitboardState = useSelector((state: RootState) => state.game.bitboardState);
+
+  const [gameFlowState, gameFlowSend] = useGameFlowMachine();
+  const { isFlowAnimating } = useGameFlowReady(gameFlowState);
+
+  const isViewingHistory = viewingHistoryIndex !== null && viewingHistoryIndex < history.length;
+
+  const historyTurn = useMemo(() => {
+    if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
+      return history[viewingHistoryIndex].currentPlayerTurn;
+    }
+    return currentPlayerTurn;
+  }, [viewingHistoryIndex, history, currentPlayerTurn]);
+  const [displayTurn, setDisplayTurn] = useState(currentPlayerTurn);
+
+  useEffect(() => {
+    if (isViewingHistory) {
+      setDisplayTurn(historyTurn);
+      return;
+    }
+    if (!isFlowAnimating) {
+      setDisplayTurn(currentPlayerTurn);
+    }
+  }, [isViewingHistory, historyTurn, currentPlayerTurn, isFlowAnimating]);
   
+  const handleTimeout = useCallback(
+    (playerColor: string) => {
+      if (isViewingHistory) return;
+      if (gameStatus !== "active" && gameStatus !== "promotion") return;
+      if (eliminatedPlayers.includes(playerColor)) return;
+
+      if (isOnlineMode) {
+        onlineGameService.timeoutPlayer(playerColor).catch((error) => {
+          console.error("Failed to process online timeout:", error);
+        });
+        return;
+      }
+      if (isP2PMode) {
+        p2pGameService.timeoutPlayer(playerColor).catch((error) => {
+          console.error("Failed to process P2P timeout:", error);
+        });
+        return;
+      }
+
+      dispatch(timeoutPlayer({ playerColor }));
+    },
+    [dispatch, eliminatedPlayers, gameStatus, isOnlineMode, isP2PMode, isViewingHistory]
+  );
+
+  const { displayClocks } = useTurnClock({
+    clocks,
+    currentPlayerTurn,
+    turnStartedAt,
+    gameStatus,
+    eliminatedPlayers,
+    teamMode,
+    teamAssignments,
+    isPaused: isViewingHistory,
+    onTimeout: handleTimeout,
+  });
+
 
   // Clear justEliminated flag after notification duration
   useEffect(() => {
@@ -373,6 +211,60 @@ export default function GameScreen() {
       return () => clearTimeout(timer);
     }
   }, [justEliminated, gameStatus, winner, dispatch]);
+
+  // ✅ Game flow machine synchronization
+  useEffect(() => {
+    const ready =
+      !!bitboardState?.pieces && bitboardState.occupancy !== undefined;
+    if (ready && !gameReadyRef.current) {
+      gameReadyRef.current = true;
+      gameFlowSend({ type: "GAME_READY" });
+    }
+  }, [bitboardState, gameFlowSend]);
+
+  useEffect(() => {
+    if (viewingHistoryRef.current !== isViewingHistory) {
+      viewingHistoryRef.current = isViewingHistory;
+      gameFlowSend({ type: "VIEW_HISTORY", enabled: isViewingHistory });
+    }
+  }, [isViewingHistory, gameFlowSend]);
+
+  useEffect(() => {
+    const moveKey = buildMoveKey(lastMove);
+    if (!moveKey) {
+      lastMoveKeyRef.current = null;
+      return;
+    }
+    if (moveKey === lastMoveKeyRef.current) return;
+    lastMoveKeyRef.current = moveKey;
+    const shouldAnimate = !isViewingHistory && !consumeSkipNextMoveAnimation();
+    gameFlowSend({ type: "MOVE_APPLIED", moveKey, shouldAnimate });
+  }, [lastMove, isViewingHistory, gameFlowSend]);
+
+  useEffect(() => {
+    if (promotionState.isAwaiting && !promotionAwaitingRef.current) {
+      promotionAwaitingRef.current = true;
+      gameFlowSend({ type: "PROMOTION_REQUIRED" });
+      return;
+    }
+    if (!promotionState.isAwaiting && promotionAwaitingRef.current) {
+      promotionAwaitingRef.current = false;
+      gameFlowSend({ type: "PROMOTION_COMPLETE" });
+    }
+  }, [promotionState.isAwaiting, gameFlowSend]);
+
+  useEffect(() => {
+    if (gameStatus === "finished" || gameStatus === "checkmate" || gameStatus === "stalemate") {
+      gameFlowSend({ type: "GAME_ENDED" });
+    }
+  }, [gameStatus, gameFlowSend]);
+
+  useEffect(() => {
+    if (!lastMove && history.length === 0) {
+      gameReadyRef.current = false;
+      gameFlowSend({ type: "RESET" });
+    }
+  }, [lastMove, history.length, gameFlowSend]);
 
   // This is the magic: create a memoized variable for the state to display
   const displayedGameState = useMemo(() => {
@@ -404,86 +296,6 @@ export default function GameScreen() {
     displayedGameState.boardState &&
     Array.isArray(displayedGameState.boardState) &&
     displayedGameState.boardState.length > 0;
-
-  // ✅ Bot Controller - triggers bot moves when it's a bot's turn
-  useEffect(() => {
-    // ✅ CRITICAL FIX: Prevent multiple rapid bot triggers for the same turn
-    if (lastProcessedTurn.current === currentPlayerTurn) {
-      // Already processed turn, skipping
-      return;
-    }
-    
-    // ✅ CRITICAL FIX: Use the actual game mode from Redux state, not settings
-    const currentGameMode = store.getState().game.gameMode;
-    const effectiveGameMode = currentGameMode || (mode as "solo" | "local" | "online" | "p2p" | "single" | undefined) || "solo";
-    
-    // Bot Controller status
-    
-    if (botPlayers.includes(currentPlayerTurn) && 
-        (gameStatus === 'active' || gameStatus === 'promotion') && // ✅ CRITICAL FIX: Allow bots in promotion mode too
-        isGameStateReady &&
-        !eliminatedPlayers.includes(currentPlayerTurn) && // ✅ CRITICAL FIX: Don't trigger bot moves for eliminated players
-        !promotionState.isAwaiting) { // ✅ CRITICAL FIX: Don't trigger bot moves when promotion modal is open
-      
-      // Mark this turn as processed IMMEDIATELY to prevent duplicate triggers
-      lastProcessedTurn.current = currentPlayerTurn;
-      
-      // ✅ UNIFIED BOT TIMING: Use consistent timing for all game modes
-      // This ensures piece animations (250ms) have time to complete before the next bot move
-      const botConfig = getBotConfig(effectiveGameMode);
-      const botThinkTime = botConfig.MOVE_DELAY;
-      
-      if (effectiveGameMode === 'online' && onlineGameService.isConnected && onlineGameService.currentGameId) {
-        // For online games, use centralized bot service
-        const currentGameState = store.getState().game;
-        
-        // ✅ CRITICAL FIX: Additional validation to prevent multiple bot triggers
-        if (currentGameState.currentPlayerTurn !== currentPlayerTurn) {
-          // Bot trigger cancelled - turn mismatch, reset the flag
-          lastProcessedTurn.current = null;
-          return;
-        }
-        onlineBotService.scheduleBotMove(onlineGameService.currentGameId, currentPlayerTurn, currentGameState);
-      } else {
-        // For local modes (solo, p2p, single), use local bot service with same timing
-        const timer = setTimeout(() => {
-          botService.makeBotMove(currentPlayerTurn);
-        }, botThinkTime);
-
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [currentPlayerTurn, botPlayers, gameStatus, isGameStateReady, gameMode, gameId, eliminatedPlayers, promotionState.isAwaiting]);
-
-  // ✅ CRITICAL FIX: Reset lastProcessedTurn when turn actually changes
-  useEffect(() => {
-    // Reset the processed turn flag when currentPlayerTurn changes
-    lastProcessedTurn.current = null;
-  }, [currentPlayerTurn]);
-
-  // Cleanup bot moves when game ends or changes
-  useEffect(() => {
-    if (gameMode === 'online' && (gameStatus === 'finished' || gameStatus === 'checkmate')) {
-      // Game ended, cancelling all bot moves
-      onlineBotService.cancelAllBotMoves();
-    }
-  }, [gameStatus, gameMode]);
-
-  // ✅ Bot Promotion Controller - handles bot pawn promotions
-  useEffect(() => {
-    // Check if there's a pending promotion for a bot player
-    if (promotionState.isAwaiting && botPlayers.includes(promotionState.color || '')) {
-      // Add a short delay for promotion decision
-      const promotionDelay = 300 + Math.random() * 300; // 0.3 - 0.6 seconds
-
-      const timer = setTimeout(() => {
-        // Handling bot promotion
-        botService.handleBotPromotion(promotionState.color!);
-      }, promotionDelay);
-
-      return () => clearTimeout(timer);
-    }
-  }, [promotionState, botPlayers, gameMode]);
 
   // ✅ Helper function to get current player color
   const getCurrentPlayerColor = (): string | null => {
@@ -539,22 +351,6 @@ export default function GameScreen() {
     };
   }, []);
 
-  // Helper function to get player name
-  const getPlayerName = (playerColor: string) => {
-    switch (playerColor) {
-      case "r":
-        return "Red";
-      case "b":
-        return "Blue";
-      case "y":
-        return "Yellow";
-      case "g":
-        return "Green";
-      default:
-        return "Unknown";
-    }
-  };
-
   // Clear justEliminated after notification is shown
   useEffect(() => {
     if (justEliminated && justEliminated !== lastEliminatedRef.current) {
@@ -594,40 +390,51 @@ export default function GameScreen() {
   };
 
   // Create player data for the pods with safety checks
-  const players = [
-    {
-      name: getPlayerName("r"),
-      color: "r",
-      score: scores?.r || 0,
-      capturedPieces: capturedPieces?.r || [],
-      isCurrentTurn: currentPlayerTurn === "r",
-      isEliminated: eliminatedPlayers?.includes("r") || false,
-    },
-    {
-      name: getPlayerName("b"),
-      color: "b",
-      score: scores?.b || 0,
-      capturedPieces: capturedPieces?.b || [],
-      isCurrentTurn: currentPlayerTurn === "b",
-      isEliminated: eliminatedPlayers?.includes("b") || false,
-    },
-    {
-      name: getPlayerName("y"),
-      color: "y",
-      score: scores?.y || 0,
-      capturedPieces: capturedPieces?.y || [],
-      isCurrentTurn: currentPlayerTurn === "y",
-      isEliminated: eliminatedPlayers?.includes("y") || false,
-    },
-    {
-      name: getPlayerName("g"),
-      color: "g",
-      score: scores?.g || 0,
-      capturedPieces: capturedPieces?.g || [],
-      isCurrentTurn: currentPlayerTurn === "g",
-      isEliminated: eliminatedPlayers?.includes("g") || false,
-    },
-  ];
+  const players = useMemo(
+    () => [
+      {
+        name: getPlayerName("r"),
+        color: "r",
+        score: scores?.r || 0,
+        capturedPieces: capturedPieces?.r || [],
+        isCurrentTurn: displayTurn === "r",
+        isEliminated: eliminatedPlayers?.includes("r") || false,
+        timeMs: displayClocks?.r ?? clocks?.r ?? 0,
+        teamLabel: teamMode ? `Team ${teamAssignments?.r ?? "A"}` : undefined,
+      },
+      {
+        name: getPlayerName("b"),
+        color: "b",
+        score: scores?.b || 0,
+        capturedPieces: capturedPieces?.b || [],
+        isCurrentTurn: displayTurn === "b",
+        isEliminated: eliminatedPlayers?.includes("b") || false,
+        timeMs: displayClocks?.b ?? clocks?.b ?? 0,
+        teamLabel: teamMode ? `Team ${teamAssignments?.b ?? "B"}` : undefined,
+      },
+      {
+        name: getPlayerName("y"),
+        color: "y",
+        score: scores?.y || 0,
+        capturedPieces: capturedPieces?.y || [],
+        isCurrentTurn: displayTurn === "y",
+        isEliminated: eliminatedPlayers?.includes("y") || false,
+        timeMs: displayClocks?.y ?? clocks?.y ?? 0,
+        teamLabel: teamMode ? `Team ${teamAssignments?.y ?? "A"}` : undefined,
+      },
+      {
+        name: getPlayerName("g"),
+        color: "g",
+        score: scores?.g || 0,
+        capturedPieces: capturedPieces?.g || [],
+        isCurrentTurn: displayTurn === "g",
+        isEliminated: eliminatedPlayers?.includes("g") || false,
+        timeMs: displayClocks?.g ?? clocks?.g ?? 0,
+        teamLabel: teamMode ? `Team ${teamAssignments?.g ?? "B"}` : undefined,
+      },
+    ],
+    [scores, capturedPieces, displayTurn, eliminatedPlayers, displayClocks, clocks, teamMode, teamAssignments]
+  );
 
   // Show loading screen if game state isn't ready
   if (!isGameStateReady) {
@@ -650,33 +457,50 @@ export default function GameScreen() {
     <SafeAreaView className="flex-1 bg-black">
       <StatusBar style="light" hidden={true} />
       <GridBackground />
+      {__DEV__ ? (
+        <View
+          pointerEvents="none"
+          style={[styles.botMachineDebug, { top: insets.top + 6 }]}
+        >
+          {botMachineDebug && (
+            <Text style={styles.botMachineText}>
+              {`Bot: ${botMachineDebug.state}${
+                botMachineDebug.scheduledTurn ? ` (${botMachineDebug.scheduledTurn})` : ""
+              }${
+                botMachineDebug.state === "idle" && botMachineDebug.idleReason
+                  ? ` · ${botMachineDebug.idleReason}`
+                  : ""
+              } · turn:${botMachineDebug.currentTurn} · status:${botMachineDebug.gameStatus} · bots:${botMachineDebug.botPlayers.join("")}`}
+            </Text>
+          )}
+          {gameFlowState?.context && (
+            <Text style={styles.botMachineText}>
+              {`Flow: ${
+                typeof gameFlowState.value === "string"
+                  ? gameFlowState.value
+                  : JSON.stringify(gameFlowState.value)
+              } · active:${gameFlowState.context.activeMoveKey ? "yes" : "no"} · promo:${
+                gameFlowState.context.promotionPending ? "yes" : "no"
+              } · sync:${gameFlowState.context.syncCounter}`}
+            </Text>
+          )}
+        </View>
+      ) : null}
 
       {/* Top HUD Panel - Toggle between Player Info and Utilities */}
-      <View style={{ paddingTop: 8, height: 160, overflow: 'visible' }}>
+      <View style={{ paddingTop: 8, height: hudHeight }}>
         {isUtilityMode ? (
-          <Animated.View 
-            entering={SlideInRight.duration(300).springify()} 
-            exiting={SlideOutLeft.duration(200)}
-            style={{ position: 'absolute', width: '100%' }}
-          >
-            <GameUtilityPanel />
-          </Animated.View>
+          <GameUtilityPanel />
         ) : (
-          <Animated.View 
-            entering={SlideInLeft.duration(300)} 
-            exiting={SlideOutRight.duration(200)}
-            style={{ position: 'absolute', width: '100%' }}
-          >
-            <PlayerHUDPanel 
-              players={players.length >= 4 ? [players[2], players[3]] : []}
-              panelType="top"
-            />
-          </Animated.View>
+          <PlayerHUDPanel 
+            players={players.length >= 4 ? [players[2], players[3]] : []}
+            panelType="top"
+          />
         )}
       </View>
 
       {/* Main Game Area with breathing space */}
-      <View className="flex-1 justify-center items-center" style={{ paddingVertical: 16 }}>
+      <View className="flex-1 justify-center items-center" style={{ paddingVertical: 8 }}>
         <Animated.View
           style={{
             transform: [{ rotate: `${boardRotation}deg` }],
@@ -690,12 +514,13 @@ export default function GameScreen() {
           <Board 
             playerData={players}
             boardRotation={boardRotation}
+            displayTurn={displayTurn}
           />
         </Animated.View>
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
-      <View style={{ paddingBottom: 100, paddingTop: 8 }}>
+      <View style={{ paddingBottom: 16, paddingTop: 8 }}>
         <PlayerHUDPanel 
           players={[players[0], players[1]]}
           panelType="bottom"
@@ -704,51 +529,24 @@ export default function GameScreen() {
 
       {/* --- Absolutely Positioned Overlays --- */}
       
-      {/* Integrated Toggle Button - Top Right Corner */}
-      <Animated.View style={[toggleAnimatedStyle, { 
-        position: 'absolute', 
-        top: insets.top + 12, 
-        right: 12, 
-        zIndex: 20 
-      }]}>
+      {/* Toggle Button - Top Right Corner */}
+      <Animated.View style={[toggleAnimatedStyle, styles.toggleButtonContainer, { top: insets.top + 12 }]}>
         <TouchableOpacity
-          onPress={async () => {
-            // ✅ CRITICAL FIX: Use sound service to respect haptics settings
-            try {
-              const soundService = require('../../services/soundService').default;
-              // Sound effect removed for menu clicks
-            } catch (error) {
-            }
-            
-            // Animate the toggle
+          onPress={() => {
             toggleScale.value = withSpring(0.9, { damping: 15, stiffness: 200 }, () => {
               toggleScale.value = withSpring(1, { damping: 15, stiffness: 200 });
             });
-            toggleRotation.value = withTiming(toggleRotation.value + 180, { duration: 300 });
             toggleOpacity.value = withSpring(isUtilityMode ? 0.7 : 1, { damping: 15, stiffness: 200 });
-            
-            // Toggle the mode
             setIsUtilityMode(!isUtilityMode);
           }}
-          style={{
-            backgroundColor: isUtilityMode ? 'rgba(59, 130, 246, 0.9)' : 'rgba(255, 255, 255, 0.15)',
-            width: 48,
-            height: 48,
-            borderRadius: 24,
-            justifyContent: 'center',
-            alignItems: 'center',
-            borderWidth: 2,
-            borderColor: isUtilityMode ? 'rgba(59, 130, 246, 0.5)' : 'rgba(255, 255, 255, 0.3)',
-            shadowColor: isUtilityMode ? '#3B82F6' : '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: isUtilityMode ? 0.4 : 0.3,
-            shadowRadius: isUtilityMode ? 12 : 8,
-            elevation: isUtilityMode ? 12 : 8,
-          }}
+          style={[
+            styles.toggleButton,
+            isUtilityMode ? styles.toggleButtonActive : styles.toggleButtonInactive
+          ]}
           activeOpacity={0.8}
         >
           <FontAwesome 
-            name="cog" 
+            name={isUtilityMode ? "users" : "sliders"} 
             size={18} 
             color="#FFFFFF" 
           />
@@ -773,7 +571,12 @@ export default function GameScreen() {
           eliminatedPlayer={justEliminated || undefined}
           justEliminated={justEliminated || undefined}
           scores={scores}
+          capturedPieces={capturedPieces}
+          moveCount={history.length}
           eliminatedPlayers={eliminatedPlayers}
+          teamMode={teamMode}
+          teamAssignments={teamAssignments}
+          winningTeam={winningTeam ?? null}
           players={players.map(p => ({
             color: p.color,
             name: p.name,
@@ -799,6 +602,10 @@ export default function GameScreen() {
               // Fallback to regular reset
               dispatch(resetGame());
             }
+          }}
+          onWatchReplay={() => {
+            dispatch(stepHistory("back"));
+            dispatch(clearGameOver());
           }}
           onDismiss={() => {
             // Clear the game over state to dismiss the modal
@@ -850,4 +657,42 @@ export default function GameScreen() {
   );
 }
 
-// Styles removed - using NativeWind classes instead
+const styles = StyleSheet.create({
+  botMachineDebug: {
+    position: "absolute",
+    right: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    zIndex: 10,
+  },
+  botMachineText: {
+    color: "#ffffff",
+    fontSize: 12,
+    letterSpacing: 0.3,
+  },
+  toggleButtonContainer: {
+    position: 'absolute',
+    right: 12,
+    zIndex: 20,
+  },
+  toggleButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toggleButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.9)',
+  },
+  toggleButtonInactive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+});

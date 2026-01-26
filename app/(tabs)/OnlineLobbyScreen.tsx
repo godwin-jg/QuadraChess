@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -11,18 +11,21 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { RootState } from "../../state/store";
 import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state";
 import { setGameMode } from "../../state/gameSlice";
 import realtimeDatabaseService, {
   RealtimeGame,
 } from "../../services/realtimeDatabaseService";
-import onlineGameService from "../../services/onlineGameService";
 import { useSettings } from "../../context/SettingsContext";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
 import { hapticsService } from "../../services/hapticsService";
+
+type TeamAssignments = { r: "A" | "B"; b: "A" | "B"; y: "A" | "B"; g: "A" | "B" };
+const DEFAULT_TEAM_ASSIGNMENTS: TeamAssignments = { r: "A", y: "A", b: "B", g: "B" };
 
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
@@ -52,12 +55,25 @@ const OnlineLobbyScreen: React.FC = () => {
   const [connectionStatus, setConnectionStatus] = useState("Initializing...");
   const [refreshKey, setRefreshKey] = useState(0);
   const [botPlayers, setBotPlayers] = useState<string[]>([]);
+  const [teamMode, setTeamMode] = useState(false);
+  const [teamAssignments, setTeamAssignments] = useState<TeamAssignments>(DEFAULT_TEAM_ASSIGNMENTS);
+  const isFocused = useIsFocused();
+  const authInFlightRef = useRef(false);
 
-  // Initialize Firebase auth (optimized)
   useEffect(() => {
-    const initializeAuth = async () => {
+    if (gameState.teamAssignments) {
+      setTeamAssignments(gameState.teamAssignments);
+    }
+    setTeamMode(!!gameState.teamMode);
+  }, [gameState.teamAssignments, gameState.teamMode]);
+
+  const initializeAuth = useCallback(
+    async (statusLabel?: string) => {
+      if (authInFlightRef.current) return;
+      authInFlightRef.current = true;
+      setIsConnected(false);
       try {
-        setConnectionStatus("Authenticating...");
+        setConnectionStatus(statusLabel ?? "Authenticating...");
         // Use Realtime Database
         await realtimeDatabaseService.signInAnonymously();
         
@@ -68,17 +84,30 @@ const OnlineLobbyScreen: React.FC = () => {
         // Connection will be validated when subscribing to games
       } catch (error) {
         console.error("Failed to initialize Firebase auth:", error);
-        setConnectionStatus("Connection failed");
-        Alert.alert("Connection Error", "Failed to connect to online services");
+        const message = error instanceof Error ? error.message : String(error);
+        const timedOut = message.toLowerCase().includes("timed out");
+        setConnectionStatus(timedOut ? "Authentication timed out" : "Connection failed");
+        Alert.alert(
+          "Connection Error",
+          timedOut
+            ? "Authentication timed out. Check your network and device time, then try again."
+            : "Failed to connect to online services"
+        );
+      } finally {
+        authInFlightRef.current = false;
       }
-    };
+    },
+    []
+  );
 
+  // Initialize Firebase auth (optimized)
+  useEffect(() => {
     initializeAuth();
-  }, []);
+  }, [initializeAuth]);
 
   // Subscribe to available games
   useEffect(() => {
-    if (!isConnected) return;
+    if (!isConnected || !isFocused) return;
     
     const unsubscribe = realtimeDatabaseService.subscribeToAvailableGames(
       (games) => {
@@ -87,44 +116,35 @@ const OnlineLobbyScreen: React.FC = () => {
     );
 
     return unsubscribe;
-  }, [isConnected, refreshKey]);
-
-  // Connect to onlineGameService when currentGameId changes
-  useEffect(() => {
-    if (!currentGameId) return;
-
-    const connectToGame = async () => {
-      try {
-        console.log(
-          "OnlineLobbyScreen: Connecting to game via onlineGameService:",
-          currentGameId
-        );
-        await onlineGameService.connectToGame(currentGameId);
-      } catch (error) {
-        console.error("OnlineLobbyScreen: Failed to connect to game:", error);
-        Alert.alert("Connection Error", "Failed to connect to the game");
-      }
-    };
-
-    connectToGame();
-
-    // Cleanup on unmount or game change
-    return () => {
-      onlineGameService.disconnect();
-    };
-  }, [currentGameId]);
+  }, [isConnected, refreshKey, isFocused]);
 
   // Subscribe to current game updates for navigation
   useEffect(() => {
-    if (!currentGameId) return;
+    if (!currentGameId || !isFocused) return;
 
     const unsubscribe = realtimeDatabaseService.subscribeToGame(
       currentGameId,
       (game) => {
         if (game) {
-          // Sync bot players from game data
-          const playersArray = Object.values(game.players || {});
-          const botPlayersFromGame = playersArray
+          const normalizedPlayers = Object.entries(game.players || {}).map(
+            ([playerId, player]) => ({
+              id: player.id || playerId,
+              name: player.name || `Player ${playerId.slice(0, 8)}`,
+              color: player.color || "g",
+              isHost: player.isHost || false,
+              isOnline: player.isOnline || false,
+              isBot: player.isBot || false,
+              lastSeen: player.lastSeen || Date.now(),
+              connectionState: player.connectionState,
+            })
+          );
+          dispatch(setPlayers(normalizedPlayers));
+
+          const user = realtimeDatabaseService.getCurrentUser();
+          dispatch(setIsHost(!!user && game.hostId === user.uid));
+          dispatch(setCanStartGame(game.status === "waiting" && normalizedPlayers.length === 4));
+
+          const botPlayersFromGame = normalizedPlayers
             .filter((player: any) => player.isBot === true)
             .map((player: any) => player.color);
           setBotPlayers(botPlayersFromGame);
@@ -147,7 +167,7 @@ const OnlineLobbyScreen: React.FC = () => {
     );
 
     return unsubscribe;
-  }, [currentGameId, dispatch, router]);
+  }, [currentGameId, dispatch, router, isFocused]);
 
   // Name editing functions
   const startEditingName = () => {
@@ -337,6 +357,29 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
+  const updateTeamConfiguration = async (
+    nextTeamMode: boolean,
+    nextAssignments: TeamAssignments
+  ) => {
+    if (!isHost || !currentGameId) {
+      return;
+    }
+    setTeamMode(nextTeamMode);
+    setTeamAssignments(nextAssignments);
+    try {
+      await realtimeDatabaseService.updateTeamConfiguration(
+        currentGameId,
+        nextTeamMode,
+        nextAssignments
+      );
+    } catch (error) {
+      console.error("Error updating team configuration:", error);
+      setTeamMode(!!gameState.teamMode);
+      setTeamAssignments(gameState.teamAssignments || DEFAULT_TEAM_ASSIGNMENTS);
+      Alert.alert("Error", "Failed to update team configuration");
+    }
+  };
+
   const cleanupCorruptedGames = async () => {
     try {
       const deletedCount = await realtimeDatabaseService.cleanupCorruptedGames();
@@ -415,6 +458,12 @@ const OnlineLobbyScreen: React.FC = () => {
         <Text className="text-gray-400 text-sm mt-2">
           Please wait while we connect...
         </Text>
+        <TouchableOpacity
+          className="bg-blue-600 px-4 py-2 rounded-lg mt-5"
+          onPress={() => initializeAuth("Re-authenticating...")}
+        >
+          <Text className="text-white text-sm font-bold">Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -467,7 +516,7 @@ const OnlineLobbyScreen: React.FC = () => {
               return allPlayers.length > 0 ? (
                 allPlayers.map((player, index) => (
                   <View
-                    key={player.id}
+                    key={player.id || `player-${index}`}
                     className="flex-row items-center justify-between"
                   >
                     <Text className="text-white text-lg">
@@ -535,6 +584,71 @@ const OnlineLobbyScreen: React.FC = () => {
                     );
                   })}
                 </View>
+              </View>
+            )}
+            {isHost && (
+              <View className="mt-4 pt-4 border-t border-white/20">
+                <View className="flex-row items-center justify-between mb-2">
+                  <Text className="text-white text-base font-semibold">Team Play</Text>
+                  <View className="flex-row bg-white/5 rounded-full p-1">
+                    <TouchableOpacity
+                      className={`px-3 py-1 rounded-full ${
+                        !teamMode ? "bg-red-500/30" : "bg-transparent"
+                      }`}
+                      onPress={() => updateTeamConfiguration(false, teamAssignments)}
+                    >
+                      <Text className={`text-xs ${!teamMode ? "text-red-200 font-semibold" : "text-gray-400"}`}>
+                        Off
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      className={`ml-1 px-3 py-1 rounded-full ${
+                        teamMode ? "bg-green-500/30" : "bg-transparent"
+                      }`}
+                      onPress={() => updateTeamConfiguration(true, teamAssignments)}
+                    >
+                      <Text className={`text-xs ${teamMode ? "text-green-200 font-semibold" : "text-gray-400"}`}>
+                        On
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                {teamMode && (
+                  <View className="flex-row flex-wrap -mx-2">
+                    {(['r', 'b', 'y', 'g'] as const).map((color) => {
+                      const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
+                      const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
+                      return (
+                        <View key={color} className="w-1/2 px-2 mb-2">
+                          <View className="flex-row items-center justify-between bg-white/5 rounded-lg px-2 py-2">
+                            <View className="flex-row items-center">
+                              <View className={`w-2.5 h-2.5 rounded-full mr-2 ${colorClass}`} />
+                              <Text className="text-white text-sm">{colorName}</Text>
+                            </View>
+                            <View className="flex-row">
+                              {(['A', 'B'] as const).map((teamId) => {
+                                const active = teamAssignments[color] === teamId;
+                                return (
+                                  <TouchableOpacity
+                                    key={`${color}-${teamId}`}
+                                    className={`px-2 py-1 rounded-full border ml-1 ${
+                                      active ? "border-blue-400 bg-blue-500/20" : "border-white/20 bg-white/5"
+                                    }`}
+                                    onPress={() => updateTeamConfiguration(teamMode, { ...teamAssignments, [color]: teamId })}
+                                  >
+                                    <Text className={`text-xs ${active ? "text-blue-200 font-semibold" : "text-gray-400"}`}>
+                                      {teamId}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             )}
           </View>
@@ -727,6 +841,10 @@ const OnlineLobbyScreen: React.FC = () => {
             <FlatList
               data={availableGames
                 .slice()
+                // Deduplicate by id
+                .filter((game, index, self) => 
+                  game.id && self.findIndex(g => g.id === game.id) === index
+                )
                 .sort((a, b) => {
                   // Sort by timestamp (newest first), with createdAt as fallback
                   const timestampA = a.lastActivity || a.createdAt || 0;
@@ -734,7 +852,7 @@ const OnlineLobbyScreen: React.FC = () => {
                   return timestampB - timestampA;
                 })}
               renderItem={renderGameItem}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => item.id || `game-${index}`}
               showsVerticalScrollIndicator={false}
               style={{ 
                 width: '100%',

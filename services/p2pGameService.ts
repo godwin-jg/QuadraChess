@@ -1,9 +1,11 @@
-import { getValidMoves, isKingInCheck } from "../functions/src/logic/gameLogic";
+import { getValidMoves } from "../src/logic/gameLogic";
 import { initialBoardState } from "../state/boardState";
-import { applyNetworkMove, setGameState } from "../state/gameSlice";
+import { applyNetworkMove, setGameState, timeoutPlayer } from "../state/gameSlice";
 import { store } from "../state/store";
 import { GameState, EnPassantTarget } from "../state/types";
 import p2pService from "./p2pService";
+import { getPieceAtFromBitboard } from "../src/logic/bitboardUtils";
+import { buildMoveKey, consumeSkipNextMoveAnimation, sendGameFlowEvent } from "./gameFlowService";
 
 export interface P2PGameService {
   currentGameId: string | null;
@@ -21,6 +23,7 @@ export interface P2PGameService {
   }) => Promise<void>;
   makePromotion: (pieceType: string) => Promise<void>;
   resignGame: () => Promise<void>;
+  timeoutPlayer: (playerColor: string) => Promise<void>;
   onGameUpdate: (callback: (game: any) => void) => () => void;
   onMoveUpdate: (callback: (move: any) => void) => () => void;
   updatePlayerPresence: (isOnline: boolean) => Promise<void>;
@@ -131,8 +134,26 @@ class P2PGameServiceImpl implements P2PGameService {
     const previousState = store.getState().game;
     const previousEliminatedPlayers = [...previousState.eliminatedPlayers];
 
+    const now = Date.now();
+    const moveWithTimestamp = { ...moveData, timestamp: now };
+    
     // ✅ Apply move locally first (optimistic UI)
-    store.dispatch(applyNetworkMove(moveData));
+    store.dispatch(applyNetworkMove(moveWithTimestamp));
+    const moveKey = buildMoveKey({
+      from: moveWithTimestamp.from,
+      to: moveWithTimestamp.to,
+      pieceCode: moveWithTimestamp.pieceCode,
+      playerColor: moveWithTimestamp.playerColor,
+      timestamp: now,
+      capturedPiece: null,
+    });
+    if (moveKey) {
+      sendGameFlowEvent({
+        type: "MOVE_APPLIED",
+        moveKey,
+        shouldAnimate: !consumeSkipNextMoveAnimation(),
+      });
+    }
 
     // ✅ CRITICAL FIX: Check if elimination occurred and sync game state
     const newState = store.getState().game;
@@ -151,7 +172,7 @@ class P2PGameServiceImpl implements P2PGameService {
     }
 
     // ✅ Send move through P2P service
-    p2pService.sendChessMove(moveData);
+    p2pService.sendChessMove(moveWithTimestamp);
   }
 
   async makePromotion(pieceType: string): Promise<void> {
@@ -208,6 +229,20 @@ class P2PGameServiceImpl implements P2PGameService {
       pieceCode: "RESIGN",
       playerColor: playerColor,
     });
+  }
+
+  async timeoutPlayer(playerColor: string): Promise<void> {
+    if (!this.currentGameId || !this.isConnected) {
+      throw new Error("Not connected to a game");
+    }
+    const now = Date.now();
+    const isHost = store.getState().game.isHost;
+    if (isHost) {
+      store.dispatch(timeoutPlayer({ playerColor, timestamp: now }));
+      p2pService.syncGameStateToClients();
+      return;
+    }
+    p2pService.sendTimeout(playerColor);
   }
 
   onGameUpdate(callback: (game: any) => void): () => void {
@@ -352,8 +387,8 @@ class P2PGameServiceImpl implements P2PGameService {
         return false;
       }
 
-      // Check if the piece belongs to the player
-      const piece = gameState.boardState[moveData.from.row][moveData.from.col];
+      // ✅ BITBOARD ONLY: Check if the piece belongs to the player
+      const piece = getPieceAtFromBitboard(gameState.bitboardState?.pieces || {}, moveData.from.row, moveData.from.col);
       if (!piece || piece[0] !== moveData.playerColor) {
         return false;
       }
@@ -362,7 +397,7 @@ class P2PGameServiceImpl implements P2PGameService {
       const validMoves = getValidMoves(
         piece,
         moveData.from,
-        gameState.boardState,
+        gameState,
         gameState.eliminatedPlayers,
         gameState.hasMoved,
         gameState.enPassantTargets
@@ -376,19 +411,7 @@ class P2PGameServiceImpl implements P2PGameService {
         return false;
       }
 
-      // Check if the move would put the player in check
-      const tempBoard = gameState.boardState.map((row) => [...row]);
-      tempBoard[moveData.to.row][moveData.to.col] = piece;
-      tempBoard[moveData.from.row][moveData.from.col] = null;
-
-      const isInCheck = isKingInCheck(
-        moveData.playerColor,
-        tempBoard,
-        gameState.eliminatedPlayers,
-        gameState.hasMoved
-      );
-
-      return !isInCheck;
+      return true;
     } catch (error) {
       console.error("Error validating move:", error);
       return false;

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import { Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../../state";
 import { resignGame } from "../../../state/gameSlice";
@@ -8,144 +8,71 @@ import ResignConfirmationModal from "./ResignConfirmationModal";
 import { useLocalSearchParams } from "expo-router";
 import soundService from "../../../services/soundService";
 
+const PLAYER_NAMES: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+
 export default function ResignButton() {
   const dispatch = useDispatch();
-  const [showResignModal, setShowResignModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [isResigning, setIsResigning] = useState(false);
-  const { gameId, mode } = useLocalSearchParams<{
-    gameId?: string;
-    mode?: string;
-  }>();
-  const { currentPlayerTurn, gameStatus, viewingHistoryIndex } = useSelector(
-    (state: RootState) => state.game
-  );
-  
-  // Get the local player's color for online games
-  const getLocalPlayerColor = (): string | null => {
-    if (isOnlineMode && onlineGameService.currentPlayer) {
-      return onlineGameService.currentPlayer.color;
-    }
-    // For local games, we don't have a specific local player concept
-    // The resign button should only appear for the current player's turn
-    return currentPlayerTurn;
-  };
-  
-  const localPlayerColor = getLocalPlayerColor();
+  const { gameId, mode } = useLocalSearchParams<{ gameId?: string; mode?: string }>();
+  const { currentPlayerTurn, gameStatus, viewingHistoryIndex } = useSelector((state: RootState) => state.game);
 
   const isOnlineMode = mode === "online" && !!gameId;
-  const isViewingHistory = viewingHistoryIndex !== null;
-  const canResign =
-    !isViewingHistory &&
-    (gameStatus === "active" ||
-      gameStatus === "waiting") &&
+  const localPlayerColor = isOnlineMode ? onlineGameService.currentPlayer?.color : currentPlayerTurn;
+  const canResign = viewingHistoryIndex === null && 
+    (gameStatus === "active" || gameStatus === "waiting") &&
     !["finished", "checkmate", "stalemate"].includes(gameStatus);
 
-  const getPlayerName = (playerColor: string) => {
-    switch (playerColor) {
-      case "r":
-        return "Red";
-      case "b":
-        return "Blue";
-      case "y":
-        return "Yellow";
-      case "g":
-        return "Green";
-      default:
-        return "Player";
-    }
-  };
-
-  const handleResignPress = () => {
-    setShowResignModal(true);
-  };
-
-  const handleConfirmResign = async () => {
+  const handleConfirm = async () => {
     setIsResigning(true);
     try {
-      
       if (isOnlineMode) {
-        // ✅ CRITICAL FIX: For online mode, don't update local state immediately
-        // Let the online service handle the resignation and sync the correct state
-        
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error("Resign request timed out")), 10000); // 10 second timeout
-        });
-        
         await Promise.race([
           onlineGameService.resignGame(),
-          timeoutPromise
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
         ]);
-        
       } else {
-        // Local multiplayer or single player - use Redux action only
-        // For local games, resign the current player's turn
         dispatch(resignGame(localPlayerColor || undefined));
       }
-      
-      // 🔊 Play game-end sound for resignation
-      try {
-        soundService.playGameEndSound();
-      } catch (error) {
-      }
-      
-      setShowResignModal(false);
-    } catch (error) {
-      
-      // For online mode, the local state was already updated, so we can close the modal
-      if (isOnlineMode) {
-        setShowResignModal(false);
-        // Don't show error alert since the resign worked locally
-      } else {
-        // Show error to user for local games
-        alert("Failed to resign from game. Please try again.");
-      }
+      soundService.playGameEndSound();
+      setShowModal(false);
+    } catch {
+      if (isOnlineMode) setShowModal(false);
+      else alert("Failed to resign. Please try again.");
     } finally {
       setIsResigning(false);
     }
   };
 
-  const handleCancelResign = () => {
-    setShowResignModal(false);
-  };
-
-  if (!canResign) {
-    return null;
-  }
+  if (!canResign) return null;
 
   return (
     <>
-      <TouchableOpacity
-        onPress={handleResignPress}
-        activeOpacity={0.7}
-        style={{
-          backgroundColor: 'rgba(239, 68, 68, 0.8)',
-          paddingHorizontal: 16,
-          paddingVertical: 8,
-          borderRadius: 8,
-          borderWidth: 1,
-          borderColor: 'rgba(239, 68, 68, 0.3)',
-        }}
-      >
-        <Text style={{
-          color: '#FFFFFF',
-          fontSize: 14,
-          fontWeight: '600',
-          fontFamily: 'SpaceMono-Regular',
-          letterSpacing: 0.8,
-          textAlign: 'center',
-        }}>
-          Resign
-        </Text>
+      <TouchableOpacity onPress={() => setShowModal(true)} activeOpacity={0.7} style={styles.button}>
+        <Text style={styles.buttonText}>Resign</Text>
       </TouchableOpacity>
-
       <ResignConfirmationModal
-        visible={showResignModal}
-        onConfirm={handleConfirmResign}
-        onCancel={handleCancelResign}
-        playerName={localPlayerColor ? getPlayerName(localPlayerColor) : "Player"}
+        visible={showModal}
+        onConfirm={handleConfirm}
+        onCancel={() => setShowModal(false)}
+        playerName={PLAYER_NAMES[localPlayerColor || ''] || "Player"}
         isResigning={isResigning}
       />
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  button: {
+    backgroundColor: '#374151',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: '#F87171',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+});

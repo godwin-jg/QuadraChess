@@ -2,9 +2,11 @@
 // Centralized bot service for online games - single source of truth
 
 import database from '@react-native-firebase/database';
-import { getValidMoves } from '../functions/src/logic/gameLogic';
+import { getValidMoves } from "../src/logic/gameLogic";
 import { GameState, Position } from '../state/types';
-import { BOT_CONFIG, getBotConfig } from '../config/gameConfig';
+import { BOT_CONFIG, getBotConfig, PIECE_VALUES } from '../config/gameConfig';
+import { getPieceAtFromBitboard, bitScanForward } from '../src/logic/bitboardUtils';
+import { computeBestMove } from "./botService";
 
 interface MoveOption {
   from: Position;
@@ -17,15 +19,6 @@ interface MoveOption {
   // Note: capturedPieceCode removed to avoid stale data in multiplayer
 }
 
-// Point values for each piece type
-const pieceValues: { [key: string]: number } = {
-  P: 1,  // Pawn
-  N: 3,  // Knight
-  B: 5,  // Bishop
-  R: 5,  // Rook
-  Q: 9,  // Queen
-  // K: Kings cannot be captured in chess, so no value assigned
-};
 
 class OnlineBotService {
   private botProcessingFlags: Map<string, boolean> = new Map(); // Per-bot processing flags
@@ -33,7 +26,7 @@ class OnlineBotService {
   // Get all legal moves for a bot with smart timeout and early termination
   private getAllLegalMoves(botColor: string, gameState: GameState, maxMoves?: number, cancellationToken?: { cancelled: boolean }): MoveOption[] {
     // Get the appropriate bot configuration based on game mode
-    const botConfig = getBotConfig(gameState.gameMode);
+    const botConfig = getBotConfig(gameState.gameMode, gameState.botDifficulty);
     const maxMovesToCalculate = maxMoves || botConfig.MAX_MOVES_TO_CALCULATE;
     
     const allMoves: MoveOption[] = [];
@@ -41,28 +34,31 @@ class OnlineBotService {
     const startTime = Date.now();
     const maxCalculationTime = 1500; // Reduced from 3000 to 1500ms for much faster calculation
 
-    // Collect all bot pieces first to avoid positional bias
+    // ✅ BITBOARD ONLY: Collect all bot pieces from bitboards
     const botPieces: { pieceCode: string; position: { row: number; col: number } }[] = [];
+    const pieces = gameState.bitboardState?.pieces || {};
     
-    for (let r = 0; r < boardState.length; r++) {
-      for (let c = 0; c < boardState[r].length; c++) {
-        // Check for cancellation before each piece
+    for (const [pieceCode, bb] of Object.entries(pieces)) {
+      if (!pieceCode.startsWith(botColor) || !bb || bb === 0n) continue;
+      
+      let temp = bb as bigint;
+      while (temp > 0n) {
         if (cancellationToken?.cancelled || (Date.now() - startTime) > maxCalculationTime) {
           return allMoves; // Return what we have so far
         }
         
-        const pieceCode = boardState[r][c];
-        if (pieceCode && pieceCode.startsWith(botColor)) {
-          botPieces.push({ pieceCode, position: { row: r, col: c } });
-        }
+        const sqIdx = Number(bitScanForward(temp));
+        const row = Math.floor(sqIdx / 14);
+        const col = sqIdx % 14;
+        botPieces.push({ pieceCode, position: { row, col } });
+        temp &= temp - 1n; // Clear lowest bit
       }
     }
     
     // ✅ SMART OPTIMIZATION: Prioritize pieces that are more likely to have good moves
     const prioritizedPieces = botPieces.sort((a, b) => {
-      const pieceValues = { 'Q': 9, 'R': 5, 'B': 5, 'N': 3, 'P': 1, 'K': 0 };
-      const aValue = pieceValues[a.pieceCode[1] as keyof typeof pieceValues] || 0;
-      const bValue = pieceValues[b.pieceCode[1] as keyof typeof pieceValues] || 0;
+      const aValue = PIECE_VALUES[a.pieceCode[1] as keyof typeof PIECE_VALUES] || 0;
+      const bValue = PIECE_VALUES[b.pieceCode[1] as keyof typeof PIECE_VALUES] || 0;
       return bValue - aValue; // Higher value pieces first
     });
     
@@ -75,7 +71,7 @@ class OnlineBotService {
       
       try {
         const movesForPiece = getValidMoves(
-          pieceCode, position, boardState, eliminatedPlayers, hasMoved, enPassantTargets
+          pieceCode, position, gameState, eliminatedPlayers, hasMoved, enPassantTargets
         );
         
         // Add moves for this piece
@@ -104,85 +100,12 @@ class OnlineBotService {
     return allMoves.slice(0, maxMovesToCalculate); // Ensure we don't exceed the limit
   }
 
-  // Choose the best move for a bot with smart fallback strategies
-  private chooseBestMove(botColor: string, gameState: GameState, cancellationToken?: { cancelled: boolean }): MoveOption | null {
-    const startTime = Date.now();
-    const maxMoveTime = 1500; // Reduced from 2500 to 1500ms for faster move selection
-    
-    // Get the appropriate bot configuration based on game mode
-    const botConfig = getBotConfig(gameState.gameMode);
-    
-    // ✅ SMART OPTIMIZATION: Start with fewer moves, increase if time allows
-    let maxMoves = Math.min(5, botConfig.MAX_MOVES_TO_CALCULATE); // Start conservative, respect config limit
-    if (Date.now() - startTime < 500) { // Reduced from 1000 to 500ms
-      maxMoves = Math.min(8, botConfig.MAX_MOVES_TO_CALCULATE); // Much smaller increase, respect config limit
-    }
-    
-    const allLegalMoves = this.getAllLegalMoves(botColor, gameState, maxMoves, cancellationToken);
-
-    // Check if calculation was cancelled due to timeout (brain overheated)
-    if (cancellationToken?.cancelled) {
-      return null; // Skip turn if timeout
-    }
-
-    if (allLegalMoves.length === 0) {
-      // Bot has no legal moves - check if it's checkmate or stalemate
-      const { isKingInCheck } = require('../functions/src/logic/gameLogic');
-      const isInCheck = isKingInCheck(botColor, gameState.boardState, gameState.eliminatedPlayers, gameState.hasMoved);
-      
-      if (isInCheck) {
-        // Return a special "eliminate" move
-        return { from: { row: -1, col: -1 }, to: { row: -1, col: -1, isCapture: false }, isEliminate: true };
-      } else {
-        return null;
-      }
-    }
-
-    const captureMoves = allLegalMoves.filter(move => move.to.isCapture);
-
-    let chosenMove: MoveOption;
-
-    if (captureMoves.length > 0) {
-      // --- GREEDY CAPTURE LOGIC ---
-      // Find the capture that yields the most points
-      chosenMove = captureMoves.reduce((bestMove, currentMove) => {
-        // Get captured piece codes at execution time to avoid stale data
-        const bestCapturedPiece = gameState.boardState[bestMove.to.row][bestMove.to.col];
-        const currentCapturedPiece = gameState.boardState[currentMove.to.row][currentMove.to.col];
-        
-        const bestValue = (bestCapturedPiece && bestCapturedPiece.length >= 2) 
-          ? pieceValues[bestCapturedPiece[1]] || 0 
-          : 0;
-        const currentValue = (currentCapturedPiece && currentCapturedPiece.length >= 2) 
-          ? pieceValues[currentCapturedPiece[1]] || 0 
-          : 0;
-        
-        return currentValue > bestValue ? currentMove : bestMove;
-      });
-      const capturedPiece = gameState.boardState[chosenMove.to.row][chosenMove.to.col];
-
-    } else {
-      // --- RANDOM MOVE LOGIC ---
-      // If no captures, make a random move
-      const nonCaptureMoves = allLegalMoves.filter(move => !move.to.isCapture);
-      if (nonCaptureMoves.length > 0) {
-        chosenMove = nonCaptureMoves[Math.floor(Math.random() * nonCaptureMoves.length)];
-      } else {
-        // This should never happen since we already filtered captureMoves above
-        // If it does happen, it indicates a logic error - log and use first available move
-        chosenMove = allLegalMoves[0];
-      }
-    }
-
-    return chosenMove;
-  }
-
   // Process bot move directly in database
   private async processBotMove(gameId: string, botColor: string, gameState: GameState): Promise<void> {
     const startTime = Date.now();
     
     // Get the appropriate bot configuration based on game mode
-    const botConfig = getBotConfig(gameState.gameMode);
+    const botConfig = getBotConfig(gameState.gameMode, gameState.botDifficulty);
     
     if (this.botProcessingFlags.get(botColor)) {
       return;
@@ -221,7 +144,7 @@ class OnlineBotService {
     try {
       // ✅ CRITICAL FIX: Calculate the move WITHOUT applying it to the database first
       // This prevents intermediate moves from showing in the UI during calculation
-      const chosenMove = this.chooseBestMove(botColor, gameState, cancellationToken);
+      const chosenMove = computeBestMove(gameState, botColor, cancellationToken);
       
       // Check if calculation was cancelled due to timeout (brain overheated)
       if (cancellationToken.cancelled) {
@@ -231,40 +154,33 @@ class OnlineBotService {
       }
       
       if (!chosenMove) {
-        // No legal moves found (stalemate) - skip turn and advance to next player
+        // No legal moves found - eliminate (checkmate or stalemate)
         clearTimeout(moveTimeout);
         this.botProcessingFlags.set(botColor, false);
         
-        // Notify user about bot stalemate
-        try {
-          const notificationService = require('./notificationService').default;
-          notificationService.show(`Bot ${botColor.toUpperCase()} has no moves - skipping turn`, "info", 3000);
-        } catch (notificationError) {
-          console.warn("Failed to show bot stalemate notification:", notificationError);
-        }
-        
-        await this.skipBotTurn(gameId, botColor);
-        return;
-      }
+        const { isKingInCheck } = require("../src/logic/bitboardLogic");
+        const isInCheck = isKingInCheck(botColor, gameState);
+        const eliminationReason = isInCheck ? "checkmated" : "stalemated";
 
-      // Handle bot elimination (checkmate)
-      if (chosenMove.isEliminate) {
         // Notify user about bot elimination
         try {
           const notificationService = require('./notificationService').default;
-          notificationService.show(`Bot ${botColor.toUpperCase()} eliminated!`, "error", 4000);
+          notificationService.show(
+            `Bot ${botColor.toUpperCase()} ${eliminationReason}!`,
+            isInCheck ? "error" : "warning",
+            4000
+          );
         } catch (notificationError) {
           console.warn("Failed to show bot elimination notification:", notificationError);
         }
-        
+
         await this.eliminateBot(gameId, botColor);
-        clearTimeout(moveTimeout);
-        this.botProcessingFlags.set(botColor, false);
         return;
       }
 
-      // Re-validate move at execution time to ensure it's still legal
-      const pieceCode = gameState.boardState[chosenMove.from.row][chosenMove.from.col];
+      // ✅ BITBOARD ONLY: Re-validate move at execution time
+      const pieces = gameState.bitboardState?.pieces || {};
+      const pieceCode = getPieceAtFromBitboard(pieces, chosenMove.from.row, chosenMove.from.col);
       if (!pieceCode || pieceCode[0] !== botColor) {
         clearTimeout(moveTimeout);
         this.botProcessingFlags.set(botColor, false);
@@ -292,9 +208,9 @@ class OnlineBotService {
         playerColor: botColor,
       };
 
-      // ✅ CRITICAL FIX: Store captured piece info for lastMove object
+      // ✅ BITBOARD ONLY: Store captured piece info for lastMove object
       // This ensures Board component can play correct sound
-      const capturedPiece = gameState.boardState[chosenMove.to.row][chosenMove.to.col];
+      const capturedPiece = getPieceAtFromBitboard(pieces, chosenMove.to.row, chosenMove.to.col);
       const isCastling = require('../state/gameHelpers').isCastlingMove(
         pieceCode,
         chosenMove.from.row,
@@ -344,25 +260,8 @@ class OnlineBotService {
         // ✅ CRITICAL FIX: Check if this is a capture move and update scores
         const capturedPiece = boardState[moveData.to.row][moveData.to.col];
         if (capturedPiece && capturedPiece[0] !== botColor) {
-          const capturedPieceType = capturedPiece[1];
-          let points = 0;
-          switch (capturedPieceType) {
-            case "P": // Pawn
-              points = 1;
-              break;
-            case "N": // Knight
-              points = 3;
-              break;
-            case "B": // Bishop
-            case "R": // Rook
-              points = 5;
-              break;
-            case "Q": // Queen
-              points = 9;
-              break;
-            default:
-              points = 0;
-          }
+          const capturedPieceType = capturedPiece[1] as keyof typeof PIECE_VALUES;
+          const points = PIECE_VALUES[capturedPieceType] || 0;
           
           // Update scores in game state
           if (!gameData.gameState.scores) {

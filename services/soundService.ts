@@ -100,7 +100,14 @@ class SoundService {
   // Play a sound effect using loaded sound files or haptic feedback
   public async playSound(soundName: string): Promise<void> {
     if (!this.isInitialized) {
-      return;
+      try {
+        await this.initialize();
+      } catch (error) {
+        return;
+      }
+      if (!this.isInitialized) {
+        return;
+      }
     }
 
     try {

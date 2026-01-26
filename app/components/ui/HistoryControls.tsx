@@ -1,138 +1,86 @@
 import React from "react";
-import { View, Text, TouchableOpacity } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../../state";
-import {
-  stepHistory,
-  returnToLive,
-  selectIsViewingHistory,
-} from "../../../state/gameSlice";
-import { useLocalSearchParams } from "expo-router";
+import { stepHistory, returnToLive, selectIsViewingHistory } from "../../../state/gameSlice";
 import { hapticsService } from "../../../services/hapticsService";
 
 export default function HistoryControls() {
   const dispatch = useDispatch();
-  const { mode } = useLocalSearchParams<{ mode?: string }>();
-  const { history, viewingHistoryIndex } = useSelector(
-    (state: RootState) => state.game
-  );
+  const { history, viewingHistoryIndex } = useSelector((state: RootState) => state.game);
   const isViewingHistory = useSelector(selectIsViewingHistory);
-  const totalMoves = Math.max(0, history.length); // Total number of moves made
-  const currentMoveNumber = isViewingHistory
-    ? (viewingHistoryIndex || 0) + 1  // Convert 0-based index to 1-based display
-    : totalMoves;
+  const totalMoves = Math.max(0, history.length);
+  const currentMoveNumber = isViewingHistory ? (viewingHistoryIndex || 0) + 1 : totalMoves;
 
-  // History controls now available in all modes including online
-  // if (mode === "online") {
-  //   return null;
-  // }
-
-  const canStepBack = true; // Always enabled - can go to first move or back to live state
-  const canStepPrevious = viewingHistoryIndex === null || (viewingHistoryIndex !== null && viewingHistoryIndex > 0); // Can go back from live state or if not at first move
-  const canStepForward = viewingHistoryIndex !== null && viewingHistoryIndex < history.length - 1;
+  // Can only navigate up to n-1 (not the current live position)
+  // User must click "Live" to return to current state
+  const canStepBack = history.length > 0;
+  const canStepPrevious = viewingHistoryIndex === null ? history.length > 0 : viewingHistoryIndex > 0;
+  const canStepForward = viewingHistoryIndex !== null && viewingHistoryIndex < history.length - 2;
   const canReturnToLive = viewingHistoryIndex !== null;
 
-
-  const handleStepBack = () => {
-    if (canStepBack) {
-      hapticsService.selection();
-      dispatch(stepHistory("back"));
-    }
-  };
-
-  const handleStepPrevious = () => {
-    if (canStepPrevious) {
-      hapticsService.selection();
-      dispatch(stepHistory("previous"));
-    }
-  };
-
-  const handleStepForward = () => {
-    if (canStepForward) {
-      hapticsService.selection();
-      dispatch(stepHistory("forward"));
-    }
-  };
-
-  const handleReturnToLive = () => {
-    if (canReturnToLive) {
-      hapticsService.selection();
-      dispatch(returnToLive());
-    }
-  };
+  const buttons = [
+    { label: "Start", symbol: "«", enabled: canStepBack, action: () => dispatch(stepHistory("back")) },
+    { label: "Prev", symbol: "◀", enabled: canStepPrevious, action: () => dispatch(stepHistory("previous")) },
+    { label: "Next", symbol: "▶", enabled: canStepForward, action: () => dispatch(stepHistory("forward")) },
+    { label: "Live", symbol: "»", enabled: canReturnToLive, action: () => dispatch(returnToLive()) },
+  ];
 
   return (
-    <View className="flex-col gap-2">
-      {/* Move counter */}
-      <View className="flex-row justify-center">
-        <Text className="text-sm text-gray-300 font-medium">
-          Move {currentMoveNumber} of {totalMoves}
-        </Text>
-      </View>
-      
-      {/* Navigation buttons */}
-      <View className="flex-row gap-2">
-        <TouchableOpacity
-          className={`w-12 h-10 rounded-lg justify-center items-center ${
-            canStepBack ? "bg-gray-700" : "bg-gray-500"
-          }`}
-          onPress={handleStepBack}
-          activeOpacity={canStepBack ? 0.7 : 1}
-          disabled={!canStepBack}
-        >
-          <Text className={`text-lg font-bold ${canStepBack ? "text-white" : "text-gray-300"}`}>«</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          className={`w-12 h-10 rounded-lg justify-center items-center ${
-            canStepPrevious ? "bg-gray-700" : "bg-gray-500"
-          }`}
-          onPress={handleStepPrevious}
-          activeOpacity={canStepPrevious ? 0.7 : 1}
-          disabled={!canStepPrevious}
-        >
-          <Text className={`text-lg font-bold ${canStepPrevious ? "text-white" : "text-gray-300"}`}>◀</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          className={`w-12 h-10 rounded-lg justify-center items-center ${
-            canStepForward ? "bg-gray-700" : "bg-gray-500"
-          }`}
-          onPress={handleStepForward}
-          activeOpacity={canStepForward ? 0.7 : 1}
-          disabled={!canStepForward}
-        >
-          <Text className={`text-lg font-bold ${canStepForward ? "text-white" : "text-gray-300"}`}>▶</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          className={`w-12 h-10 rounded-lg justify-center items-center ${
-            canReturnToLive ? "bg-gray-700" : "bg-gray-500"
-          }`}
-          onPress={handleReturnToLive}
-          activeOpacity={canReturnToLive ? 0.7 : 1}
-          disabled={!canReturnToLive}
-        >
-          <Text className={`text-lg font-bold ${canReturnToLive ? "text-white" : "text-gray-300"}`}>»</Text>
-        </TouchableOpacity>
-      </View>
-      
-      {/* Button labels */}
-      <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 4 }}>
-        {/* Each label is wrapped in a View for proper layout */}
-        <View style={{ width: 48, alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Start</Text>
-        </View>
-        <View style={{ width: 48, alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Prev</Text>
-        </View>
-        <View style={{ width: 48, alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Next</Text>
-        </View>
-        <View style={{ width: 48, alignItems: 'center' }}>
-          <Text style={{ fontSize: 12, color: '#FFFFFF', fontWeight: 'bold' }}>Live</Text>
-        </View>
+    <View style={styles.container}>
+      <Text style={styles.moveCounter}>Move {currentMoveNumber} of {totalMoves}</Text>
+      <View style={styles.buttonsRow}>
+        {buttons.map(({ label, symbol, enabled, action }) => (
+          <TouchableOpacity
+            key={label}
+            style={[styles.button, enabled ? styles.buttonEnabled : styles.buttonDisabled]}
+            onPress={() => { if (enabled) { hapticsService.selection(); action(); } }}
+            activeOpacity={enabled ? 0.7 : 1}
+            disabled={!enabled}
+          >
+            <Text style={[styles.buttonText, enabled ? styles.textEnabled : styles.textDisabled]}>{symbol}</Text>
+            <Text style={[styles.labelText, enabled ? styles.textEnabled : styles.textDisabled]}>{label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { 
+    alignItems: 'center',
+    gap: 8,
+  },
+  moveCounter: { 
+    fontSize: 13, 
+    color: '#D1D5DB', 
+    fontWeight: '500', 
+    textAlign: 'center',
+  },
+  buttonsRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'center',
+    gap: 6,
+  },
+  button: { 
+    width: 44, 
+    height: 44, 
+    borderRadius: 8, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+  },
+  buttonEnabled: { backgroundColor: '#374151' },
+  buttonDisabled: { backgroundColor: '#4B5563' },
+  buttonText: { 
+    fontSize: 16, 
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  labelText: {
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  textEnabled: { color: '#FFFFFF' },
+  textDisabled: { color: '#9CA3AF' },
+});

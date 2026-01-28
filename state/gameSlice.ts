@@ -923,10 +923,13 @@ const gameSlice = createSlice({
 
       const now = Date.now();
       const moverColor = pieceColor as ClockColor;
-      const remainingMs = applyElapsedToClock(state, moverColor, now);
-      if (remainingMs <= 0) {
-        applyTimeoutLogic(state, moverColor, now);
-        return;
+      const shouldTrackClock = state.gameMode !== "solo" && state.gameMode !== "single";
+      if (shouldTrackClock) {
+        const remainingMs = applyElapsedToClock(state, moverColor, now);
+        if (remainingMs <= 0) {
+          applyTimeoutLogic(state, moverColor, now);
+          return;
+        }
       }
 
       // ✅ Gather all information about the move
@@ -952,7 +955,7 @@ const gameSlice = createSlice({
         enPassantTarget,
       });
 
-      if (state.timeControl.incrementMs > 0) {
+      if (shouldTrackClock && state.timeControl.incrementMs > 0) {
         state.clocks[moverColor] = Math.max(
           0,
           state.clocks[moverColor] + state.timeControl.incrementMs
@@ -1432,10 +1435,13 @@ const gameSlice = createSlice({
       }
 
       const moverColor = playerColor as ClockColor;
-      const remainingMs = applyElapsedToClock(state, moverColor, now);
-      if (remainingMs <= 0) {
-        applyTimeoutLogic(state, moverColor, now);
-        return;
+      const shouldTrackClock = state.gameMode !== "solo" && state.gameMode !== "single";
+      if (shouldTrackClock) {
+        const remainingMs = applyElapsedToClock(state, moverColor, now);
+        if (remainingMs <= 0) {
+          applyTimeoutLogic(state, moverColor, now);
+          return;
+        }
       }
 
       // ✅ Gather all information about the move
@@ -1466,7 +1472,7 @@ const gameSlice = createSlice({
         enPassantTarget,
       });
 
-      if (state.timeControl.incrementMs > 0) {
+      if (shouldTrackClock && state.timeControl.incrementMs > 0) {
         state.clocks[moverColor] = Math.max(
           0,
           state.clocks[moverColor] + state.timeControl.incrementMs

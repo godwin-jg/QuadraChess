@@ -33,6 +33,7 @@ interface SquareProps {
     isCurrentTurn: boolean;
     isEliminated: boolean;
     timeMs?: number;
+    isTimerDisabled?: boolean;
   }>;
   boardRotation?: number;
   viewerColor?: string | null;
@@ -139,6 +140,7 @@ const CornerSquare = React.memo(function CornerSquare({
           isEliminated={player.isEliminated}
           boardRotation={boardRotation}
           timeMs={player.timeMs}
+          isTimerDisabled={player.isTimerDisabled}
         />
       </Animated.View>
     </View>

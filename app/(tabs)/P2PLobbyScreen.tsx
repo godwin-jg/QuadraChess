@@ -4,9 +4,9 @@ import {
   Text,
   TouchableOpacity,
   TextInput,
-  FlatList,
   Alert,
   ActivityIndicator,
+  ScrollView,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
@@ -36,6 +36,7 @@ import networkDiscoveryService from "../../services/networkDiscoveryService";
 import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
 import { hapticsService } from "../../services/hapticsService";
+import { getTabBarSpacer } from "../utils/responsive";
 
 type TeamAssignments = { r: "A" | "B"; b: "A" | "B"; y: "A" | "B"; g: "A" | "B" };
 const DEFAULT_TEAM_ASSIGNMENTS: TeamAssignments = { r: "A", y: "A", b: "B", g: "B" };
@@ -45,6 +46,7 @@ const P2PLobbyScreen: React.FC = () => {
   const router = useRouter();
   const { settings, updateProfile } = useSettings();
   const insets = useSafeAreaInsets();
+  const tabBarSpacer = getTabBarSpacer(insets.bottom);
   
   const isFocused = useIsFocused();
 
@@ -339,9 +341,10 @@ const P2PLobbyScreen: React.FC = () => {
   };
 
   // Render discovered game item
-  const renderGameItem = ({ item }: { item: any }) => {
+  const renderGameItem = (item: any, index: number) => {
     return (
       <TouchableOpacity
+        key={item.id || `game-${index}`}
         className="bg-white/10 p-4 rounded-xl mb-3 border border-white/20"
         onPress={() => joinGame(item.id)}
         disabled={isLoading}
@@ -365,6 +368,21 @@ const P2PLobbyScreen: React.FC = () => {
       </TouchableOpacity>
     );
   };
+
+  const displayDiscoveredGames = useMemo(
+    () =>
+      discoveredGames
+        .slice()
+        .filter((game, index, self) =>
+          game.id && self.findIndex(g => g.id === game.id) === index
+        )
+        .sort((a, b) => {
+          const timestampA = a.timestamp || a.createdAt || 0;
+          const timestampB = b.timestamp || b.createdAt || 0;
+          return timestampB - timestampA;
+        }),
+    [discoveredGames]
+  );
 
   // Show connection error screen
   if (connectionError) {
@@ -400,10 +418,13 @@ const P2PLobbyScreen: React.FC = () => {
   // In-game waiting room
   if (currentGame) {
     return (
-      <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+      <SafeAreaView style={{ flex: 1 }} className="bg-black">
         {/* Subtle blueprint grid background */}
         <GridBackground />
-        
+        <ScrollView
+          contentContainerStyle={{ padding: 24, paddingBottom: tabBarSpacer }}
+          showsVerticalScrollIndicator={false}
+        >
         <View className="items-center mb-8">
           <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
           {isEditingName ? (
@@ -677,15 +698,20 @@ const P2PLobbyScreen: React.FC = () => {
             Leave Game
           </Text>
         </TouchableOpacity>
+        </ScrollView>
       </SafeAreaView>
     );
   }
 
   // Main menu
   return (
-    <SafeAreaView style={{ flex: 1, marginBottom: 80 }} className="bg-black p-6">
+    <SafeAreaView style={{ flex: 1 }} className="bg-black">
       {/* Subtle blueprint grid background */}
       <GridBackground />
+      <ScrollView
+        contentContainerStyle={{ padding: 24, paddingBottom: tabBarSpacer }}
+        showsVerticalScrollIndicator={false}
+      >
       <View className="items-center mb-8">
         <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
         {isEditingName ? (
@@ -767,33 +793,15 @@ const P2PLobbyScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {discoveredGames.length === 0 ? (
+        {displayDiscoveredGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8 pb-4">
             The arena stands empty... Be the first to spill digital blood!
           </Text>
         ) : (
           <View style={{ position: 'relative', width: '100%' }}>
-            <FlatList
-              data={discoveredGames
-                .slice()
-                .filter((game, index, self) => 
-                  game.id && self.findIndex(g => g.id === game.id) === index
-                )
-                .sort((a, b) => {
-                  // Sort by timestamp (newest first), with createdAt as fallback
-                  const timestampA = a.timestamp || a.createdAt || 0;
-                  const timestampB = b.timestamp || b.createdAt || 0;
-                  return timestampB - timestampA;
-                })}
-              renderItem={renderGameItem}
-              keyExtractor={(item, index) => item.id || `game-${index}`}
-              showsVerticalScrollIndicator={false}
-              style={{ 
-                width: '100%',
-                maxHeight: 300, // Constrain height to prevent going behind tab bar
-              }}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            />
+            <View style={{ width: '100%', paddingBottom: 20 }}>
+              {displayDiscoveredGames.map((game, index) => renderGameItem(game, index))}
+            </View>
             {/* Smooth fade-out gradient overlay */}
             <LinearGradient
               colors={['transparent', 'rgba(0, 0, 0, 0.8)', 'rgba(0, 0, 0, 1)']}
@@ -802,13 +810,14 @@ const P2PLobbyScreen: React.FC = () => {
                 bottom: 0,
                 left: 0,
                 right: 0,
-                height: 40,
+                height: 40 + insets.bottom,
                 pointerEvents: 'none',
               }}
             />
           </View>
         )}
       </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };

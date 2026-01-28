@@ -74,11 +74,13 @@ interface BoardProps {
     isCurrentTurn: boolean;
     isEliminated: boolean;
     timeMs?: number;
+    isTimerDisabled?: boolean;
   }>;
   // floatingPoints and onFloatingPointComplete removed for performance optimization
   boardRotation?: number;
   viewerColor?: string | null;
   displayTurn?: string;
+  maxBoardSize?: number;
 }
 
 
@@ -89,15 +91,24 @@ export default function Board({
   boardRotation = 0,
   viewerColor = null,
   displayTurn,
+  maxBoardSize,
 }: BoardProps) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   // Board dimensions - adapts to screen size with tablet support
-  const boardSize = React.useMemo(() => getBoardSize(), [width]);
+  const boardSize = React.useMemo(() => {
+    const baseSize = getBoardSize(width, height);
+    if (typeof maxBoardSize === "number" && Number.isFinite(maxBoardSize) && maxBoardSize > 0) {
+      return Math.min(baseSize, maxBoardSize);
+    }
+    return baseSize;
+  }, [width, height, maxBoardSize]);
   const squareSize = React.useMemo(() => boardSize / 14, [boardSize]);
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { settings } = useSettings();
   const tapToMoveEnabled = settings.game.tapToMoveEnabled ?? true;
   const dragToMoveEnabled = settings.game.dragToMoveEnabled ?? true;
+  const animationsEnabled = settings.game.animationsEnabled ?? true;
+  const showMoveHints = settings.game.showMoveHints ?? true;
   const boardTheme = useMemo(() => getBoardTheme(settings), [settings]);
   const { handleSquarePress: handleSquareSelection, getMovesForSquare, isValidMove } =
     useChessEngine();
@@ -134,6 +145,12 @@ export default function Board({
     }
     return boardState;
   }, [viewingHistoryIndex, history, boardState]);
+  const displayEliminatedPlayers = useMemo(() => {
+    if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
+      return history[viewingHistoryIndex].eliminatedPlayers ?? [];
+    }
+    return eliminatedPlayers;
+  }, [viewingHistoryIndex, history, eliminatedPlayers]);
   // OPTIMIZATION: Use separate selectors to avoid creating new objects
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
   const players = useSelector((state: RootState) => state.game.players);
@@ -153,7 +170,7 @@ export default function Board({
 
   const glowTurn = displayTurn ?? currentPlayerTurn;
   // Animation values for current player glow (extracted hook)
-  const { glowOpacity, glowScale } = useBoardGlowAnimation(glowTurn);
+  const { glowOpacity, glowScale } = useBoardGlowAnimation(glowTurn, animationsEnabled);
 
   // Drag state
   const [dragState, setDragState] = React.useState<{
@@ -230,14 +247,19 @@ export default function Board({
     [selectedPiece, displayBoardState]
   );
 
+  const visibleValidMoves = useMemo(
+    () => (showMoveHints ? displayValidMoves : []),
+    [displayValidMoves, showMoveHints]
+  );
+
   const moveTypeMap = useMemo(() => {
     const map = new Array(196).fill(null) as Array<"move" | "capture" | null>;
-    for (let i = 0; i < displayValidMoves.length; i++) {
-      const move = displayValidMoves[i];
+    for (let i = 0; i < visibleValidMoves.length; i++) {
+      const move = visibleValidMoves[i];
       map[move.row * 14 + move.col] = move.isCapture ? "capture" : "move";
     }
     return map;
-  }, [displayValidMoves]);
+  }, [visibleValidMoves]);
 
   // Animation orchestration (extracted hook)
   const {
@@ -253,6 +275,7 @@ export default function Board({
     displayBoardState,
     lastMove,
     isViewingHistory,
+    animationsEnabled,
     dragState,
     isFlowAnimating,
     gameFlowSend,
@@ -938,7 +961,7 @@ export default function Board({
                           checkStatus[piece[0] as keyof typeof checkStatus]
                         )
                       }
-                      isEliminated={isPieceEliminated(piece, eliminatedPlayers)}
+                      isEliminated={isPieceEliminated(piece, displayEliminatedPlayers)}
                       isInteractable={true}
                       boardTheme={boardTheme}
                       playerData={isCornerCenter ? playerData : undefined}
@@ -957,7 +980,7 @@ export default function Board({
         <BoardOverlayCanvas
           boardSize={boardSize}
           squareSize={squareSize}
-          validMoves={displayValidMoves}
+          validMoves={visibleValidMoves}
           selectedPiece={selectedPiece}
           selectedPieceColor={selectedPieceColor}
           checkSquares={checkSquares}

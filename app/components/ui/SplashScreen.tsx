@@ -23,6 +23,19 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
   const backgroundOpacity = useSharedValue(1);
   const [videoError, setVideoError] = React.useState(false);
   const [playerReady, setPlayerReady] = React.useState(false);
+  const isKeepAwakeError = React.useCallback((error: unknown) => {
+    if (!error) {
+      return false;
+    }
+    if (typeof error === 'string') {
+      return error.toLowerCase().includes('keep awake');
+    }
+    if (typeof error === 'object' && 'message' in error) {
+      const message = String((error as { message?: string }).message ?? '');
+      return message.toLowerCase().includes('keep awake');
+    }
+    return false;
+  }, []);
   
   // ✅ CRITICAL FIX: Always call useVideoPlayer at top level (Rules of Hooks requirement)
   const player = useVideoPlayer(videoSource || '', React.useCallback((player: any) => {
@@ -73,30 +86,36 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
   // Video player setup
 
   React.useEffect(() => {
-    if (visible) {
-      // Start video playback if using video and player is ready
-      if (useVideo && player && playerReady) {
+    const syncPlayback = async () => {
+      if (!useVideo || !player || !playerReady) {
+        return;
+      }
+      if (visible) {
         try {
-          player.play();
+          await player.play();
         } catch (error) {
-         
-        
-         
+          if (isKeepAwakeError(error)) {
+            console.warn('⚠️ Keep awake not available, continuing playback');
+            return;
+          }
           console.error('❌ Failed to start video playback:', error);
           setVideoError(true);
         }
-      }
-    } else {
-      // Stop video playback if using video and player is ready
-      if (useVideo && player && playerReady) {
+      } else {
         try {
-          player.pause();
+          await player.pause();
         } catch (error) {
+          if (isKeepAwakeError(error)) {
+            console.warn('⚠️ Keep awake not available, continuing without it');
+            return;
+          }
           console.error('❌ Failed to stop video playback:', error);
         }
       }
-    }
-  }, [visible, useVideo, player, playerReady]);
+    };
+
+    void syncPlayback();
+  }, [visible, useVideo, player, playerReady, isKeepAwakeError]);
 
   // Handle transition animation
   React.useEffect(() => {
@@ -121,7 +140,7 @@ export default function SplashScreen({ visible, transitioning = false, videoSour
             player={player}
             style={styles.video}
             contentFit="cover"
-            allowsFullscreen={false}
+            fullscreenOptions={{ enable: false }}
             allowsPictureInPicture={false}
             nativeControls={false}
             // allowsExternalPlayback={false}

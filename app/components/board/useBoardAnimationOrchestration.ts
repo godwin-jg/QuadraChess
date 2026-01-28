@@ -8,6 +8,7 @@ interface AnimationOrchestrationParams {
   displayBoardState: (string | null)[][];
   lastMove: LastMove;
   isViewingHistory: boolean;
+  animationsEnabled: boolean;
   dragState: { piece: string; from: { row: number; col: number } } | null;
   isFlowAnimating: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +41,7 @@ export function useBoardAnimationOrchestration({
   displayBoardState,
   lastMove,
   isViewingHistory,
+  animationsEnabled,
   dragState: _dragState, // Kept for API compatibility, not used in skip logic
   isFlowAnimating,
   gameFlowSend,
@@ -162,7 +164,8 @@ export function useBoardAnimationOrchestration({
   // - isViewingHistory is true
   // Note: We don't skip for !!dragState - network moves should still animate
   // even if user is currently dragging a piece
-  const skipAnimation = skipNextAnimationRef.current || isViewingHistory;
+  const skipAnimation =
+    skipNextAnimationRef.current || isViewingHistory || !animationsEnabled;
 
   // Compute pending animation plan
   const pendingPlan = useMemo(() => {
@@ -308,6 +311,12 @@ export function useBoardAnimationOrchestration({
       moveKeyOverride: moveKey ?? null,
     });
   }, [moveKey, currentPiecesMap, handleAnimationComplete, handleAnimationCompleteUI]);
+
+  React.useEffect(() => {
+    if (!animationsEnabled && activePlanRef.current) {
+      clearActiveAnimationPlan();
+    }
+  }, [animationsEnabled, clearActiveAnimationPlan]);
 
   const animationPiecesMap =
     effectivePlan && planPiecesRef.current ? planPiecesRef.current : currentPiecesMap;

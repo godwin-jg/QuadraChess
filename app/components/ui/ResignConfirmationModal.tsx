@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, TouchableOpacity, Modal } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface ResignConfirmationModalProps {
   visible: boolean;
@@ -23,7 +24,7 @@ export default function ResignConfirmationModal({
       animationType="fade"
       onRequestClose={onCancel}
     >
-      <View className="flex-1 bg-black/70 justify-center items-center">
+      <SafeAreaView className="flex-1 bg-black/70 justify-center items-center">
         <View className="bg-gray-800 rounded-2xl p-6 mx-8 max-w-sm w-full">
           <Text className="text-2xl font-bold text-white text-center mb-4">
             Resign Game
@@ -60,7 +61,7 @@ export default function ResignConfirmationModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }

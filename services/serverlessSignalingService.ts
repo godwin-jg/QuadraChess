@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
 import { BridgeServer } from 'react-native-http-bridge-refurbished';
-import p2pService from './p2pService';
+
+// NOTE: p2pService is imported lazily inside methods to avoid circular dependency
+// p2pService.ts -> serverlessSignalingService.ts -> p2pService.ts
 
 // Lightweight HTTP server for WebRTC signaling (host only)
 class ServerlessSignalingService {
@@ -50,6 +52,8 @@ class ServerlessSignalingService {
       // Game state endpoint for HTTP relay fallback
       this.server.get('/api/game-state', async (req: any, res: any) => {
         try {
+          // Lazy import to avoid circular dependency
+          const p2pService = require('./p2pService').default;
           const gameState = p2pService.getGameState();
           if (gameState) {
             return gameState;
@@ -196,6 +200,9 @@ class ServerlessSignalingService {
       
       // Import WebRTC types
       const { RTCPeerConnection, RTCSessionDescription } = require('react-native-webrtc');
+      
+      // Lazy import to avoid circular dependency
+      const p2pService = require('./p2pService').default;
       
       // Create WebRTC connection for the joining player
       const connection = new RTCPeerConnection({

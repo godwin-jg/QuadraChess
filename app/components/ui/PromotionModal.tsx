@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, Pressable, Modal, Dimensions } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Piece from "../board/Piece";
 
 interface PromotionModalProps {
@@ -77,7 +78,7 @@ export default function PromotionModal({
       animationType="fade"
       statusBarTranslucent={true}
     >
-      <View className="flex-1 bg-black/70 justify-center items-center">
+      <SafeAreaView className="flex-1 bg-black/70 justify-center items-center">
         <View
           className="bg-transparent rounded-2xl shadow-2xl /10 p-6 mx-4"
           style={{ maxWidth: modalWidth, width: modalWidth }}
@@ -126,7 +127,7 @@ export default function PromotionModal({
             Tap a piece to promote
           </Text>
         </View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }

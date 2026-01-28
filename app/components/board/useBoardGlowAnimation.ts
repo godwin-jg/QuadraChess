@@ -19,12 +19,21 @@ interface UseBoardGlowAnimationReturn {
  * indicating the current player's turn.
  */
 export function useBoardGlowAnimation(
-  currentPlayerTurn: string
+  currentPlayerTurn: string,
+  animationsEnabled: boolean
 ): UseBoardGlowAnimationReturn {
   const glowOpacity = useSharedValue(0);
   const glowScale = useSharedValue(1);
 
   useEffect(() => {
+    if (!animationsEnabled) {
+      cancelAnimation(glowScale);
+      cancelAnimation(glowOpacity);
+      glowOpacity.value = 0;
+      glowScale.value = 1;
+      return;
+    }
+
     if (currentPlayerTurn) {
       // Animate glow in
       glowOpacity.value = withTiming(1, { duration: 400 });
@@ -48,7 +57,7 @@ export function useBoardGlowAnimation(
     return () => {
       cancelAnimation(glowScale);
     };
-  }, [currentPlayerTurn, glowOpacity, glowScale]);
+  }, [currentPlayerTurn, animationsEnabled, glowOpacity, glowScale]);
 
   return { glowOpacity, glowScale };
 }

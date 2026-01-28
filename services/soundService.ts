@@ -1,11 +1,12 @@
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { settingsService } from './settingsService';
 
 class SoundService {
   private static instance: SoundService;
-  private sounds: Map<string, Audio.Sound> = new Map();
+  private sounds: Map<string, AudioPlayer> = new Map();
   private isInitialized = false;
+  private playingLocks: Map<string, boolean> = new Map();
 
   private constructor() {}
 
@@ -21,13 +22,12 @@ class SoundService {
     if (this.isInitialized) return;
 
     try {
-      
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        staysActiveInBackground: false,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
+      // Configure audio mode using expo-audio API
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        interruptionMode: 'duckOthers',
+        shouldRouteThroughEarpiece: false,
       });
 
       // Load sound files if they exist
@@ -65,13 +65,14 @@ class SoundService {
 
     for (const [name, file] of Object.entries(soundFiles)) {
       try {
-        const { sound } = await Audio.Sound.createAsync(file, {
-          shouldPlay: false,
-          isLooping: false,
-          volume: 0.7,
-        });
+        // Create audio player using expo-audio API
+        const player = createAudioPlayer(file);
         
-        this.sounds.set(name, sound);
+        // Configure player settings
+        player.loop = false;
+        player.volume = 0.7;
+        
+        this.sounds.set(name, player);
       } catch (error) {
       }
     }
@@ -113,21 +114,38 @@ class SoundService {
     try {
       // First try to play the actual sound file (only if sound is enabled)
       if (this.isSoundEnabled()) {
-        const sound = this.sounds.get(soundName);
-        if (sound) {
-          await sound.setPositionAsync(0); // Reset to beginning
-          
-          // ✅ CRITICAL FIX: Play sound and haptics simultaneously
-          const soundPromise = sound.playAsync();
-          const hapticPromise = this.isHapticsEnabled() 
-            ? Haptics.impactAsync(this.getHapticStyleForSound(soundName))
-            : Promise.resolve();
-          
-          // Wait for both to complete simultaneously
-          await Promise.all([soundPromise, hapticPromise]);
-          
-          if (this.isHapticsEnabled()) {
+        const player = this.sounds.get(soundName);
+        if (player) {
+          // ✅ CRITICAL FIX: Prevent concurrent access to same sound object
+          // This fixes "player accessed on wrong thread" error
+          if (this.playingLocks.get(soundName)) {
+            // Sound is already being played, skip this call
+            if (this.isHapticsEnabled()) {
+              await Haptics.impactAsync(this.getHapticStyleForSound(soundName));
+            }
+            return;
           }
+          
+          this.playingLocks.set(soundName, true);
+          
+          try {
+            // Seek to beginning and play (expo-audio equivalent of replayAsync)
+            await player.seekTo(0);
+            player.play();
+            
+            const hapticPromise = this.isHapticsEnabled() 
+              ? Haptics.impactAsync(this.getHapticStyleForSound(soundName))
+              : Promise.resolve();
+            
+            // Wait for haptic to complete
+            await hapticPromise;
+          } finally {
+            // Release lock after a short delay to prevent rapid re-triggering
+            setTimeout(() => {
+              this.playingLocks.set(soundName, false);
+            }, 50);
+          }
+          
           return;
         }
       }

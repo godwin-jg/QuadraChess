@@ -68,6 +68,7 @@ export default ({ config }) => {
           }
         ],
         "expo-video",
+        "expo-audio",
         "expo-web-browser",
       ],
       extra: {

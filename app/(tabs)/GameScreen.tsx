@@ -1,7 +1,7 @@
-import { Text, View } from "@/components/Themed";
+import { Text } from "@/components/Themed";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { ActivityIndicator } from "react-native";
+import { ActivityIndicator, useWindowDimensions, View, TouchableOpacity, StyleSheet } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import { useGameConnection } from "../../hooks/useGameConnection";
 import onlineGameService from "../../services/onlineGameService";
@@ -36,9 +36,8 @@ import {
 } from "../../services/botStateMachine";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
-import { TouchableOpacity, StyleSheet } from "react-native";
 import { FontAwesome } from "@expo/vector-icons";
-import { getHudHeight, getBottomPadding } from "../utils/responsive";
+import { getBoardSize, getHudHeight, sw, sh, TAB_BAR_HEIGHT, TAB_BAR_OFFSET } from "../utils/responsive";
 import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
 import Animated, { 
@@ -68,10 +67,19 @@ export default function GameScreen() {
     mode?: string;
   }>();
   const insets = useSafeAreaInsets();
-  
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // Responsive layout values
-  const hudHeight = getHudHeight();
-  const bottomPadding = getBottomPadding();
+  const baseHudHeight = getHudHeight(windowHeight);
+  const tabBarSpace = TAB_BAR_HEIGHT + TAB_BAR_OFFSET + 8; // extra 8 for breathing room above tab bar
+  const contentHeight = Math.max(0, windowHeight - insets.top - insets.bottom - tabBarSpace);
+  const maxBoardSize = Math.max(
+    0,
+    contentHeight - (baseHudHeight * 2) - (BOARD_PADDING_Y * 2)
+  );
+  const idealBoardSize = Math.min(getBoardSize(windowWidth, windowHeight), maxBoardSize);
+  const availableHudSpace = Math.max(0, contentHeight - idealBoardSize - (BOARD_PADDING_Y * 2));
+  const hudHeight = Math.max(baseHudHeight, Math.floor(availableHudSpace / 2));
+  const hudTextScale = clamp(hudHeight / baseHudHeight, 1, 1.2);
   
   const { connectionStatus, isOnline: isOnlineMode, isP2P: isP2PMode } =
     useGameConnection(mode, gameId);
@@ -156,6 +164,7 @@ export default function GameScreen() {
   const validMoves = useSelector((state: RootState) => state.game.validMoves);
   const gameMode = useSelector((state: RootState) => state.game.gameMode);
   const bitboardState = useSelector((state: RootState) => state.game.bitboardState);
+  const isSoloMode = gameMode === "solo" || gameMode === "single";
 
   const [gameFlowState, gameFlowSend] = useGameFlowMachine();
   const { isFlowAnimating } = useGameFlowReady(gameFlowState);
@@ -217,8 +226,8 @@ export default function GameScreen() {
     eliminatedPlayers,
     teamMode,
     teamAssignments,
-    isPaused: isViewingHistory || introCountdown !== null,
-    onTimeout: handleTimeout,
+    isPaused: isViewingHistory || introCountdown !== null || isSoloMode,
+    onTimeout: isSoloMode ? undefined : handleTimeout,
   });
 
 
@@ -641,6 +650,7 @@ export default function GameScreen() {
         isCurrentTurn: displayTurn === "r",
         isEliminated: eliminatedPlayers?.includes("r") || false,
         timeMs: displayClocks?.r ?? clocks?.r ?? 0,
+        isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.r ?? "A"}` : undefined,
       },
       {
@@ -651,6 +661,7 @@ export default function GameScreen() {
         isCurrentTurn: displayTurn === "b",
         isEliminated: eliminatedPlayers?.includes("b") || false,
         timeMs: displayClocks?.b ?? clocks?.b ?? 0,
+        isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.b ?? "B"}` : undefined,
       },
       {
@@ -661,6 +672,7 @@ export default function GameScreen() {
         isCurrentTurn: displayTurn === "y",
         isEliminated: eliminatedPlayers?.includes("y") || false,
         timeMs: displayClocks?.y ?? clocks?.y ?? 0,
+        isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.y ?? "A"}` : undefined,
       },
       {
@@ -671,26 +683,37 @@ export default function GameScreen() {
         isCurrentTurn: displayTurn === "g",
         isEliminated: eliminatedPlayers?.includes("g") || false,
         timeMs: displayClocks?.g ?? clocks?.g ?? 0,
+        isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.g ?? "B"}` : undefined,
       },
     ],
-    [scores, capturedPieces, displayTurn, eliminatedPlayers, displayClocks, clocks, teamMode, teamAssignments]
+    [
+      scores,
+      capturedPieces,
+      displayTurn,
+      eliminatedPlayers,
+      displayClocks,
+      clocks,
+      teamMode,
+      teamAssignments,
+      isSoloMode,
+    ]
   );
 
   // Show loading screen if game state isn't ready
   if (!isGameStateReady) {
     return (
-      <View className="flex-1 bg-black justify-center items-center">
+      <SafeAreaView className="flex-1 bg-black justify-center items-center">
         {/* Subtle blueprint grid background */}
         <GridBackground />
-        <View style={{ paddingTop: insets.top }}>
+        <View>
           <ActivityIndicator size="large" color="#ffffff" />
           <Text className="text-white text-lg mt-4">Preparing the battlefield...</Text>
           {(isOnlineMode || isP2PMode) && (
             <Text className="text-gray-400 text-sm mt-2">{connectionStatus}</Text>
           )}
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -699,10 +722,7 @@ export default function GameScreen() {
       <StatusBar style="light" hidden={true} />
       <GridBackground />
       {__DEV__ ? (
-        <View
-          pointerEvents="none"
-          style={[styles.botMachineDebug, { top: insets.top + 6 }]}
-        >
+        <View pointerEvents="none" style={styles.botMachineDebug}>
           {botMachineDebug && (
             <Text style={styles.botMachineText}>
               {`Bot: ${botMachineDebug.state}${
@@ -729,19 +749,31 @@ export default function GameScreen() {
       ) : null}
 
       {/* Top HUD Panel - Toggle between Player Info and Utilities */}
-      <View style={{ paddingTop: 8, height: hudHeight }}>
+      <View
+        style={{
+          paddingTop: HUD_PADDING_TOP,
+          height: hudHeight,
+          overflow: "hidden",
+          justifyContent: "flex-end",
+          zIndex: 1,
+        }}
+      >
         {isUtilityMode ? (
-          <GameUtilityPanel />
+          <GameUtilityPanel textScale={hudTextScale} />
         ) : (
           <PlayerHUDPanel 
             players={players.length >= 4 ? [players[2], players[3]] : []}
             panelType="top"
+            textScale={hudTextScale}
           />
         )}
       </View>
 
       {/* Main Game Area with breathing space */}
-      <View className="flex-1 justify-center items-center" style={{ paddingVertical: 8 }}>
+      <View
+        className="flex-1 justify-center items-center"
+        style={{ paddingVertical: BOARD_PADDING_Y, zIndex: 2 }}
+      >
         <Animated.View
           style={boardRotationStyle}
           pointerEvents={introCountdown !== null ? "none" : "auto"}
@@ -751,6 +783,7 @@ export default function GameScreen() {
             boardRotation={visualPerspective.rotation}
             viewerColor={visualPerspective.viewerColor}
             displayTurn={displayTurn}
+            maxBoardSize={maxBoardSize}
           />
         </Animated.View>
         {introCountdown !== null && (
@@ -761,17 +794,30 @@ export default function GameScreen() {
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
-      <View style={{ paddingBottom: 16, paddingTop: 8 }}>
+      <View
+        style={{
+          paddingBottom: HUD_PADDING_BOTTOM,
+          paddingTop: HUD_PADDING_TOP,
+          height: hudHeight,
+          overflow: "hidden",
+          justifyContent: "flex-start",
+          zIndex: 1,
+        }}
+      >
         <PlayerHUDPanel 
           players={[players[0], players[1]]}
           panelType="bottom"
+          textScale={hudTextScale}
         />
       </View>
+      
+      {/* Spacer for bottom tab bar */}
+      <View style={{ height: tabBarSpace }} />
 
       {/* --- Absolutely Positioned Overlays --- */}
       
       {/* Toggle Button - Top Right Corner */}
-      <Animated.View style={[toggleAnimatedStyle, styles.toggleButtonContainer, { top: insets.top + 12 }]}>
+      <Animated.View style={[toggleAnimatedStyle, styles.toggleButtonContainer]}>
         <TouchableOpacity
           onPress={() => {
             toggleScale.value = withSpring(0.9, { damping: 15, stiffness: 200 }, () => {
@@ -786,10 +832,10 @@ export default function GameScreen() {
           ]}
           activeOpacity={0.8}
         >
-          <FontAwesome 
-            name={isUtilityMode ? "users" : "sliders"} 
-            size={18} 
-            color="#FFFFFF" 
+          <FontAwesome
+            name={isUtilityMode ? "users" : "sliders"}
+            size={TOGGLE_ICON_SIZE}
+            color="#FFFFFF"
           />
         </TouchableOpacity>
       </Animated.View>
@@ -898,10 +944,25 @@ export default function GameScreen() {
   );
 }
 
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const HUD_PADDING_TOP = clamp(sh(8), 4, 12);
+const HUD_PADDING_BOTTOM = clamp(sh(16), 8, 20);
+const BOARD_PADDING_Y = clamp(sh(8), 4, 12);
+
+const TOGGLE_SIZE = clamp(sw(44), 44, 64);
+const TOGGLE_ICON_SIZE = clamp(sw(18), 18, 28);
+const TOGGLE_OFFSET_X = clamp(sw(12), 10, 20);
+const TOGGLE_OFFSET_Y = clamp(sh(32), 24, 48);
+const DEBUG_OFFSET_TOP = clamp(sh(6), 4, 12);
+const DEBUG_OFFSET_RIGHT = clamp(sw(8), 6, 16);
+
 const styles = StyleSheet.create({
   botMachineDebug: {
     position: "absolute",
-    right: 8,
+    right: DEBUG_OFFSET_RIGHT,
+    top: DEBUG_OFFSET_TOP,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
@@ -915,13 +976,14 @@ const styles = StyleSheet.create({
   },
   toggleButtonContainer: {
     position: 'absolute',
-    right: 12,
+    right: TOGGLE_OFFSET_X,
+    top: TOGGLE_OFFSET_Y,
     zIndex: 20,
   },
   toggleButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: TOGGLE_SIZE,
+    height: TOGGLE_SIZE,
+    borderRadius: TOGGLE_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',

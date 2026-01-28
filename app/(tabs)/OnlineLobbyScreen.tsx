@@ -4,11 +4,14 @@ import {
   Text,
   TouchableOpacity,
   TextInput,
-  FlatList,
   Alert,
   ActivityIndicator,
+  ScrollView,
+  Switch,
 } from "react-native";
+import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
+import { FontAwesome } from "@expo/vector-icons";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -23,9 +26,25 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
 import { hapticsService } from "../../services/hapticsService";
+import { getTabBarSpacer } from "../utils/responsive";
 
 type TeamAssignments = { r: "A" | "B"; b: "A" | "B"; y: "A" | "B"; g: "A" | "B" };
+type TimeControlSettings = { baseMinutes: number; incrementSeconds: number };
 const DEFAULT_TEAM_ASSIGNMENTS: TeamAssignments = { r: "A", y: "A", b: "B", g: "B" };
+const DEFAULT_TIME_CONTROL: TimeControlSettings = { baseMinutes: 5, incrementSeconds: 0 };
+const COLOR_LABELS: Record<string, string> = {
+  r: "Red",
+  b: "Blue",
+  y: "Yellow",
+  g: "Green",
+};
+const SECTION_TITLE_CLASS = "text-white text-lg font-semibold";
+const TIME_CONTROL_LIMITS = {
+  baseMinutes: { min: 1, max: 30, step: 1 },
+  incrementSeconds: { min: 0, max: 30, step: 1 },
+};
+const AUTO_CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
+const AUTO_CLEANUP_MIN_AGE_MS = 30 * 60 * 1000;
 
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
@@ -33,6 +52,7 @@ const OnlineLobbyScreen: React.FC = () => {
   const { resigned } = useLocalSearchParams<{ resigned?: string }>();
   const { settings, updateProfile } = useSettings();
   const insets = useSafeAreaInsets();
+  const tabBarSpacer = getTabBarSpacer(insets.bottom);
   
   // Debug logging
 
@@ -52,14 +72,23 @@ const OnlineLobbyScreen: React.FC = () => {
   const [availableGames, setAvailableGames] = useState<RealtimeGame[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
+  const [currentGameStatus, setCurrentGameStatus] = useState<RealtimeGame["status"] | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("Initializing...");
-  const [refreshKey, setRefreshKey] = useState(0);
   const [botPlayers, setBotPlayers] = useState<string[]>([]);
   const [teamMode, setTeamMode] = useState(false);
   const [teamAssignments, setTeamAssignments] = useState<TeamAssignments>(DEFAULT_TEAM_ASSIGNMENTS);
+  const [timeControl, setTimeControl] = useState<TimeControlSettings>(DEFAULT_TIME_CONTROL);
+  const [isUpdatingTimeControl, setIsUpdatingTimeControl] = useState(false);
+  const [isTimeControlExpanded, setIsTimeControlExpanded] = useState(false);
   const isFocused = useIsFocused();
   const authInFlightRef = useRef(false);
+  const lastAutoCleanupAtRef = useRef(0);
+  const autoCleanupInFlightRef = useRef(false);
+  const isAdjustingTimeControlRef = useRef(false);
+  const lastSyncedTimeControlRef = useRef(
+    `${DEFAULT_TIME_CONTROL.baseMinutes}:${DEFAULT_TIME_CONTROL.incrementSeconds}`
+  );
 
   useEffect(() => {
     if (gameState.teamAssignments) {
@@ -67,6 +96,14 @@ const OnlineLobbyScreen: React.FC = () => {
     }
     setTeamMode(!!gameState.teamMode);
   }, [gameState.teamAssignments, gameState.teamMode]);
+
+  useEffect(() => {
+    if (!currentGameId) {
+      setCurrentGameStatus(null);
+      setTimeControl(DEFAULT_TIME_CONTROL);
+      lastSyncedTimeControlRef.current = `${DEFAULT_TIME_CONTROL.baseMinutes}:${DEFAULT_TIME_CONTROL.incrementSeconds}`;
+    }
+  }, [currentGameId]);
 
   // ✅ CRITICAL FIX: Clear game context immediately when user resigned
   // This ensures the waiting room is not shown after resignation
@@ -133,7 +170,7 @@ const OnlineLobbyScreen: React.FC = () => {
     );
 
     return unsubscribe;
-  }, [isConnected, refreshKey, isFocused]);
+  }, [isConnected, isFocused]);
 
   // Subscribe to current game updates for navigation
   useEffect(() => {
@@ -191,6 +228,28 @@ const OnlineLobbyScreen: React.FC = () => {
           console.log(`[BotSnapshot] Players from Firebase:`, normalizedPlayers.map(p => ({ color: p.color, isBot: p.isBot })));
           console.log(`[BotSnapshot] Extracted botPlayers:`, botPlayersFromGame);
           setBotPlayers(botPlayersFromGame);
+
+          setCurrentGameStatus(game.status);
+          const baseMs = game.gameState?.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMinutes * 60 * 1000;
+          const incrementMs = game.gameState?.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementSeconds * 1000;
+          const nextBaseMinutes = clampValue(
+            Math.round(baseMs / (60 * 1000)),
+            TIME_CONTROL_LIMITS.baseMinutes.min,
+            TIME_CONTROL_LIMITS.baseMinutes.max
+          );
+          const nextIncrementSeconds = clampValue(
+            Math.round(incrementMs / 1000),
+            TIME_CONTROL_LIMITS.incrementSeconds.min,
+            TIME_CONTROL_LIMITS.incrementSeconds.max
+          );
+          const nextKey = `${nextBaseMinutes}:${nextIncrementSeconds}`;
+          lastSyncedTimeControlRef.current = nextKey;
+          if (!isAdjustingTimeControlRef.current) {
+            setTimeControl({
+              baseMinutes: nextBaseMinutes,
+              incrementSeconds: nextIncrementSeconds,
+            });
+          }
           
           // Only redirect to game if:
           // 1. Game status is "playing"
@@ -214,6 +273,36 @@ const OnlineLobbyScreen: React.FC = () => {
     return unsubscribe;
   }, [currentGameId, dispatch, router, isFocused]);
 
+  const runAutoCleanup = useCallback(
+    async (source: string) => {
+      if (!isConnected) return;
+      const now = Date.now();
+      if (autoCleanupInFlightRef.current) return;
+      if (now - lastAutoCleanupAtRef.current < AUTO_CLEANUP_INTERVAL_MS) return;
+
+      autoCleanupInFlightRef.current = true;
+      try {
+        const deletedCount = await realtimeDatabaseService.cleanupCorruptedGames({
+          minAgeMs: AUTO_CLEANUP_MIN_AGE_MS,
+        });
+        if (deletedCount > 0) {
+          console.log(`[OnlineLobby] Auto cleanup (${source}) deleted ${deletedCount} games`);
+        }
+      } catch (error) {
+        console.warn("[OnlineLobby] Auto cleanup failed:", error);
+      } finally {
+        lastAutoCleanupAtRef.current = now;
+        autoCleanupInFlightRef.current = false;
+      }
+    },
+    [isConnected]
+  );
+
+  useEffect(() => {
+    if (!isFocused) return;
+    void runAutoCleanup("lobby-focus");
+  }, [isFocused, runAutoCleanup]);
+
   // Name editing functions
   const startEditingName = () => {
     setTempName(settings.profile.name);
@@ -226,6 +315,55 @@ const OnlineLobbyScreen: React.FC = () => {
     }
     setIsEditingName(false);
   };
+
+  const clampValue = (value: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, value));
+
+  const formatTimeControlLabel = useCallback((control: TimeControlSettings) => {
+    const baseLabel = `${control.baseMinutes} min`;
+    const incrementLabel =
+      control.incrementSeconds > 0
+        ? `+${control.incrementSeconds}s`
+        : "no increment";
+    return `${baseLabel} | ${incrementLabel}`;
+  }, []);
+
+  const commitTimeControl = useCallback(
+    async (nextControl: TimeControlSettings) => {
+      if (!isHost || !currentGameId || currentGameStatus !== "waiting") {
+        return;
+      }
+      const key = `${nextControl.baseMinutes}:${nextControl.incrementSeconds}`;
+      if (key === lastSyncedTimeControlRef.current) {
+        return;
+      }
+
+      setIsUpdatingTimeControl(true);
+      try {
+        await realtimeDatabaseService.updateTimeControl(
+          currentGameId,
+          nextControl.baseMinutes * 60 * 1000,
+          nextControl.incrementSeconds * 1000
+        );
+        lastSyncedTimeControlRef.current = key;
+      } catch (error) {
+        const [baseMinutes, incrementSeconds] =
+          lastSyncedTimeControlRef.current.split(":").map(Number);
+        setTimeControl({
+          baseMinutes: Number.isFinite(baseMinutes)
+            ? baseMinutes
+            : DEFAULT_TIME_CONTROL.baseMinutes,
+          incrementSeconds: Number.isFinite(incrementSeconds)
+            ? incrementSeconds
+            : DEFAULT_TIME_CONTROL.incrementSeconds,
+        });
+        Alert.alert("Time Control", "Failed to update time control.");
+      } finally {
+        setIsUpdatingTimeControl(false);
+      }
+    },
+    [currentGameId, currentGameStatus, isHost]
+  );
 
   const createGame = async () => {
     if (!settings.profile.name.trim()) {
@@ -374,11 +512,6 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
-  const refreshGames = async () => {
-    // Refresh the subscription (real-time query will automatically update)
-    setRefreshKey(prev => prev + 1);
-  };
-
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = async (color: string) => {
     console.log(`[BotToggle] Toggle called for color: ${color}, isHost: ${isHost}, gameId: ${currentGameId}`);
@@ -431,37 +564,7 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
-  const cleanupCorruptedGames = async () => {
-    try {
-      const deletedCount = await realtimeDatabaseService.cleanupCorruptedGames();
-      
-      if (deletedCount > 0) {
-        Alert.alert("Cleanup Complete", `Deleted ${deletedCount} corrupted games`);
-        // Refresh the games list after cleanup
-        setRefreshKey(prev => prev + 1);
-      } else {
-        Alert.alert("Cleanup Complete", "No corrupted games found");
-      }
-    } catch (error) {
-      console.error("Error cleaning up games:", error);
-      Alert.alert("Error", "Failed to clean up corrupted games");
-    }
-  };
-
-  const forceReauth = async () => {
-    try {
-      await realtimeDatabaseService.signInAnonymously();
-      Alert.alert("Re-authentication Complete", "Successfully re-authenticated with Firebase");
-      // Refresh everything after re-auth
-      setRefreshKey(prev => prev + 1);
-    } catch (error) {
-      console.error("Error re-authenticating:", error);
-      Alert.alert("Error", "Failed to re-authenticate");
-    }
-  };
-
-
-  const renderGameItem = ({ item }: { item: RealtimeGame }) => {
+  const renderGameItem = (item: RealtimeGame, index: number) => {
     // Only count valid players (with proper data)
     const validPlayers = Object.values(item.players || {}).filter(player => 
       player && player.id && player.name && player.color
@@ -471,6 +574,7 @@ const OnlineLobbyScreen: React.FC = () => {
 
     return (
       <TouchableOpacity
+        key={item.id || `game-${index}`}
         className={`p-4 rounded-xl mb-3 border ${
           isFull 
             ? "bg-white/5 border-white/10 opacity-60" 
@@ -510,6 +614,28 @@ const OnlineLobbyScreen: React.FC = () => {
     );
   };
 
+  const displayAvailableGames = useMemo(
+    () =>
+      availableGames
+        .slice()
+        .filter((game, index, self) =>
+          game.id && self.findIndex(g => g.id === game.id) === index
+        )
+        .sort((a, b) => {
+          const timestampA = a.lastActivity || a.createdAt || 0;
+          const timestampB = b.lastActivity || b.createdAt || 0;
+          return timestampB - timestampA;
+        }),
+    [availableGames]
+  );
+
+  const timeControlLocked =
+    !isHost || currentGameStatus !== "waiting" || isUpdatingTimeControl;
+  const timeControlLabel = formatTimeControlLabel(timeControl);
+  const sliderAccentColor = timeControlLocked ? "#6b7280" : "#ffffff";
+  const sliderTrackColor = timeControlLocked ? "#374151" : "#9ca3af";
+  const sliderThumbColor = timeControlLocked ? "#9ca3af" : "#ffffff";
+
   if (!isConnected) {
     return (
       <View className="flex-1 bg-black justify-center items-center">
@@ -533,15 +659,18 @@ const OnlineLobbyScreen: React.FC = () => {
   if (currentGameId) {
     // In-game waiting room
     return (
-      <SafeAreaView style={{ flex: 1 }} className="bg-black p-6">
+      <SafeAreaView style={{ flex: 1 }} className="bg-black">
         {/* Subtle blueprint grid background */}
         <GridBackground />
-        
-        <View className="items-center mb-8">
-          <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
+        <ScrollView
+          contentContainerStyle={{ padding: 18, paddingBottom: tabBarSpacer }}
+          showsVerticalScrollIndicator={false}
+        >
+        <View className="items-center mb-6">
+          <Text className="text-gray-300 text-base mb-2">Playing as:</Text>
           {isEditingName ? (
             <TextInput
-              className="text-white text-2xl font-bold text-center border-b border-white/30 pb-1"
+              className="text-white text-2xl font-semibold text-center border-b border-white/30 pb-1"
               value={tempName}
               onChangeText={setTempName}
               onSubmitEditing={saveName}
@@ -555,18 +684,14 @@ const OnlineLobbyScreen: React.FC = () => {
               hapticsService.selection();
               startEditingName();
             }}>
-              <Text className="text-white text-2xl font-bold">
+              <Text className="text-white text-2xl font-semibold">
                 {settings.profile.name}
               </Text>
             </TouchableOpacity>
           )}
         </View>
 
-        <View className="bg-white/10 p-6 rounded-xl mb-6 items-center">
-          <Text className="text-white text-xl font-bold mb-4 text-center">
-            Waiting for Players
-          </Text>
-
+        <View className="bg-white/10 p-5 rounded-xl mb-5 items-center">
           <View className="space-y-3 w-full">
             <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
             {/* ✅ CRITICAL FIX: Show all players (bots are already included in Redux players array) */}
@@ -582,7 +707,10 @@ const OnlineLobbyScreen: React.FC = () => {
                     className="flex-row items-center justify-between"
                   >
                     <Text className="text-white text-lg">
-                      {player.name} {player.isHost && "(Host)"} {player.isBot && "🤖"}
+                      {player.isBot
+                        ? `Bot ${COLOR_LABELS[player.color] ?? "Player"}`
+                        : player.name}{" "}
+                      {player.isHost && "(Host)"} {player.isBot && "🤖"}
                     </Text>
                     <View className="flex-row items-center">
                       <View
@@ -598,23 +726,23 @@ const OnlineLobbyScreen: React.FC = () => {
                                   : "bg-gray-500"
                         }`}
                       />
-                      <Text className="text-gray-400 text-sm">
+                      <Text className="text-gray-400 text-base">
                         {player.isBot ? 'Bot' : (player.connectionState || 'connected')}
                       </Text>
                     </View>
                   </View>
                 ))
               ) : (
-                <Text className="text-gray-400 text-center">No players yet</Text>
+                <Text className="text-gray-400 text-base text-center">No players yet</Text>
               );
             })()}
             
             {/* Bot Configuration Section (Host Only) */}
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
-                <Text className="text-white text-lg font-semibold mb-3 text-center">Bot Configuration</Text>
+                <Text className="text-white text-lg font-semibold mb-3 text-center">Add Bots To Your Game</Text>
                 <Text className="text-gray-400 text-sm mb-3 text-center">
-                  Tap to toggle bot players (host controls all bots)
+                  Tap which colors you want the bot to play
                 </Text>
                 <View className="flex-row justify-around">
                   {['r', 'b', 'y', 'g'].map((color) => {
@@ -631,10 +759,10 @@ const OnlineLobbyScreen: React.FC = () => {
                     return (
                       <TouchableOpacity
                         key={color}
-                        className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
-                          isBot ? 'border-green-400 bg-green-500/20' : 
-                          wouldExceedMax ? 'border-gray-600 bg-gray-800/50 opacity-50' : 
-                          'border-white/30 bg-white/10'
+                        className={`mx-1 w-16 h-16 rounded-full items-center justify-center ${
+                          isBot ? 'bg-green-500/20' : 
+                          wouldExceedMax ? 'bg-gray-800/50 opacity-50' : 
+                          'bg-white/10'
                         }`}
                         onPress={() => {
                           if (wouldExceedMax) return; // Don't allow if would exceed max
@@ -644,12 +772,12 @@ const OnlineLobbyScreen: React.FC = () => {
                         disabled={wouldExceedMax}
                       >
                         <View className="items-center">
-                          <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
+                          <View className={`w-3 h-3 rounded-full mb-1 ${colorClass}`} />
                           <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : wouldExceedMax ? 'text-gray-500' : 'text-gray-300'}`}>
                             {colorName}
                           </Text>
-                          <Text className={`text-xs ${isBot ? 'text-green-300' : wouldExceedMax ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {isBot ? '🤖 Bot' : '👤 Human'}
+                          <Text className={`text-[10px] ${isBot ? 'text-green-300' : wouldExceedMax ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {isBot ? 'Bot' : 'Human'}
                           </Text>
                         </View>
                       </TouchableOpacity>
@@ -661,41 +789,45 @@ const OnlineLobbyScreen: React.FC = () => {
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
                 <View className="flex-row items-center justify-between mb-2">
-                  <Text className="text-white text-base font-semibold">Team Play</Text>
-                  <View className="flex-row bg-white/5 rounded-full p-1">
-                    <TouchableOpacity
-                      className={`px-3 py-1 rounded-full ${
-                        !teamMode ? "bg-red-500/30" : "bg-transparent"
-                      }`}
-                      onPress={() => updateTeamConfiguration(false, teamAssignments)}
-                    >
-                      <Text className={`text-xs ${!teamMode ? "text-red-200 font-semibold" : "text-gray-400"}`}>
-                        Off
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      className={`ml-1 px-3 py-1 rounded-full ${
-                        teamMode ? "bg-green-500/30" : "bg-transparent"
-                      }`}
-                      onPress={() => updateTeamConfiguration(true, teamAssignments)}
-                    >
-                      <Text className={`text-xs ${teamMode ? "text-green-200 font-semibold" : "text-gray-400"}`}>
-                        On
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                  <Text className={SECTION_TITLE_CLASS}>Team Play</Text>
+                  <Switch
+                    value={teamMode}
+                    onValueChange={(nextValue) => {
+                      if (settings.game.hapticsEnabled) {
+                        hapticsService.selection();
+                      }
+                      updateTeamConfiguration(nextValue, teamAssignments);
+                    }}
+                    trackColor={{ false: "#374151", true: "#22c55e" }}
+                    thumbColor={teamMode ? "#ffffff" : "#d1d5db"}
+                    ios_backgroundColor="#374151"
+                  />
                 </View>
                 {teamMode && (
                   <View className="flex-row flex-wrap -mx-2">
                     {(['r', 'b', 'y', 'g'] as const).map((color) => {
-                      const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
                       const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
+                      const playerLabel = (() => {
+                        const player = players.find((p) => p.color === color);
+                        if (!player) return "Open";
+                        if (player.isBot) {
+                          return `Bot ${COLOR_LABELS[color] ?? "Player"}`;
+                        }
+                        return player.name;
+                      })();
                       return (
                         <View key={color} className="w-1/2 px-2 mb-2">
                           <View className="flex-row items-center justify-between bg-white/5 rounded-lg px-2 py-2">
                             <View className="flex-row items-center">
                               <View className={`w-2.5 h-2.5 rounded-full mr-2 ${colorClass}`} />
-                              <Text className="text-white text-sm">{colorName}</Text>
+                              <Text
+                                className="text-white text-base"
+                                numberOfLines={1}
+                                ellipsizeMode="tail"
+                                style={{ flexShrink: 1, maxWidth: 90 }}
+                              >
+                                {playerLabel}
+                              </Text>
                             </View>
                             <View className="flex-row">
                               {(['A', 'B'] as const).map((teamId) => {
@@ -708,7 +840,7 @@ const OnlineLobbyScreen: React.FC = () => {
                                     }`}
                                     onPress={() => updateTeamConfiguration(teamMode, { ...teamAssignments, [color]: teamId })}
                                   >
-                                    <Text className={`text-xs ${active ? "text-blue-200 font-semibold" : "text-gray-400"}`}>
+                                    <Text className={`text-sm ${active ? "text-blue-200 font-semibold" : "text-gray-400"}`}>
                                       {teamId}
                                     </Text>
                                   </TouchableOpacity>
@@ -723,14 +855,156 @@ const OnlineLobbyScreen: React.FC = () => {
                 )}
               </View>
             )}
+            <View className="mt-4 pt-4 border-t border-white/20">
+              <View className="flex-row items-center justify-between mb-3">
+                <Text className={SECTION_TITLE_CLASS}>Time Control</Text>
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-gray-400 text-sm">{timeControlLabel}</Text>
+                  <TouchableOpacity
+                    className="px-2 py-1 rounded-full bg-white/5"
+                    onPress={() => {
+                      if (settings.game.hapticsEnabled) {
+                        hapticsService.selection();
+                      }
+                      setIsTimeControlExpanded((prev) => !prev);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Toggle time control settings"
+                  >
+                    <FontAwesome
+                      name={isTimeControlExpanded ? "chevron-up" : "chevron-down"}
+                      size={14}
+                      color="#9ca3af"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              {isTimeControlExpanded && (
+                <>
+                  <View className="mb-3">
+                    <View className="flex-row items-center justify-between mb-1">
+                      <Text className="text-white text-sm">Base time</Text>
+                      <Text className="text-gray-300 text-sm">
+                        {timeControl.baseMinutes} min
+                      </Text>
+                    </View>
+                    <Slider
+                      style={{ width: "100%", height: 30 }}
+                      minimumValue={TIME_CONTROL_LIMITS.baseMinutes.min}
+                      maximumValue={TIME_CONTROL_LIMITS.baseMinutes.max}
+                      step={TIME_CONTROL_LIMITS.baseMinutes.step}
+                      value={timeControl.baseMinutes}
+                      minimumTrackTintColor={sliderAccentColor}
+                      maximumTrackTintColor={sliderTrackColor}
+                      thumbTintColor={sliderThumbColor}
+                      disabled={timeControlLocked}
+                      onValueChange={(value) => {
+                        if (timeControlLocked) return;
+                        isAdjustingTimeControlRef.current = true;
+                        const nextBaseMinutes = clampValue(
+                          Math.round(value),
+                          TIME_CONTROL_LIMITS.baseMinutes.min,
+                          TIME_CONTROL_LIMITS.baseMinutes.max
+                        );
+                        setTimeControl((prev) => ({
+                          ...prev,
+                          baseMinutes: nextBaseMinutes,
+                        }));
+                      }}
+                      onSlidingComplete={(value) => {
+                        if (timeControlLocked) return;
+                        const nextBaseMinutes = clampValue(
+                          Math.round(value),
+                          TIME_CONTROL_LIMITS.baseMinutes.min,
+                          TIME_CONTROL_LIMITS.baseMinutes.max
+                        );
+                        isAdjustingTimeControlRef.current = false;
+                        if (settings.game.hapticsEnabled) {
+                          hapticsService.selection();
+                        }
+                        setTimeControl((prev) => {
+                          const next = { ...prev, baseMinutes: nextBaseMinutes };
+                          void commitTimeControl(next);
+                          return next;
+                        });
+                      }}
+                    />
+                  </View>
+                  <View>
+                    <View className="flex-row items-center justify-between mb-1">
+                      <Text className="text-white text-sm">Increment</Text>
+                      <Text className="text-gray-300 text-sm">
+                        {timeControl.incrementSeconds > 0
+                          ? `+${timeControl.incrementSeconds}s`
+                          : "0s"}
+                      </Text>
+                    </View>
+                    <Slider
+                      style={{ width: "100%", height: 30 }}
+                      minimumValue={TIME_CONTROL_LIMITS.incrementSeconds.min}
+                      maximumValue={TIME_CONTROL_LIMITS.incrementSeconds.max}
+                      step={TIME_CONTROL_LIMITS.incrementSeconds.step}
+                      value={timeControl.incrementSeconds}
+                      minimumTrackTintColor={sliderAccentColor}
+                      maximumTrackTintColor={sliderTrackColor}
+                      thumbTintColor={sliderThumbColor}
+                      disabled={timeControlLocked}
+                      onValueChange={(value) => {
+                        if (timeControlLocked) return;
+                        isAdjustingTimeControlRef.current = true;
+                        const nextIncrementSeconds = clampValue(
+                          Math.round(value),
+                          TIME_CONTROL_LIMITS.incrementSeconds.min,
+                          TIME_CONTROL_LIMITS.incrementSeconds.max
+                        );
+                        setTimeControl((prev) => ({
+                          ...prev,
+                          incrementSeconds: nextIncrementSeconds,
+                        }));
+                      }}
+                      onSlidingComplete={(value) => {
+                        if (timeControlLocked) return;
+                        const nextIncrementSeconds = clampValue(
+                          Math.round(value),
+                          TIME_CONTROL_LIMITS.incrementSeconds.min,
+                          TIME_CONTROL_LIMITS.incrementSeconds.max
+                        );
+                        isAdjustingTimeControlRef.current = false;
+                        if (settings.game.hapticsEnabled) {
+                          hapticsService.selection();
+                        }
+                        setTimeControl((prev) => {
+                          const next = {
+                            ...prev,
+                            incrementSeconds: nextIncrementSeconds,
+                          };
+                          void commitTimeControl(next);
+                          return next;
+                        });
+                      }}
+                    />
+                  </View>
+                </>
+              )}
+              {!isHost && (
+                <Text className="text-gray-500 text-sm text-center mt-3">
+                  Host controls time settings
+                </Text>
+              )}
+              {isUpdatingTimeControl && (
+                <Text className="text-gray-500 text-sm text-center mt-2">
+                  Updating...
+                </Text>
+              )}
+            </View>
           </View>
         </View>
 
         {isHost && (
           <View className="items-center gap-4 mb-4">
             {players.length < 4 && (
-              <Text className="text-gray-400 text-sm mb-3">
-                Need exactly 4 players to start
+              <Text className="text-gray-400 text-base mb-3">
+                Need 4 players to start
               </Text>
             )}
             <TouchableOpacity
@@ -743,7 +1017,7 @@ const OnlineLobbyScreen: React.FC = () => {
                 style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
               />
               <Text
-                className={`text-lg font-bold text-center ${
+                className={`text-xl font-bold text-center ${
                   players.length !== 4 ? "text-gray-300" : "text-black"
                 }`}
                 style={{
@@ -779,7 +1053,7 @@ const OnlineLobbyScreen: React.FC = () => {
             style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
           />
           <Text 
-            className="text-white text-lg font-bold text-center"
+            className="text-white text-xl font-bold text-center"
             style={{
               fontWeight: '900',
               letterSpacing: 1.2,
@@ -792,15 +1066,20 @@ const OnlineLobbyScreen: React.FC = () => {
             Leave Game
           </Text>
         </TouchableOpacity>
+        </ScrollView>
       </SafeAreaView>
     );
   }
 
   // Main menu
   return (
-    <SafeAreaView style={{ flex: 1, marginBottom: 130 }} className="bg-black p-6">
+    <SafeAreaView style={{ flex: 1 }} className="bg-black">
       {/* Subtle blueprint grid background */}
       <GridBackground />
+      <ScrollView
+        contentContainerStyle={{ padding: 24, paddingBottom: tabBarSpacer }}
+        showsVerticalScrollIndicator={false}
+      >
       <View className="items-center mb-8">
         <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
         {isEditingName ? (
@@ -858,79 +1137,17 @@ const OnlineLobbyScreen: React.FC = () => {
           <Text className="text-white text-xl font-bold text-center mb-4">
             Available Games
           </Text>
-          <View className="flex-row gap-2">
-            <TouchableOpacity
-              className="bg-blue-600 px-3 py-2 rounded-lg"
-              onPress={() => {
-                // ✅ Add haptic feedback for buttons that don't play sounds
-                try {
-                  const { hapticsService } = require('../../services/hapticsService');
-                  hapticsService.buttonPress();
-                } catch (error) {
-                }
-                refreshGames();
-              }}
-            >
-              <Text className="text-white text-sm font-bold">Refresh</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="bg-green-600 px-3 py-2 rounded-lg"
-              onPress={() => {
-                // ✅ Add haptic feedback for buttons that don't play sounds
-                try {
-                  const { hapticsService } = require('../../services/hapticsService');
-                  hapticsService.buttonPress();
-                } catch (error) {
-                }
-                forceReauth();
-              }}
-            >
-              <Text className="text-white text-sm font-bold">Re-auth</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className="bg-red-600 px-3 py-2 rounded-lg"
-              onPress={() => {
-                // ✅ Add haptic feedback for buttons that don't play sounds
-                try {
-                  const { hapticsService } = require('../../services/hapticsService');
-                  hapticsService.buttonPress();
-                } catch (error) {
-                }
-                cleanupCorruptedGames();
-              }}
-            >
-              <Text className="text-white text-sm font-bold">Cleanup</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
-        {availableGames.length === 0 ? (
+        {displayAvailableGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8 pb-4">
             No games available. Create one to get started!
           </Text>
         ) : (
           <View style={{ position: 'relative', width: '100%' }}>
-            <FlatList
-              data={availableGames
-                .slice()
-                // Deduplicate by id
-                .filter((game, index, self) => 
-                  game.id && self.findIndex(g => g.id === game.id) === index
-                )
-                .sort((a, b) => {
-                  // Sort by timestamp (newest first), with createdAt as fallback
-                  const timestampA = a.lastActivity || a.createdAt || 0;
-                  const timestampB = b.lastActivity || b.createdAt || 0;
-                  return timestampB - timestampA;
-                })}
-              renderItem={renderGameItem}
-              keyExtractor={(item, index) => item.id || `game-${index}`}
-              showsVerticalScrollIndicator={false}
-              style={{ 
-                width: '100%',
-              }}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            />
+            <View style={{ width: '100%', paddingBottom: 20 }}>
+              {displayAvailableGames.map((game, index) => renderGameItem(game, index))}
+            </View>
             {/* Smooth fade-out gradient overlay */}
             <LinearGradient
               colors={['transparent', 'rgba(0, 0, 0, 0.8)', 'rgba(0, 0, 0, 1)']}
@@ -939,13 +1156,14 @@ const OnlineLobbyScreen: React.FC = () => {
                 bottom: 0,
                 left: 0,
                 right: 0,
-                height: 40,
+                height: 40 + insets.bottom,
                 pointerEvents: 'none',
               }}
             />
           </View>
         )}
       </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };

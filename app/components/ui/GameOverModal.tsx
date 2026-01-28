@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { View, Text, Pressable, Modal, StyleSheet, Share } from "react-native";
+import { View, Text, Pressable, Modal, StyleSheet, Share, ScrollView, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -58,6 +58,8 @@ export default function GameOverModal({
   onDismiss,
 }: GameOverModalProps) {
   const router = useRouter();
+  const { height } = useWindowDimensions();
+  const maxModalHeight = height * 0.9;
   // Create leaderboard data first
   const createLeaderboard = (): PlayerResult[] => {
     const colorNames = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
@@ -159,7 +161,7 @@ export default function GameOverModal({
   
   // Winner-specific animations
   const winnerGlowOpacity = useSharedValue(0);
-  const winnerShimmerTranslate = useSharedValue(-200);
+  const winnerShimmerTranslate = useSharedValue(0);
   const sparkleOpacity = useSharedValue(0);
   const sparkleTranslateY = useSharedValue(0);
   
@@ -216,9 +218,12 @@ export default function GameOverModal({
     const winnerDelay = 540 + ((leaderboard.length - 1) * 140) + 300; // After winner appears
     winnerGlowOpacity.value = withDelay(winnerDelay, withTiming(1, { duration: 420 }));
     winnerShimmerTranslate.value = withDelay(winnerDelay + 420, withRepeat(
-      withTiming(200, { duration: 2200, easing: Easing.inOut(Easing.quad) }),
+      withSequence(
+        withTiming(0, { duration: 0 }), // Reset to start position
+        withTiming(700, { duration: 2500, easing: Easing.inOut(Easing.quad) }) // Travel full width
+      ),
       -1, // Infinite repeat
-      false // Don't reverse
+      false // Don't reverse - loops back smoothly
     ));
 
     sparkleOpacity.value = withDelay(
@@ -418,6 +423,7 @@ export default function GameOverModal({
               shadowRadius: 24,
               shadowOffset: { width: 0, height: 12 },
               elevation: 12,
+              maxHeight: maxModalHeight,
             },
             modalAnimatedStyle
           ]}
@@ -445,7 +451,10 @@ export default function GameOverModal({
             </Pressable>
           )}
           
-          <View className="p-6">
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.modalContent}
+          >
               <Animated.View style={titleAnimatedStyle}>
                 <Text className="text-2xl font-bold text-center mb-2 text-white">
                   {getTitle()}
@@ -652,7 +661,7 @@ export default function GameOverModal({
                   </View>
                 </View>
               </Animated.View>
-            </View>
+            </ScrollView>
         </Animated.View>
       </SafeAreaView>
     </Modal>
@@ -660,6 +669,10 @@ export default function GameOverModal({
 }
 
 const styles = StyleSheet.create({
+  modalContent: {
+    padding: 24,
+    paddingTop: 56,
+  },
   winnerRow: {
     borderWidth: 1,
     borderColor: "rgba(255, 215, 0, 0.6)",

@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { hapticsService } from '@/services/hapticsService';
 import soundService from '@/services/soundService';
 import * as Haptics from 'expo-haptics';
@@ -40,6 +40,8 @@ const BOT_DIFFICULTY_DESCRIPTIONS: Record<BotDifficulty, string> = {
 
 export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const footerSpacer = 96 + insets.bottom;
   const {
     settings,
     isLoading,
@@ -56,7 +58,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     resetToDefaults,
   } = useSettings();
 
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const developerTapStateRef = useRef({ count: 0, lastTapAt: 0 });
   const developerTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const developerTapWindowMs = 1500;
@@ -100,7 +101,6 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
           style: "destructive",
           onPress: async () => {
             await resetToDefaults();
-            setShowResetConfirm(false);
           },
         },
       ]
@@ -130,7 +130,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         clearTimeout(developerTapTimeoutRef.current);
         developerTapTimeoutRef.current = null;
       }
-      Alert.alert("Click OK if you’re gay");
+      Alert.alert("click OK if you’re gay");
     }
   };
 
@@ -487,7 +487,12 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               />
             </View>
             <View className="flex-row justify-between items-center py-4 border-b border-white/10">
-              <Text className="text-lg font-semibold text-gray-300 flex-1">Animations</Text>
+              <View className="flex-1 pr-4">
+                <Text className="text-lg font-semibold text-gray-300">Animations</Text>
+                <Text className="text-sm text-gray-400 mt-1">
+                  Disable this if you experience animation issues
+                </Text>
+              </View>
               <Switch
                 value={settings.game.animationsEnabled}
                 onValueChange={async (value) => {
@@ -663,10 +668,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
 
         {/* Reset Section */}
         <View className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mx-4 my-2">
-          <TouchableOpacity
-            className="py-2"
-            onPress={() => setShowResetConfirm(true)}
-          >
+          <TouchableOpacity className="py-2" onPress={handleResetToDefaults}>
             <Text className="text-base font-medium text-red-300 text-center">
               Reset all settings to default
             </Text>
@@ -674,12 +676,15 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Add padding to prevent content from hiding behind the footer */}
-        <View className="h-24" />
+        <View style={{ height: footerSpacer }} />
         </ScrollView>
 
         {/* Auto-save status */}
         {isSaving && (
-          <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/70 border-t border-white/10">
+          <View
+            className="absolute bottom-0 left-0 right-0 p-4 bg-black/70 border-t border-white/10"
+            style={{ paddingBottom: insets.bottom + 12 }}
+          >
             <Text className="text-sm text-gray-300 text-center font-medium">
               Saving changes...
             </Text>

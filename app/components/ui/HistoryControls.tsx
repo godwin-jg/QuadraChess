@@ -4,11 +4,20 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "../../../state";
 import { stepHistory, returnToLive, selectIsViewingHistory } from "../../../state/gameSlice";
 import { hapticsService } from "../../../services/hapticsService";
+import { sw, sh, sf, isCompact } from "../../utils/responsive";
 
-export default function HistoryControls() {
+interface HistoryControlsProps {
+  textScale?: number;
+}
+
+export default function HistoryControls({ textScale = 1 }: HistoryControlsProps) {
   const dispatch = useDispatch();
   const { history, viewingHistoryIndex } = useSelector((state: RootState) => state.game);
   const isViewingHistory = useSelector(selectIsViewingHistory);
+  const clampedTextScale = Math.min(1.15, Math.max(1, textScale));
+  const moveCounterSize = sf(c ? 12 : 13) * clampedTextScale;
+  const buttonTextSize = sf(c ? 11 : 13) * clampedTextScale;
+  const labelTextSize = sf(c ? 6 : 7) * clampedTextScale;
   const totalMoves = Math.max(0, history.length);
   const currentMoveNumber = isViewingHistory ? (viewingHistoryIndex || 0) + 1 : totalMoves;
 
@@ -28,7 +37,9 @@ export default function HistoryControls() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.moveCounter}>Move {currentMoveNumber} of {totalMoves}</Text>
+      <Text style={[styles.moveCounter, { fontSize: moveCounterSize }]}>
+        Move {currentMoveNumber} of {totalMoves}
+      </Text>
       <View style={styles.buttonsRow}>
         {buttons.map(({ label, symbol, enabled, action }) => (
           <TouchableOpacity
@@ -37,9 +48,19 @@ export default function HistoryControls() {
             onPress={() => { if (enabled) { hapticsService.selection(); action(); } }}
             activeOpacity={enabled ? 0.7 : 1}
             disabled={!enabled}
+            hitSlop={{
+              top: CONTROL_HIT_SLOP,
+              bottom: CONTROL_HIT_SLOP,
+              left: CONTROL_HIT_SLOP,
+              right: CONTROL_HIT_SLOP,
+            }}
           >
-            <Text style={[styles.buttonText, enabled ? styles.textEnabled : styles.textDisabled]}>{symbol}</Text>
-            <Text style={[styles.labelText, enabled ? styles.textEnabled : styles.textDisabled]}>{label}</Text>
+            <Text style={[styles.buttonText, { fontSize: buttonTextSize }, enabled ? styles.textEnabled : styles.textDisabled]}>
+              {symbol}
+            </Text>
+            <Text style={[styles.labelText, { fontSize: labelTextSize }, enabled ? styles.textEnabled : styles.textDisabled]}>
+              {label}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -47,13 +68,19 @@ export default function HistoryControls() {
   );
 }
 
+const c = isCompact;
+const CONTROL_BUTTON_SIZE = Math.min(Math.max(sw(c ? 32 : 36), 24), 40);
+const CONTROL_BUTTON_RADIUS = Math.min(Math.max(sw(c ? 6 : 8), 5), 10);
+const CONTROL_HIT_SLOP = c ? 6 : 8;
+
 const styles = StyleSheet.create({
   container: { 
     alignItems: 'center',
-    gap: 8,
+    width: '100%',
+    gap: sh(c ? 6 : 8),
   },
   moveCounter: { 
-    fontSize: 13, 
+    fontSize: sf(c ? 12 : 13), 
     color: '#D1D5DB', 
     fontWeight: '500', 
     textAlign: 'center',
@@ -61,24 +88,25 @@ const styles = StyleSheet.create({
   buttonsRow: { 
     flexDirection: 'row', 
     justifyContent: 'center',
-    gap: 6,
+    gap: sw(c ? 2 : 4),
+    width: '100%',
   },
   button: { 
-    width: 44, 
-    height: 44, 
-    borderRadius: 8, 
+    width: CONTROL_BUTTON_SIZE, 
+    height: CONTROL_BUTTON_SIZE, 
+    borderRadius: CONTROL_BUTTON_RADIUS, 
     justifyContent: 'center', 
     alignItems: 'center',
   },
   buttonEnabled: { backgroundColor: '#374151' },
   buttonDisabled: { backgroundColor: '#4B5563' },
   buttonText: { 
-    fontSize: 16, 
+    fontSize: sf(c ? 11 : 13), 
     fontWeight: '700',
-    marginBottom: 2,
+    marginBottom: sh(c ? 0 : 1),
   },
   labelText: {
-    fontSize: 9,
+    fontSize: sf(c ? 6 : 7),
     fontWeight: '600',
   },
   textEnabled: { color: '#FFFFFF' },

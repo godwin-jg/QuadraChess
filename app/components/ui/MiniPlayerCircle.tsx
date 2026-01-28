@@ -19,6 +19,7 @@ interface MiniPlayerCircleProps {
   isEliminated?: boolean;
   boardRotation?: number;
   timeMs?: number;
+  isTimerDisabled?: boolean;
 }
 
 const formatTime = (ms?: number) => {
@@ -35,6 +36,7 @@ export default function MiniPlayerCircle({
   isEliminated = false,
   boardRotation = 0,
   timeMs,
+  isTimerDisabled = false,
 }: MiniPlayerCircleProps) {
   // Animation values
   const scale = useSharedValue(1);
@@ -247,18 +249,23 @@ export default function MiniPlayerCircle({
           style={[
             styles.timerBadge,
             {
-              backgroundColor: isEliminated 
-                ? 'rgba(107, 114, 128, 0.9)' 
-                : isCurrentTurn
-                  ? 'rgba(0, 0, 0, 0.85)'
-                  : 'rgba(0, 0, 0, 0.7)',
-              borderColor: isEliminated
-                ? 'rgba(107, 114, 128, 0.6)'
-                : isCurrentTurn
-                  ? (player.color === 'r' ? 'rgba(239, 68, 68, 0.8)' : 
-                     player.color === 'b' ? 'rgba(59, 130, 246, 0.8)' : 
-                     player.color === 'y' ? 'rgba(124, 58, 237, 0.8)' : 'rgba(16, 185, 129, 0.8)')
-                  : 'rgba(255, 255, 255, 0.3)',
+              backgroundColor: isTimerDisabled
+                ? 'rgba(17, 24, 39, 0.6)'
+                : isEliminated 
+                  ? 'rgba(107, 114, 128, 0.9)' 
+                  : isCurrentTurn
+                    ? 'rgba(0, 0, 0, 0.85)'
+                    : 'rgba(0, 0, 0, 0.7)',
+              borderColor: isTimerDisabled
+                ? 'rgba(156, 163, 175, 0.45)'
+                : isEliminated
+                  ? 'rgba(107, 114, 128, 0.6)'
+                  : isCurrentTurn
+                    ? (player.color === 'r' ? 'rgba(239, 68, 68, 0.8)' : 
+                       player.color === 'b' ? 'rgba(59, 130, 246, 0.8)' : 
+                       player.color === 'y' ? 'rgba(124, 58, 237, 0.8)' : 'rgba(16, 185, 129, 0.8)')
+                    : 'rgba(255, 255, 255, 0.3)',
+              opacity: isTimerDisabled ? 0.75 : 1,
             }
           ]}
         >
@@ -266,13 +273,15 @@ export default function MiniPlayerCircle({
             style={[
               styles.timerText,
               {
-                color: isEliminated 
-                  ? '#9CA3AF' 
-                  : (timeMs <= 10000 && !isEliminated)
-                    ? '#F87171' // Red when low time
-                    : isCurrentTurn 
-                      ? '#FFFFFF' 
-                      : '#D1D5DB',
+                color: isTimerDisabled
+                  ? '#9CA3AF'
+                  : isEliminated 
+                    ? '#9CA3AF' 
+                    : (timeMs <= 10000 && !isEliminated)
+                      ? '#F87171' // Red when low time
+                      : isCurrentTurn 
+                        ? '#FFFFFF' 
+                        : '#D1D5DB',
               }
             ]}
           >

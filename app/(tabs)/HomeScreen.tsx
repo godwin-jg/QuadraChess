@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "expo-router";
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch } from 'react-redux';
 import Animated, { 
   useSharedValue, 
@@ -20,6 +20,7 @@ import type { BotDifficulty } from "../../config/gameConfig";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
 import FloatingPieces from "@/app/components/ui/FloatingPieces";
+import { getTabBarSpacer } from "../utils/responsive";
 
 // --- Reusable AnimatedButton Component ---
 interface AnimatedButtonProps {
@@ -135,6 +136,8 @@ export default function HomeScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
   const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
+  const tabBarSpacer = getTabBarSpacer(insets.bottom);
   const [isNavigating, setIsNavigating] = useState(false);
   const botDifficulty = (settings.game.botDifficulty || "easy") as BotDifficulty;
   const difficultyLabel = DIFFICULTY_LABELS[botDifficulty] ?? "Easy";
@@ -215,6 +218,7 @@ export default function HomeScreen() {
       {/* Background Chess Pieces */}
       <FloatingPieces />
 
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
       <View className="flex-1" style={{ zIndex: 1 }}>
       {/* Top Navigation Bar */}
       <View className="flex-row justify-between items-center px-6 pt-8 pb-4">
@@ -238,7 +242,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <View className="flex-1 px-6 pb-16 justify-between mt-8">
+      <View className="flex-1 px-6 justify-between mt-8" style={{ paddingBottom: tabBarSpacer }}>
         {/* Header Section */}
         
         <View className="items-center mb-8">
@@ -340,12 +344,13 @@ export default function HomeScreen() {
           <View className="items-center flex-1">
             <Text className="text-2xl mb-2">🏆</Text>
             <Text className="text-gray-300 text-sm font-semibold text-center">
-              Strategic Gameplay
+              Strategic play
             </Text>
           </View>
         </View>
       </View>
       </View>
+      </ScrollView>
 
     </SafeAreaView>
   );

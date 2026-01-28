@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Text, TouchableOpacity, StyleSheet } from "react-native";
+import { Text, TouchableOpacity, StyleSheet, View } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState, setPlayers, setIsHost, setCanStartGame } from "../../../state";
 import { resignGame } from "../../../state/gameSlice";
@@ -7,16 +7,25 @@ import onlineGameService from "../../../services/onlineGameService";
 import ResignConfirmationModal from "./ResignConfirmationModal";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import soundService from "../../../services/soundService";
+import { sw, sh, sf, isCompact } from "../../utils/responsive";
+import { FontAwesome } from "@expo/vector-icons";
 
 const PLAYER_NAMES: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
 
-export default function ResignButton() {
+interface ResignButtonProps {
+  textScale?: number;
+}
+
+export default function ResignButton({ textScale = 1 }: ResignButtonProps) {
   const dispatch = useDispatch();
   const router = useRouter();
   const [showModal, setShowModal] = useState(false);
   const [isResigning, setIsResigning] = useState(false);
   const { gameId, mode } = useLocalSearchParams<{ gameId?: string; mode?: string }>();
   const { currentPlayerTurn, gameStatus, viewingHistoryIndex } = useSelector((state: RootState) => state.game);
+  const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
+  const iconSize = sf(c ? 11 : 12) * clampedTextScale;
+  const labelSize = sf(c ? 12 : 14) * clampedTextScale;
 
   const isOnlineMode = mode === "online" && !!gameId;
   const localPlayerColor = isOnlineMode ? onlineGameService.currentPlayer?.color : currentPlayerTurn;
@@ -74,7 +83,10 @@ export default function ResignButton() {
   return (
     <>
       <TouchableOpacity onPress={() => setShowModal(true)} activeOpacity={0.7} style={styles.button}>
-        <Text style={styles.buttonText}>Resign</Text>
+        <View style={styles.buttonContent}>
+          <FontAwesome name="flag" size={iconSize} color="#F87171" style={styles.icon} />
+          <Text style={[styles.buttonText, { fontSize: labelSize }]}>Resign</Text>
+        </View>
       </TouchableOpacity>
       <ResignConfirmationModal
         visible={showModal}
@@ -87,16 +99,33 @@ export default function ResignButton() {
   );
 }
 
+const c = isCompact;
+
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: '#374151',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.55)',
+    paddingHorizontal: sw(c ? 12 : 14),
+    paddingVertical: sh(c ? 6 : 8),
+    borderRadius: sw(c ? 6 : 8),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: {
+    marginRight: sw(6),
   },
   buttonText: {
-    color: '#F87171',
-    fontSize: 13,
+    color: '#FCA5A5',
+    fontSize: sf(c ? 12 : 14),
     fontWeight: '600',
     textAlign: 'center',
   },

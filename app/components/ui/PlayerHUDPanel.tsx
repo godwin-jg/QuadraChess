@@ -24,6 +24,7 @@ interface PlayerHUDPanelProps {
     teamLabel?: string;
   }>;
   panelType: 'top' | 'bottom';
+  textScale?: number;
 }
 
 const PLAYER_COLORS: Record<string, string> = {
@@ -75,12 +76,15 @@ const JuicyScore = React.memo(function JuicyScore({
   baseColor,
   playerColor,
   isEliminated,
+  textScale = 1,
 }: {
   score: number;
   baseColor: string;
   playerColor: string;
   isEliminated: boolean;
+  textScale?: number;
 }) {
+  const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
   const scale = useSharedValue(1);
   const flash = useSharedValue(0);
   const deltaProgress = useSharedValue(0);
@@ -140,7 +144,11 @@ const JuicyScore = React.memo(function JuicyScore({
       {delta > 0 && (
         <Animated.Text
           key={`delta-${score}`}
-          style={[styles.floatingDelta, deltaStyle]}
+          style={[
+            styles.floatingDelta,
+            { fontSize: Math.round(DELTA_SIZE * clampedTextScale) },
+            deltaStyle,
+          ]}
         >
           +{delta}
         </Animated.Text>
@@ -148,6 +156,7 @@ const JuicyScore = React.memo(function JuicyScore({
       <Animated.Text
         style={[
           styles.playerScore,
+          { fontSize: Math.round(SCORE_SIZE * clampedTextScale) },
           { textDecorationLine: isEliminated ? "line-through" : "none" },
           animatedStyle,
         ]}
@@ -158,8 +167,13 @@ const JuicyScore = React.memo(function JuicyScore({
   );
 });
 
-export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelProps) {
+export default function PlayerHUDPanel({ players, panelType, textScale = 1 }: PlayerHUDPanelProps) {
   const c = isCompact; // compact mode flag
+  const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
+  const playerNameSize = Math.round(PLAYER_NAME_SIZE * clampedTextScale);
+  const teamLabelSize = Math.round(TEAM_LABEL_SIZE * clampedTextScale);
+  const eliminatedTextSize = Math.round(ELIMINATED_SIZE * clampedTextScale);
+  const smallTextSize = Math.round(SMALL_TEXT_SIZE * clampedTextScale);
 
   return (
     <View style={[styles.panel, panelType === 'top' ? styles.topPanel : styles.bottomPanel]}>
@@ -185,13 +199,14 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
                   inactiveColor={nameInactiveColor}
                   style={[
                     styles.playerName,
+                    { fontSize: playerNameSize },
                     { textDecorationLine: player.isEliminated ? "line-through" : "none" },
                   ]}
                 >
                   {PLAYER_NAMES[player.color] || "Unknown"}
                 </TurnColorText>
                 {player.teamLabel && (
-                  <Text style={styles.teamLabel}>
+                  <Text style={[styles.teamLabel, { fontSize: teamLabelSize }]}>
                     {player.teamLabel}
                   </Text>
                 )}
@@ -200,8 +215,13 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
                   baseColor={scoreColor}
                   playerColor={playerColor}
                   isEliminated={player.isEliminated}
+                  textScale={clampedTextScale}
                 />
-                {player.isEliminated && <Text style={styles.eliminatedText}>ELIMINATED</Text>}
+                {player.isEliminated && (
+                  <Text style={[styles.eliminatedText, { fontSize: eliminatedTextSize }]}>
+                    ELIMINATED
+                  </Text>
+                )}
               </View>
 
               <View style={styles.capturedSection}>
@@ -215,7 +235,7 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
                       isActive={isActive}
                       activeColor={smallActiveColor}
                       inactiveColor={smallInactiveColor}
-                      style={styles.smallText}
+                      style={[styles.smallText, { fontSize: smallTextSize }]}
                     >
                       None
                     </TurnColorText>
@@ -225,7 +245,7 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
                       isActive={isActive}
                       activeColor={smallActiveColor}
                       inactiveColor={smallInactiveColor}
-                      style={styles.smallText}
+                      style={[styles.smallText, { fontSize: smallTextSize }]}
                     >
                       +{player.capturedPieces.length - 6}
                     </TurnColorText>
@@ -241,16 +261,24 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
 }
 
 const c = isCompact;
+const PLAYER_NAME_SIZE = sf(c ? 13 : 16);
+const TEAM_LABEL_SIZE = sf(c ? 9 : 11);
+const SCORE_SIZE = sf(c ? 20 : 24);
+const DELTA_SIZE = sf(c ? 16 : 20);
+const ELIMINATED_SIZE = sf(c ? 9 : 11);
+const SMALL_TEXT_SIZE = sf(c ? 9 : 11);
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: sw(c ? 16 : 24),
-    paddingTop: sh(c ? 6 : 10),
-    paddingBottom: sh(c ? 10 : 16),
-    marginHorizontal: sw(12),
-    marginVertical: sh(6),
+    paddingHorizontal: sw(c ? 12 : 20),
+    paddingTop: sh(c ? 4 : 8),
+    paddingBottom: sh(c ? 8 : 12),
+    marginHorizontal: sw(c ? 8 : 12),
+    marginVertical: sh(c ? 2 : 4),
+    flexShrink: 1,
+    maxHeight: "100%",
   },
   topPanel: {
     borderTopWidth: 0,
@@ -284,13 +312,13 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   playerName: {
-    fontSize: sf(c ? 13 : 16),
+    fontSize: PLAYER_NAME_SIZE,
     fontWeight: '900',
     letterSpacing: 1.2,
     marginBottom: sh(4),
   },
   playerScore: {
-    fontSize: sf(c ? 20 : 24),
+    fontSize: SCORE_SIZE,
     fontWeight: '900',
     letterSpacing: 1.5,
   },
@@ -305,19 +333,19 @@ const styles = StyleSheet.create({
   floatingDelta: {
     position: 'absolute',
     top: -sh(c ? 10 : 12),
-    fontSize: sf(c ? 16 : 20),
+    fontSize: DELTA_SIZE,
     fontWeight: '900',
     color: '#FACC15',
   },
   teamLabel: {
-    fontSize: sf(c ? 9 : 11),
+    fontSize: TEAM_LABEL_SIZE,
     color: '#9CA3AF',
     fontWeight: '600',
     letterSpacing: 0.8,
     marginBottom: sh(2),
   },
   eliminatedText: {
-    fontSize: sf(c ? 9 : 11),
+    fontSize: ELIMINATED_SIZE,
     color: '#F87171',
     fontWeight: '600',
     marginTop: sh(4),
@@ -335,7 +363,7 @@ const styles = StyleSheet.create({
     height: sh(c ? 24 : 30),
   },
   smallText: {
-    fontSize: sf(c ? 9 : 11),
+    fontSize: SMALL_TEXT_SIZE,
     fontStyle: 'italic',
   },
 });

@@ -5,12 +5,21 @@ import { RootState, endGame } from "../../../state";
 import { useLocalSearchParams } from "expo-router";
 import soundService from "../../../services/soundService";
 import onlineGameService from "../../../services/onlineGameService";
+import { sw, sh, sf, isCompact } from "../../utils/responsive";
+import { FontAwesome } from "@expo/vector-icons";
 
-export default function EndgameButton() {
+interface EndgameButtonProps {
+  textScale?: number;
+}
+
+export default function EndgameButton({ textScale = 1 }: EndgameButtonProps) {
   const dispatch = useDispatch();
   const [showModal, setShowModal] = useState(false);
   const { gameId } = useLocalSearchParams<{ gameId?: string }>();
   const { gameStatus, viewingHistoryIndex, gameMode } = useSelector((state: RootState) => state.game);
+  const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
+  const iconSize = sf(c ? 11 : 12) * clampedTextScale;
+  const labelSize = sf(c ? 12 : 14) * clampedTextScale;
   
   const isActuallyOnline = gameMode === "online" && onlineGameService.isConnected && gameId;
   const isLocalGame = gameMode === "solo" || gameMode === "single" || !isActuallyOnline;
@@ -31,7 +40,10 @@ export default function EndgameButton() {
   return (
     <>
       <TouchableOpacity onPress={() => setShowModal(true)} activeOpacity={0.7} style={styles.button}>
-        <Text style={styles.buttonText}>End Game</Text>
+        <View style={styles.buttonContent}>
+          <FontAwesome name="stop-circle" size={iconSize} color="#FDBA74" style={styles.icon} />
+          <Text style={[styles.buttonText, { fontSize: labelSize }]}>End Game</Text>
+        </View>
       </TouchableOpacity>
 
       <Modal visible={showModal} transparent animationType="fade" onRequestClose={() => setShowModal(false)}>
@@ -56,16 +68,35 @@ export default function EndgameButton() {
   );
 }
 
+const c = isCompact;
+const ENDGAME_RAISE_Y = -Math.min(sh(c ? 2 : 4), c ? 4 : 6);
+
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: '#374151',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: 'rgba(251, 146, 60, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 146, 60, 0.6)',
+    paddingHorizontal: sw(c ? 12 : 14),
+    paddingVertical: sh(c ? 6 : 8),
+    borderRadius: sw(c ? 6 : 8),
+    marginTop: ENDGAME_RAISE_Y,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: {
+    marginRight: sw(6),
   },
   buttonText: {
-    color: '#FBBF24',
-    fontSize: 13,
+    color: '#FDBA74',
+    fontSize: sf(c ? 12 : 14),
     fontWeight: '600',
     textAlign: 'center',
   },

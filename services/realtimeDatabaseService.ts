@@ -1670,6 +1670,16 @@ class RealtimeDatabaseService {
         throw new Error("Need exactly 4 players to start");
       }
 
+      const existingTimeControl = gameData.gameState?.timeControl ?? DEFAULT_TIME_CONTROL;
+      const baseMs =
+        typeof existingTimeControl.baseMs === "number"
+          ? existingTimeControl.baseMs
+          : DEFAULT_TIME_CONTROL.baseMs;
+      const incrementMs =
+        typeof existingTimeControl.incrementMs === "number"
+          ? existingTimeControl.incrementMs
+          : DEFAULT_TIME_CONTROL.incrementMs;
+
       // Get the host's assigned color to start the game with their turn
       const hostPlayer = gameData.players[user.uid];
       const startingColor = hostPlayer?.color || "r";
@@ -1681,14 +1691,14 @@ class RealtimeDatabaseService {
         "gameState/currentPlayerTurn": startingColor,
         "gameState/version": increment(1),
         "gameState/timeControl": {
-          baseMs: DEFAULT_TIME_CONTROL.baseMs,
-          incrementMs: DEFAULT_TIME_CONTROL.incrementMs,
+          baseMs,
+          incrementMs,
         },
         "gameState/clocks": {
-          r: DEFAULT_TIME_CONTROL.baseMs,
-          b: DEFAULT_TIME_CONTROL.baseMs,
-          y: DEFAULT_TIME_CONTROL.baseMs,
-          g: DEFAULT_TIME_CONTROL.baseMs,
+          r: baseMs,
+          b: baseMs,
+          y: baseMs,
+          g: baseMs,
         },
         "gameState/turnStartedAt": Date.now(),
       });
@@ -2773,6 +2783,61 @@ class RealtimeDatabaseService {
     }
   }
 
+  async updateTimeControl(
+    gameId: string,
+    baseMs: number,
+    incrementMs: number
+  ): Promise<void> {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
+
+      const gameRef = ref(db, `games/${gameId}`);
+      const snapshot = await get(gameRef);
+
+      if (!snapshot.exists()) {
+        throw new Error("Game not found");
+      }
+
+      const gameData = snapshot.val();
+      if (gameData.hostId !== user.uid) {
+        throw new Error("Only host can update time control");
+      }
+
+      if (gameData.status !== "waiting") {
+        throw new Error("Cannot change time control after game has started");
+      }
+
+      const safeBaseMs = Number.isFinite(baseMs)
+        ? Math.floor(baseMs)
+        : DEFAULT_TIME_CONTROL.baseMs;
+      const safeIncrementMs = Number.isFinite(incrementMs)
+        ? Math.floor(incrementMs)
+        : DEFAULT_TIME_CONTROL.incrementMs;
+      const normalizedBaseMs = Math.max(60 * 1000, safeBaseMs);
+      const normalizedIncrementMs = Math.max(0, safeIncrementMs);
+
+      await update(gameRef, {
+        "gameState/timeControl": {
+          baseMs: normalizedBaseMs,
+          incrementMs: normalizedIncrementMs,
+        },
+        "gameState/clocks": {
+          r: normalizedBaseMs,
+          b: normalizedBaseMs,
+          y: normalizedBaseMs,
+          g: normalizedBaseMs,
+        },
+        "gameState/turnStartedAt": null,
+        "gameState/version": increment(1),
+        lastActivity: Date.now(),
+      });
+    } catch (error) {
+      console.error("Error updating time control:", error);
+      throw error;
+    }
+  }
+
   async updateTeamConfiguration(
     gameId: string,
     teamMode: boolean,
@@ -2842,7 +2907,7 @@ class RealtimeDatabaseService {
   }
 
   // Enhanced cleanup for corrupted games with comprehensive detection
-  async cleanupCorruptedGames(): Promise<number> {
+  async cleanupCorruptedGames(options?: { minAgeMs?: number }): Promise<number> {
     try {
       const gamesRef = ref(db, "games");
       const snapshot = await get(gamesRef);
@@ -2853,6 +2918,29 @@ class RealtimeDatabaseService {
 
       const games = snapshot.val();
       const corruptedGames: string[] = [];
+      const minAgeMs = options?.minAgeMs ?? 0;
+      const now = Date.now();
+
+      const getGameTimestamp = (gameData: any): number | null => {
+        if (typeof gameData?.lastActivity === "number") {
+          return gameData.lastActivity;
+        }
+        if (typeof gameData?.createdAt === "number") {
+          return gameData.createdAt;
+        }
+        return null;
+      };
+
+      const isOldEnough = (gameData: any): boolean => {
+        if (!minAgeMs) {
+          return true;
+        }
+        const timestamp = getGameTimestamp(gameData);
+        if (timestamp === null) {
+          return true;
+        }
+        return now - timestamp >= minAgeMs;
+      };
       
       // Track games by host to detect duplicates
       const gamesByHost = new Map<string, string[]>();
@@ -2869,6 +2957,15 @@ class RealtimeDatabaseService {
       
       // Second pass: analyze and identify corrupted games
       Object.entries(games).forEach(([gameId, gameData]: [string, any]) => {
+        if (!isOldEnough(gameData)) {
+          return;
+        }
+
+        if (!gameData || typeof gameData !== "object") {
+          corruptedGames.push(gameId);
+          return;
+        }
+
         // Clean up games with missing required fields
         if (!gameData.status || 
             !gameData.hostName || 
@@ -2949,10 +3046,10 @@ class RealtimeDatabaseService {
           return;
         }
 
-        // Clean up games with only 1 player for more than 7 minutes
+        // Clean up games with only 1 player for more than 30 minutes
         if (gameData.status === "waiting" && validPlayers.length === 1 && gameData.lastActivity) {
-          const sevenMinutesAgo = Date.now() - 7 * 60 * 1000; // 7 minutes ago
-          if (gameData.lastActivity < sevenMinutesAgo) {
+          const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000; // 30 minutes ago
+          if (gameData.lastActivity < thirtyMinutesAgo) {
             corruptedGames.push(gameId);
             return;
           }

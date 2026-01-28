@@ -39,3 +39,7 @@ export const TOTAL_SQUARES = BOARD_SQUARES * BOARD_SQUARES; // 196
 // Type exports
 export type PlayerColor = keyof typeof GRADIENT_MAP;
 export type DragAccentColor = keyof typeof DRAG_ACCENT;
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

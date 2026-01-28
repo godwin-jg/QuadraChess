@@ -46,6 +46,7 @@ import Animated, {
   useAnimatedStyle, 
   withSpring, 
   withTiming,
+  Easing,
 } from "react-native-reanimated";
 
 const PLAYER_NAMES: Record<string, string> = {
@@ -103,6 +104,22 @@ export default function GameScreen() {
   
   // Board rotation state - rotates board for each player's perspective
   const [boardRotation, setBoardRotation] = useState(0);
+  // Visual perspective passed to children - only updates after fade-out completes
+  const [visualPerspective, setVisualPerspective] = useState<{
+    rotation: number;
+    viewerColor: string | null;
+  }>({ rotation: 0, viewerColor: null });
+  const [introCountdown, setIntroCountdown] = useState<number | null>(null);
+  const introCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const introCountdownCompletedAtRef = useRef<number | null>(null);
+  const pendingPerspectiveRef = useRef<{ rotation: number; viewerColor: string | null } | null>(
+    null
+  );
+  const hasShownInitialPerspectiveRef = useRef(false);
+  
+  // Opacity and scale for smooth perspective transition
+  const boardOpacity = useSharedValue(0);
+  const boardScale = useSharedValue(0.95);
   
   // Animation values for the toggle button
   const toggleScale = useSharedValue(1);
@@ -131,6 +148,7 @@ export default function GameScreen() {
   const teamMode = useSelector((state: RootState) => state.game.teamMode);
   const teamAssignments = useSelector((state: RootState) => state.game.teamAssignments);
   const winningTeam = useSelector((state: RootState) => state.game.winningTeam);
+  const gamePlayers = useSelector((state: RootState) => state.game.players);
   const promotionState = useSelector((state: RootState) => state.game.promotionState);
   const justEliminated = useSelector((state: RootState) => state.game.justEliminated);
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
@@ -186,15 +204,20 @@ export default function GameScreen() {
     [dispatch, eliminatedPlayers, gameStatus, isOnlineMode, isP2PMode, isViewingHistory]
   );
 
+  const effectiveTurnStartedAt =
+    turnStartedAt && introCountdownCompletedAtRef.current
+      ? Math.max(turnStartedAt, introCountdownCompletedAtRef.current)
+      : turnStartedAt;
+
   const { displayClocks } = useTurnClock({
     clocks,
     currentPlayerTurn,
-    turnStartedAt,
+    turnStartedAt: effectiveTurnStartedAt,
     gameStatus,
     eliminatedPlayers,
     teamMode,
     teamAssignments,
-    isPaused: isViewingHistory,
+    isPaused: isViewingHistory || introCountdown !== null,
     onTimeout: handleTimeout,
   });
 
@@ -297,10 +320,24 @@ export default function GameScreen() {
     Array.isArray(displayedGameState.boardState) &&
     displayedGameState.boardState.length > 0;
 
+  // ✅ Reactive state for local player color - polls service until connected
+  const [localPlayerColor, setLocalPlayerColor] = useState<string | null>(null);
+  const lastStablePlayerColorRef = useRef<string | null>(null);
+  const clearLocalPlayerColorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   // ✅ Helper function to get current player color
   const getCurrentPlayerColor = (): string | null => {
     if (isOnlineMode && onlineGameService.currentPlayer) {
       return onlineGameService.currentPlayer.color;
+    }
+    if (isOnlineMode) {
+      const currentUserId = realtimeDatabaseService.getCurrentUser()?.uid ?? null;
+      if (currentUserId && Array.isArray(gamePlayers)) {
+        const matchingPlayer = gamePlayers.find((player) => player.id === currentUserId);
+        if (matchingPlayer?.color) {
+          return matchingPlayer.color;
+        }
+      }
     }
     if (isP2PMode && p2pGameService.currentPlayer) {
       return p2pGameService.currentPlayer.color;
@@ -309,14 +346,71 @@ export default function GameScreen() {
     return null;
   };
 
+  // ✅ Watch for player color changes (including when host is reassigned to different color)
+  useEffect(() => {
+    if (!isOnlineMode && !isP2PMode) {
+      if (clearLocalPlayerColorTimeoutRef.current) {
+        clearTimeout(clearLocalPlayerColorTimeoutRef.current);
+        clearLocalPlayerColorTimeoutRef.current = null;
+      }
+      lastStablePlayerColorRef.current = null;
+      setLocalPlayerColor(null);
+      return;
+    }
+    
+    const commitPlayerColor = (color: string | null) => {
+      if (color) {
+        if (clearLocalPlayerColorTimeoutRef.current) {
+          clearTimeout(clearLocalPlayerColorTimeoutRef.current);
+          clearLocalPlayerColorTimeoutRef.current = null;
+        }
+        lastStablePlayerColorRef.current = color;
+        setLocalPlayerColor(color);
+        return;
+      }
+
+      if (clearLocalPlayerColorTimeoutRef.current) return;
+      clearLocalPlayerColorTimeoutRef.current = setTimeout(() => {
+        const currentColor = getCurrentPlayerColor();
+        if (!currentColor) {
+          lastStablePlayerColorRef.current = null;
+          setLocalPlayerColor(null);
+        }
+        clearLocalPlayerColorTimeoutRef.current = null;
+      }, 400);
+    };
+
+    // Check immediately
+    const color = getCurrentPlayerColor();
+    console.log(`[BoardRotation] Initial color check: ${color}`);
+    commitPlayerColor(color ?? null);
+    
+    // Keep polling to detect color changes (e.g., when host is reassigned due to bot config)
+    let lastColor = color ?? null;
+    const interval = setInterval(() => {
+      const currentColor = getCurrentPlayerColor();
+      if (currentColor !== lastColor) {
+        console.log(`[BoardRotation] Color changed: ${lastColor} -> ${currentColor}`);
+        lastColor = currentColor;
+        commitPlayerColor(currentColor ?? null);
+      }
+    }, 200);
+    
+    return () => {
+      clearInterval(interval);
+      if (clearLocalPlayerColorTimeoutRef.current) {
+        clearTimeout(clearLocalPlayerColorTimeoutRef.current);
+        clearLocalPlayerColorTimeoutRef.current = null;
+      }
+    };
+  }, [isOnlineMode, isP2PMode, gameId, gamePlayers]);
+
   // ✅ Board rotation logic - rotate board for each player's perspective
   useEffect(() => {
-    const currentPlayerColor = getCurrentPlayerColor();
-    
-    if (currentPlayerColor) {
+    if (localPlayerColor) {
       // Rotate board so each player sees their pieces at the bottom (red position)
       let rotation = 0;
-      switch (currentPlayerColor) {
+      switch (localPlayerColor) {
         case 'r': // Red - default position (0 degrees)
           rotation = 0;
           break;
@@ -333,12 +427,159 @@ export default function GameScreen() {
           rotation = 0;
       }
       
+      console.log(`[BoardRotation] Setting rotation for ${localPlayerColor}: ${rotation}°`);
       setBoardRotation(rotation);
     } else {
       // For local games, keep default rotation
+      console.log(`[BoardRotation] No local player color, keeping default rotation`);
       setBoardRotation(0);
     }
-  }, [isOnlineMode, isP2PMode, onlineGameService.currentPlayer?.color, p2pGameService.currentPlayer?.color]);
+  }, [localPlayerColor]);
+
+  // Track if this is the initial mount for rotation animation
+  const isFirstRender = useRef(true);
+  const previousRotation = useRef(0);
+  
+  // ✅ Reset rotation refs when game changes (to handle navigation between games)
+  useEffect(() => {
+    console.log(`[BoardRotation] Game changed, resetting rotation refs`);
+    isFirstRender.current = true;
+    previousRotation.current = 0;
+    hasShownInitialPerspectiveRef.current = false;
+    pendingPerspectiveRef.current = null;
+    introCountdownCompletedAtRef.current = null;
+    if (introCountdownIntervalRef.current) {
+      clearInterval(introCountdownIntervalRef.current);
+      introCountdownIntervalRef.current = null;
+    }
+    setIntroCountdown(null);
+    // Hide board until the correct perspective is ready
+    boardOpacity.value = 0;
+    boardScale.value = 0.95;
+  }, [gameId]);
+
+  useEffect(() => {
+    return () => {
+      if (introCountdownIntervalRef.current) {
+        clearInterval(introCountdownIntervalRef.current);
+      }
+    };
+  }, []);
+  
+  // ✅ Animate board perspective change with smooth ease-in-out transition
+  useEffect(() => {
+    console.log(
+      `[BoardRotation] Animation effect: boardRotation=${boardRotation}, ` +
+        `isFirst=${isFirstRender.current}, prev=${previousRotation.current}, ` +
+        `player=${localPlayerColor}`
+    );
+    const targetPlayerColor = localPlayerColor ?? null;
+    
+    const targetPerspective = { rotation: boardRotation, viewerColor: targetPlayerColor };
+
+    const shouldWaitForLocalPlayer =
+      (isOnlineMode || isP2PMode) &&
+      !targetPlayerColor &&
+      !hasShownInitialPerspectiveRef.current;
+
+    if (shouldWaitForLocalPlayer) {
+      boardOpacity.value = 0;
+      boardScale.value = 0.95;
+      return;
+    }
+
+    if (!hasShownInitialPerspectiveRef.current && targetPlayerColor) {
+      hasShownInitialPerspectiveRef.current = true;
+      pendingPerspectiveRef.current = targetPerspective;
+      // Keep the previous board visible during the countdown
+      boardOpacity.value = 1;
+      boardScale.value = 1;
+      introCountdownCompletedAtRef.current = null;
+      setIntroCountdown(3);
+
+      if (introCountdownIntervalRef.current) {
+        clearInterval(introCountdownIntervalRef.current);
+      }
+
+      introCountdownIntervalRef.current = setInterval(() => {
+        setIntroCountdown((prev) => {
+          if (prev === null) return null;
+          if (prev <= 1) {
+            if (introCountdownIntervalRef.current) {
+              clearInterval(introCountdownIntervalRef.current);
+              introCountdownIntervalRef.current = null;
+            }
+            introCountdownCompletedAtRef.current = Date.now();
+            const pending = pendingPerspectiveRef.current ?? targetPerspective;
+            setVisualPerspective(pending);
+            previousRotation.current = pending.rotation;
+            isFirstRender.current = false;
+            boardOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+            boardScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return;
+    }
+
+    if (introCountdown !== null) {
+      pendingPerspectiveRef.current = targetPerspective;
+      return;
+    }
+
+    // On first render or if rotation didn't actually change, just set values directly
+    if (isFirstRender.current || boardRotation === previousRotation.current) {
+      isFirstRender.current = false;
+      previousRotation.current = boardRotation;
+      setVisualPerspective(targetPerspective);
+      console.log(`[BoardRotation] Direct set (no animation): ${boardRotation}°`);
+      boardOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+      boardScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+      return;
+    }
+    
+    previousRotation.current = boardRotation;
+    
+    const easeOut = Easing.out(Easing.cubic);
+    const easeIn = Easing.in(Easing.cubic);
+    
+    // Capture the target rotation for setTimeout closures
+    const targetRotation = boardRotation;
+    const targetViewerColor = targetPlayerColor;
+    
+    console.log(`[BoardRotation] Starting fade animation to ${targetRotation}°`);
+    
+    // Step 1: Fade out and scale down
+    boardOpacity.value = withTiming(0, { duration: 200, easing: easeOut });
+    boardScale.value = withTiming(0.95, { duration: 200, easing: easeOut });
+    
+    // Step 2: After fade out, change rotation
+    const rotationTimeout = setTimeout(() => {
+      console.log(`[BoardRotation] Fade out complete, setting rotation to ${targetRotation}°`);
+      setVisualPerspective({ rotation: targetRotation, viewerColor: targetViewerColor });
+    }, 210);
+    
+    // Step 3: Fade back in
+    const fadeInTimeout = setTimeout(() => {
+      console.log(`[BoardRotation] Starting fade in`);
+      boardOpacity.value = withTiming(1, { duration: 250, easing: easeIn });
+      boardScale.value = withTiming(1, { duration: 250, easing: easeIn });
+    }, 220);
+    
+    // Cleanup: cancel pending timeouts if effect re-runs
+    return () => {
+      clearTimeout(rotationTimeout);
+      clearTimeout(fadeInTimeout);
+    };
+  }, [boardRotation, localPlayerColor, introCountdown, isOnlineMode, isP2PMode]);
+
+  // ✅ Animated style for board rotation container
+  const boardRotationStyle = useAnimatedStyle(() => ({
+    opacity: boardOpacity.value,
+    transform: [{ scale: boardScale.value }],
+  }));
 
   // ✅ Setup notification service callback
   useEffect(() => {
@@ -502,21 +743,21 @@ export default function GameScreen() {
       {/* Main Game Area with breathing space */}
       <View className="flex-1 justify-center items-center" style={{ paddingVertical: 8 }}>
         <Animated.View
-          style={{
-            transform: [{ rotate: `${boardRotation}deg` }],
-            // Adjust padding to compensate for board rotation
-            paddingTop: boardRotation === 90 ? 8 : boardRotation === 180 ? 16 : boardRotation === 270 ? 8 : 0,
-            paddingBottom: boardRotation === 90 ? 8 : boardRotation === 180 ? 0 : boardRotation === 270 ? 8 : 16,
-            paddingLeft: boardRotation === 90 ? 16 : boardRotation === 180 ? 8 : boardRotation === 270 ? 0 : 8,
-            paddingRight: boardRotation === 90 ? 0 : boardRotation === 180 ? 8 : boardRotation === 270 ? 16 : 8,
-          }}
+          style={boardRotationStyle}
+          pointerEvents={introCountdown !== null ? "none" : "auto"}
         >
           <Board 
             playerData={players}
-            boardRotation={boardRotation}
+            boardRotation={visualPerspective.rotation}
+            viewerColor={visualPerspective.viewerColor}
             displayTurn={displayTurn}
           />
         </Animated.View>
+        {introCountdown !== null && (
+          <View pointerEvents="none" style={styles.countdownOverlay}>
+            <Text style={styles.countdownText}>{introCountdown}</Text>
+          </View>
+        )}
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
@@ -617,8 +858,8 @@ export default function GameScreen() {
       {/* Promotion Modal - Only show to the player who needs to promote in multiplayer games */}
       <PromotionModal
         visible={promotionState.isAwaiting && 
-                (getCurrentPlayerColor() === null || // Local games - show to all players
-                 promotionState.color === getCurrentPlayerColor())} // Multiplayer - show only to promoting player
+                (localPlayerColor === null || // Local games - show to all players
+                 promotionState.color === localPlayerColor)} // Multiplayer - show only to promoting player
         playerColor={promotionState.color || ""}
         onSelectPiece={async (pieceType) => {
           if (isOnlineMode && onlineGameService.isConnected) {
@@ -694,5 +935,18 @@ const styles = StyleSheet.create({
   },
   toggleButtonInactive: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    zIndex: 15,
+  },
+  countdownText: {
+    color: "#ffffff",
+    fontSize: 56,
+    fontWeight: "700",
+    letterSpacing: 2,
   },
 });

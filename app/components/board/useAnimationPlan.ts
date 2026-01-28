@@ -183,3 +183,7 @@ export function useAnimationPlan({
     handleAnimationComplete,
   };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

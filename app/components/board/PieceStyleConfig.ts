@@ -123,3 +123,7 @@ export const getPieceSize = (settings: UserSettings): number => {
       return 1.0;
   }
 };
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

@@ -53,3 +53,7 @@ export const getCrestColor = (playerColor: string): string => {
       return "#DC2626";
   }
 };
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

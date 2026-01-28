@@ -1,11 +1,16 @@
-import { useCallback, useMemo } from "react";
-import { useDispatch } from "react-redux";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import notificationService from "../../../services/notificationService";
 import onlineGameService from "../../../services/onlineGameService";
 import p2pGameService from "../../../services/p2pGameService";
 import networkService from "../../services/networkService";
-import { makeMove, sendMoveToServer } from "../../../state/gameSlice";
+import { makeMove, sendMoveToServer, setPremove } from "../../../state/gameSlice";
 import type { MoveInfo, Position } from "../../../types";
+import { onlineDataClient } from "../../../services/onlineDataClient";
+import { RootState } from "../../../state/store";
+
+// All player colors in turn order
+const TURN_ORDER = ['r', 'b', 'y', 'g'] as const;
 
 interface UseMoveExecutionOptions {
   effectiveMode: string | undefined;
@@ -14,6 +19,7 @@ interface UseMoveExecutionOptions {
   displayBoardState: (string | null)[][];
   enPassantTargets: any[];
   abortPendingDrop: () => void;
+  botPlayers?: string[];
 }
 
 interface UseMoveExecutionReturn {
@@ -34,19 +40,58 @@ export function useMoveExecution({
   displayBoardState,
   enPassantTargets,
   abortPendingDrop,
+  botPlayers = [],
 }: UseMoveExecutionOptions): UseMoveExecutionReturn {
   const dispatch = useDispatch();
+  const players = useSelector((state: RootState) => state.game.players);
+  const currentUserId = onlineDataClient.getCurrentUser()?.uid ?? null;
+  const lastKnownOnlineColorRef = useRef<string | null>(null);
+
+  const resolvedOnlineColor = useMemo(() => {
+    if (effectiveMode !== "online") return null;
+    const serviceColor = onlineGameService.currentPlayer?.color ?? null;
+    if (serviceColor) {
+      return serviceColor;
+    }
+    if (currentUserId) {
+      const matchedPlayer = players.find((player) => player.id === currentUserId);
+      return matchedPlayer?.color ?? null;
+    }
+    return null;
+  }, [currentUserId, effectiveMode, players, onlineGameService.currentPlayer?.color]);
+
+  useEffect(() => {
+    if (effectiveMode === "online") {
+      if (resolvedOnlineColor) {
+        lastKnownOnlineColorRef.current = resolvedOnlineColor;
+      }
+      return;
+    }
+    lastKnownOnlineColorRef.current = null;
+  }, [effectiveMode, resolvedOnlineColor]);
 
   // Memoize current player color to avoid repeated service lookups
+  // For solo mode, derive human player as whoever is NOT a bot
   const currentPlayerColor = useMemo(() => {
     if (effectiveMode === "online") {
-      return onlineGameService.currentPlayer?.color ?? null;
+      return resolvedOnlineColor ?? lastKnownOnlineColorRef.current;
     }
     if (effectiveMode === "p2p") {
       return p2pGameService.currentPlayer?.color ?? null;
     }
+    // Solo mode: human is whoever is NOT in botPlayers
+    if (effectiveMode === "single" && botPlayers.length > 0) {
+      const humanPlayers = TURN_ORDER.filter(c => !botPlayers.includes(c));
+      // Return the first human player (typically 'r' for Red)
+      return humanPlayers[0] ?? null;
+    }
     return null;
-  }, [effectiveMode, onlineGameService.currentPlayer?.color, p2pGameService.currentPlayer?.color]);
+  }, [
+    effectiveMode,
+    botPlayers,
+    resolvedOnlineColor,
+    p2pGameService.currentPlayer?.color,
+  ]);
 
   const executeMoveFrom = useCallback(
     (from: Position, to: Position, moveInfo?: MoveInfo) => {
@@ -57,24 +102,32 @@ export function useMoveExecution({
       }
       const pieceColor = pieceToMove.charAt(0);
 
-      // Online mode validation
-      if (
-        effectiveMode === "online" &&
-        currentPlayerColor &&
-        currentPlayerColor !== currentPlayerTurn
-      ) {
-        notificationService.show("Not your turn", "warning", 1500);
-        abortPendingDrop();
-        return;
-      }
-      if (effectiveMode === "online" && pieceColor !== currentPlayerTurn) {
-        abortPendingDrop();
-        return;
-      }
+      // Game status check
       if (gameStatus !== "active") {
         if (effectiveMode === "online") {
           notificationService.show("Game has not started", "warning", 1500);
         }
+        abortPendingDrop();
+        return;
+      }
+
+      // Online mode - handle premove when not your turn
+      if (effectiveMode === "online" && currentPlayerColor) {
+        // Only allow moves/premoves with your own pieces
+        if (pieceColor !== currentPlayerColor) {
+          abortPendingDrop();
+          return;
+        }
+        
+        // If it's not your turn, set as premove instead of executing
+        if (currentPlayerColor !== currentPlayerTurn) {
+          dispatch(setPremove({ from, to, pieceCode: pieceToMove }));
+          notificationService.show("Premove set", "info", 1000);
+          abortPendingDrop();
+          return;
+        }
+      } else if (effectiveMode === "online" && pieceColor !== currentPlayerTurn) {
+        // Fallback for online without player color
         abortPendingDrop();
         return;
       }
@@ -157,3 +210,7 @@ export function useMoveExecution({
 
   return { executeMoveFrom, currentPlayerColor };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

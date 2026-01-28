@@ -115,10 +115,43 @@ export const PIECE_CONFIG = {
   ANIMATION: {
     // Enable smooth animations
     ENABLED: true,
-    // Animation duration in milliseconds
-    DURATION: 200,
-    // Easing function
-    EASING: "ease-in-out",
+    // Animation duration in milliseconds (synced with gameConfig.ANIMATION_DURATIONS.PIECE_MOVE)
+    DURATION: 250,
+    // Easing function (actual: Easing.inOut(Easing.cubic) in SkiaMoveAnimator)
+    EASING: "ease-in-out-cubic",
+    
+    // ============================================================
+    // PIECE ROTATION DURING ANIMATION (PER-COLOR)
+    // ============================================================
+    // Rotation offsets for each player color
+    // Offsets are absolute degrees (boardRotation is ignored).
+    // Use 0, 90, 180, -90, etc.
+    ROTATION: {
+      // Red player pieces
+      r: { OFFSET_DEGREES: 0 },
+      // Blue player pieces  
+      b: { OFFSET_DEGREES: 0 },
+      // Yellow player pieces
+      y: { OFFSET_DEGREES: 0 },
+      // Green player pieces
+      g: { OFFSET_DEGREES: 0 },
+    },
+  },
+
+  // ============================================================
+  // VIEWER POV ROTATION (PER-PLAYER)
+  // ============================================================
+  // When a viewer color is provided, all pieces use this config
+  // (based on the player's POV) instead of per-piece colors.
+  POV_ROTATION: {
+    // Red viewer
+    r: { OFFSET_DEGREES: 0 },
+    // Blue viewer
+    b: { OFFSET_DEGREES: 90 },
+    // Yellow viewer
+    y: { OFFSET_DEGREES: 180 },
+    // Green viewer
+    g: { OFFSET_DEGREES: -90 },
   },
 
   // Accessibility settings
@@ -143,6 +176,57 @@ export const PIECE_CONFIG = {
       luxury: "Luxury",
     },
   },
+};
+
+type RotationConfig = {
+  OFFSET_DEGREES: number;
+};
+
+const DEFAULT_ROTATION: RotationConfig = { OFFSET_DEGREES: 0 };
+
+const getRotationForColor = (
+  color: string,
+  config: Record<string, RotationConfig>
+) => {
+  "worklet";
+  const rotation = config[color] ?? DEFAULT_ROTATION;
+  return rotation.OFFSET_DEGREES;
+};
+
+const getRotationForViewer = (
+  pieceColor: string,
+  pieceConfig: Record<string, RotationConfig>,
+  viewerColor?: string | null
+) => {
+  "worklet";
+  if (viewerColor) {
+    return getRotationForColor(viewerColor, PIECE_CONFIG.POV_ROTATION);
+  }
+  return getRotationForColor(pieceColor, pieceConfig);
+};
+
+export const getStaticPieceRotation = (
+  color: string,
+  viewerColor?: string | null
+) => {
+  "worklet";
+  return getRotationForViewer(color, PIECE_CONFIG.ANIMATION.ROTATION, viewerColor);
+};
+
+export const getAnimationPieceRotation = (
+  color: string,
+  viewerColor?: string | null
+) => {
+  "worklet";
+  return getRotationForViewer(color, PIECE_CONFIG.ANIMATION.ROTATION, viewerColor);
+};
+
+export const getDragPieceRotation = (
+  color: string,
+  viewerColor?: string | null
+) => {
+  "worklet";
+  return getRotationForViewer(color, PIECE_CONFIG.ANIMATION.ROTATION, viewerColor);
 };
 
 // Helper function to get piece color
@@ -188,3 +272,7 @@ export const getPieceType = (piece: string): string => {
       return "pawn";
   }
 };
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

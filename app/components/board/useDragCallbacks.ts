@@ -104,3 +104,7 @@ export function useDragCallbacks({
 
   return { onCursorChange, onSnapKeyChange };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

@@ -8,11 +8,13 @@ import {
   SNAP_RING_RADIUS_RATIO,
   TAP_MOVE_TOLERANCE,
 } from "./boardConstants";
+import { getDragLiftOffset } from "./boardDragUtils";
 import type { DragSharedValues } from "./useDragSharedValues";
 
 interface UseBoardGesturesParams {
   boardSize: number;
   squareSize: number;
+  boardRotation: number;
   sharedValues: DragSharedValues;
   enableTapToMove: boolean;
   enableDragToMove: boolean;
@@ -27,9 +29,45 @@ interface UseBoardGesturesParams {
   cancelDrag: () => void;
 }
 
+/**
+ * Transform touch coordinates based on board rotation.
+ * The board view is rotated, so we need to counter-rotate touch coordinates
+ * to get the correct logical board position.
+ */
+function transformTouchCoords(
+  x: number,
+  y: number,
+  boardSize: number,
+  boardRotation: number
+): { x: number; y: number } {
+  "worklet";
+  // Normalize rotation to 0, 90, 180, 270
+  const rot = ((boardRotation % 360) + 360) % 360;
+  
+  switch (rot) {
+    case 0:
+      return { x, y };
+    case 90:
+    case -270:
+      // 90° clockwise: (x, y) -> (y, boardSize - x)
+      return { x: y, y: boardSize - x };
+    case 180:
+    case -180:
+      // 180°: (x, y) -> (boardSize - x, boardSize - y)
+      return { x: boardSize - x, y: boardSize - y };
+    case 270:
+    case -90:
+      // 270° clockwise (or -90°): (x, y) -> (boardSize - y, x)
+      return { x: boardSize - y, y: x };
+    default:
+      return { x, y };
+  }
+}
+
 export function useBoardGestures({
   boardSize,
   squareSize,
+  boardRotation,
   sharedValues,
   enableTapToMove,
   enableDragToMove,
@@ -47,6 +85,7 @@ export function useBoardGestures({
     dragX,
     dragY,
     dragScale,
+    dragOffsetX,
     dragOffsetY,
     dragSnapX,
     dragSnapY,
@@ -65,9 +104,9 @@ export function useBoardGestures({
   const applyDragVisuals = useCallback(
     (localX: number, localY: number) => {
       "worklet";
-      const pieceOffsetY = squareSize * DRAG_OFFSET_Y;
-      const pieceX = localX;
-      const pieceY = localY + pieceOffsetY;
+      const liftOffset = getDragLiftOffset(squareSize * DRAG_OFFSET_Y, boardRotation);
+      const pieceX = localX + liftOffset.x;
+      const pieceY = localY + liftOffset.y;
       const safeX = Math.max(0, Math.min(pieceX, boardSize));
       const safeY = Math.max(0, Math.min(pieceY, boardSize));
       const targetX = localX - squareSize / 2;
@@ -135,13 +174,16 @@ export function useBoardGestures({
 
       dragX.value = targetX;
       dragY.value = targetY;
-      dragOffsetY.value = squareSize * DRAG_OFFSET_Y;
+      dragOffsetX.value = liftOffset.x;
+      dragOffsetY.value = liftOffset.y;
     },
     [
       boardSize,
       squareSize,
+      boardRotation,
       dragX,
       dragY,
+      dragOffsetX,
       dragOffsetY,
       dragSnapActive,
       dragSnapTargets,
@@ -195,6 +237,7 @@ export function useBoardGestures({
             dragX.value = dragSnapX.value;
             dragY.value = dragSnapY.value;
             dragScale.value = 1;
+            dragOffsetX.value = 0;
             dragOffsetY.value = 0;
 
             const fromRow = dragStartPos.value?.row ?? 0;
@@ -222,9 +265,9 @@ export function useBoardGestures({
             return;
           }
 
-          const pieceOffsetY = squareSize * DRAG_OFFSET_Y;
-          const pieceX = event.x;
-          const pieceY = event.y + pieceOffsetY;
+          const liftOffset = getDragLiftOffset(squareSize * DRAG_OFFSET_Y, boardRotation);
+          const pieceX = event.x + liftOffset.x;
+          const pieceY = event.y + liftOffset.y;
           const safeX = Math.max(0, Math.min(pieceX, boardSize));
           const safeY = Math.max(0, Math.min(pieceY, boardSize));
           const snapThreshold = squareSize * SNAP_RING_RADIUS_RATIO;
@@ -262,6 +305,7 @@ export function useBoardGestures({
             dragX.value = bestX - squareSize / 2;
             dragY.value = bestY - squareSize / 2;
             dragScale.value = 1;
+            dragOffsetX.value = 0;
             dragOffsetY.value = 0;
 
             const fromRow = dragStartPos.value?.row ?? 0;
@@ -300,12 +344,14 @@ export function useBoardGestures({
       clearMask,
       boardSize,
       squareSize,
+      boardRotation,
       dragSnapTargets,
       validMoveMap,
       dragStartPos,
       dragX,
       dragY,
       dragScale,
+      dragOffsetX,
       dragOffsetY,
       dragSnapX,
       dragSnapY,
@@ -340,3 +386,7 @@ export function useBoardGestures({
 
   return { panGesture, tapGesture, boardGesture };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

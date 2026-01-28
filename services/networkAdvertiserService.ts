@@ -259,7 +259,7 @@ class NetworkAdvertiserService {
   private async registerMDNSServiceOnInterface(gameInfo: GameAdvertisement, iface: NetworkInterface): Promise<void> {
     try {
       console.log(`NetworkAdvertiser: Registering mDNS service on ${iface.name} (${iface.address})`);
-      console.log('NetworkAdvertiser: Service type: _quadchess._tcp.');
+      console.log('NetworkAdvertiser: Service type: _quadrachess._tcp.');
       console.log('NetworkAdvertiser: Service name:', gameInfo.gameName);
       console.log('NetworkAdvertiser: Port:', gameInfo.port);
       console.log('NetworkAdvertiser: Domain: local.');
@@ -285,7 +285,7 @@ class NetworkAdvertiserService {
       try {
         // Use the correct API format - individual parameters, not object
         this.zeroconf.publishService(
-          '_quadchess._tcp',  // type
+          '_quadrachess._tcp',  // type
           'tcp',              // protocol
           'local.',           // domain
           gameInfo.gameName,  // name

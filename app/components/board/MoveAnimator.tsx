@@ -11,6 +11,7 @@ import Animated, {
 import { ANIMATION_DURATIONS } from "../../../config/gameConfig";
 import Piece from "./Piece";
 import { AnimPlan, keyToRowCol } from "./chessgroundAnimations";
+import { getAnimationPieceRotation } from "./PieceConfig";
 
 type MovingPiece = {
   key: number;
@@ -32,14 +33,14 @@ interface MoveAnimatorProps {
   piecesMap: Map<number, string>;
   movePieceOverrides?: Map<number, string> | null;
   squareSize: number;
-  boardRotation: number;
+  viewerColor?: string | null;
   onComplete: () => void;
   animationRunning?: SharedValue<number>;
   onCompleteUI?: () => void;
 }
 
 const CAPTURE_RING_COLOR = "rgba(255, 255, 255, 0.4)";
-const moveEasing = Easing.out(Easing.exp);
+const moveEasing = Easing.inOut(Easing.cubic);
 
 const CaptureRing = React.memo(function CaptureRing({
   squareSize,
@@ -78,7 +79,7 @@ const MovingPieceView = React.memo(function MovingPieceView({
   vector,
   squareSize,
   progress,
-  boardRotation,
+  viewerColor = null,
 }: {
   piece: string;
   baseX: number;
@@ -86,7 +87,7 @@ const MovingPieceView = React.memo(function MovingPieceView({
   vector: [number, number];
   squareSize: number;
   progress: SharedValue<number>;
-  boardRotation: number;
+  viewerColor?: string | null;
 }) {
   const animatedStyle = useAnimatedStyle(() => ({
     position: "absolute",
@@ -96,11 +97,24 @@ const MovingPieceView = React.memo(function MovingPieceView({
     ],
   }));
 
+  const rotationDegrees = getAnimationPieceRotation(piece[0], viewerColor);
+  const liftStyle = useAnimatedStyle(() => {
+    const lift = Math.sin(Math.PI * progress.value);
+    return {
+      transform: [
+        { scale: 1 + lift * 0.04 },
+      ],
+    };
+  });
+
   return (
     <Animated.View style={animatedStyle}>
-      <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
-        <Piece piece={piece} size={squareSize} />
-      </Animated.View>
+      {/* Keep rotation on a non-animated View to update immediately */}
+      <View style={{ transform: [{ rotate: `${rotationDegrees}deg` }] }}>
+        <Animated.View style={liftStyle}>
+          <Piece piece={piece} size={squareSize} />
+        </Animated.View>
+      </View>
     </Animated.View>
   );
 });
@@ -111,14 +125,14 @@ const FadingPieceView = React.memo(function FadingPieceView({
   baseY,
   squareSize,
   progress,
-  boardRotation,
+  viewerColor = null,
 }: {
   piece: string;
   baseX: number;
   baseY: number;
   squareSize: number;
   progress: SharedValue<number>;
-  boardRotation: number;
+  viewerColor?: string | null;
 }) {
   const animatedStyle = useAnimatedStyle(() => ({
     position: "absolute",
@@ -128,9 +142,14 @@ const FadingPieceView = React.memo(function FadingPieceView({
 
   return (
     <Animated.View style={animatedStyle}>
-      <Animated.View style={{ transform: [{ rotate: `${-boardRotation}deg` }] }}>
+      {/* Keep rotation on a non-animated View to update immediately */}
+      <View
+        style={{
+          transform: [{ rotate: `${getAnimationPieceRotation(piece[0], viewerColor)}deg` }],
+        }}
+      >
         <Piece piece={piece} size={squareSize} />
-      </Animated.View>
+      </View>
     </Animated.View>
   );
 });
@@ -140,7 +159,7 @@ export default function MoveAnimator({
   piecesMap,
   movePieceOverrides,
   squareSize,
-  boardRotation,
+  viewerColor = null,
   onComplete,
   animationRunning,
   onCompleteUI,
@@ -249,7 +268,7 @@ export default function MoveAnimator({
           vector={pieceData.vector}
           squareSize={squareSize}
           progress={progress}
-          boardRotation={boardRotation}
+          viewerColor={viewerColor}
         />
       ))}
       {fadingPieces.map((pieceData) => (
@@ -260,7 +279,7 @@ export default function MoveAnimator({
           baseY={pieceData.baseY}
           squareSize={squareSize}
           progress={progress}
-          boardRotation={boardRotation}
+          viewerColor={viewerColor}
         />
       ))}
       {hasCaptureEffect &&

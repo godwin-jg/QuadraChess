@@ -45,3 +45,7 @@ export function useVisibilityMask(): VisibilityMaskReturn {
     clearMask,
   };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

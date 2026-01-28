@@ -1,4 +1,5 @@
 import { initializeApp, getApps, getApp } from "@react-native-firebase/app";
+import type { FirebaseApp } from "@react-native-firebase/app";
 
 // Firebase configuration
 const firebaseConfig = {
@@ -11,15 +12,21 @@ const firebaseConfig = {
   databaseURL: "https://dchess-97670-default-rtdb.firebaseio.com",
 };
 
+export const ensureFirebaseApp = (): FirebaseApp => {
+  if (getApps().length === 0) {
+    initializeApp(firebaseConfig);
+  }
+  return getApp() as FirebaseApp;
+};
+
 // Initialize Firebase if it hasn't been initialized already
 try {
-  if (getApps().length === 0) {
-    const app = initializeApp(firebaseConfig);
-    console.log("Firebase initialized:", app.name);
-  } else {
-    const app = getApp();
-    console.log("Firebase already initialized:", app.name);
-  }
+  const hadApps = getApps().length > 0;
+  const app = ensureFirebaseApp();
+  console.log(
+    hadApps ? "Firebase already initialized:" : "Firebase initialized:",
+    app.name
+  );
 } catch (error) {
   console.error("Firebase initialization failed:", error);
   // Continue with app initialization even if Firebase fails

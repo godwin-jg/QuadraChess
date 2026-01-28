@@ -223,7 +223,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <!-- - **Website**: [Quadrachess.com](https://Quadrachess.com)
 - **App Store**: [Download on App Store](https://apps.apple.com/app/Quadrachess) -->
-- **Google Play**: [Get it on Google Play](https://play.google.com/store/apps/details?id=com.chess4d)
+- **Google Play**: [Get it on Google Play](https://play.google.com/store/apps/details?id=com.quadrachess)
 
 ---
 

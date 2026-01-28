@@ -4,6 +4,7 @@ import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reani
 import { BoardTheme } from "./BoardThemeConfig";
 import Piece from "./Piece";
 import MiniPlayerCircle from "../ui/MiniPlayerCircle";
+import { getStaticPieceRotation } from "./PieceConfig";
 
 interface SquareProps {
   piece: string | null;
@@ -31,17 +32,13 @@ interface SquareProps {
     capturedPieces: string[];
     isCurrentTurn: boolean;
     isEliminated: boolean;
+    timeMs?: number;
   }>;
   boardRotation?: number;
+  viewerColor?: string | null;
   visibilityMask?: SharedValue<number[]>;
 }
 
-const ROTATION_CONFIGS: Record<number, { topLeft: { x: number; y: number }; topRight: { x: number; y: number }; bottomLeft: { x: number; y: number }; bottomRight: { x: number; y: number } }> = {
-  0: { topLeft: { x: -5, y: -10 }, topRight: { x: 3, y: -12 }, bottomLeft: { x: -5, y: 0 }, bottomRight: { x: 3, y: 0 } },
-  [-90]: { topLeft: { x: 5, y: 0 }, topRight: { x: 3, y: 8 }, bottomLeft: { x: -5, y: 0 }, bottomRight: { x: -5, y: 12 } },
-  [-180]: { topLeft: { x: 5, y: 0 }, topRight: { x: -3, y: 0 }, bottomLeft: { x: 8, y: -12 }, bottomRight: { x: -3, y: -9 } },
-  [-270]: { topLeft: { x: -3, y: 8 }, topRight: { x: -3, y: 3 }, bottomLeft: { x: 3, y: 8 }, bottomRight: { x: 3, y: 3 } },
-};
 
 const isCornerSquare = (row: number, col: number) =>
   (row < 3 && col < 3) ||
@@ -54,6 +51,29 @@ const isCornerCenter = (row: number, col: number) =>
   (row === 1 && col === 12) ||
   (row === 12 && col === 1) ||
   (row === 12 && col === 12);
+
+type CornerPosition = "TL" | "TR" | "BL" | "BR";
+
+const getCornerPosition = (row: number, col: number): CornerPosition | null => {
+  if (row === 1 && col === 1) return "TL";
+  if (row === 1 && col === 12) return "TR";
+  if (row === 12 && col === 1) return "BL";
+  if (row === 12 && col === 12) return "BR";
+  return null;
+};
+
+const normalizeRotation = (rotation: number) => {
+  const normalized = ((Math.round(rotation) % 360) + 360) % 360;
+  const snapped = (Math.round(normalized / 90) * 90) % 360;
+  return snapped;
+};
+
+const CORNER_ROTATION_MAP: Record<number, Record<CornerPosition, CornerPosition>> = {
+  0: { TL: "TL", TR: "TR", BR: "BR", BL: "BL" },
+  90: { TL: "TR", TR: "BR", BR: "BL", BL: "TL" },
+  180: { TL: "BR", TR: "BL", BR: "TL", BL: "TR" },
+  270: { TL: "BL", TR: "TL", BR: "TR", BL: "BR" },
+};
 
 const getCornerPlayer = (
   row: number,
@@ -68,14 +88,6 @@ const getCornerPlayer = (
   return null;
 };
 
-const getCornerOffset = (row: number, col: number, boardRotation: number) => {
-  const offsets = ROTATION_CONFIGS[boardRotation] || ROTATION_CONFIGS[0];
-  if (row === 1 && col === 1) return offsets.topLeft;
-  if (row === 1 && col === 12) return offsets.topRight;
-  if (row === 12 && col === 1) return offsets.bottomLeft;
-  if (row === 12 && col === 12) return offsets.bottomRight;
-  return { x: 0, y: 0 };
-};
 
 const CornerSquare = React.memo(function CornerSquare({
   row,
@@ -89,13 +101,20 @@ const CornerSquare = React.memo(function CornerSquare({
     return <View style={{ width: size, height: size, backgroundColor: "transparent" }} />;
   }
 
-  const cornerOffset = getCornerOffset(row, col, boardRotation);
-  const radians = (boardRotation * Math.PI) / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const translateX = cornerOffset.x * cos - cornerOffset.y * sin;
-  const translateY = cornerOffset.x * sin + cornerOffset.y * cos;
+  const corner = getCornerPosition(row, col);
+  const rotation = normalizeRotation(boardRotation);
+  const screenCorner = corner
+    ? CORNER_ROTATION_MAP[rotation]?.[corner] ?? corner
+    : null;
+  const verticalOffset =
+    screenCorner === "TL" || screenCorner === "TR"
+      ? -Math.round(size * 0.25)
+      : screenCorner === "BL" || screenCorner === "BR"
+        ? Math.round(size * 0.25)
+        : 0;
 
+  // Container is the size of a single square, but the avatar overflows
+  // The avatar counter-rotates to stay upright when the board rotates
   return (
     <View
       style={{
@@ -104,16 +123,22 @@ const CornerSquare = React.memo(function CornerSquare({
         backgroundColor: "transparent",
         justifyContent: "center",
         alignItems: "center",
-        alignSelf: "center",
         overflow: "visible",
       }}
     >
-      <Animated.View style={{ transform: [{ translateX }, { translateY }, { rotate: `${-boardRotation}deg` }] }}>
+      <Animated.View 
+        style={{ 
+          transform: [{ rotate: `${-boardRotation}deg` }, { translateY: verticalOffset }],
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
         <MiniPlayerCircle
           player={player}
           isCurrentTurn={player.isCurrentTurn}
           isEliminated={player.isEliminated}
           boardRotation={boardRotation}
+          timeMs={player.timeMs}
         />
       </Animated.View>
     </View>
@@ -137,6 +162,7 @@ const PlayableSquare = React.memo(function PlayableSquare({
   onHoverOut,
   boardTheme,
   boardRotation = 0,
+  viewerColor = null,
   visibilityMask,
 }: SquareProps) {
   const getCaptureBackgroundColor = (capturingColor: string) => {
@@ -187,9 +213,12 @@ const PlayableSquare = React.memo(function PlayableSquare({
       visibilityMask ? visibilityMask.value[currentIndex] === 1 : false;
     return {
       opacity: isHiddenByMask ? 0 : 1,
-      transform: [{ rotate: `${-boardRotation}deg` }],
     };
-  }, [boardRotation, row, col, visibilityMask]);
+  }, [row, col, visibilityMask]);
+
+  const rotationDegrees = piece
+    ? getStaticPieceRotation(piece[0], viewerColor)
+    : 0;
 
   const pressSlopX = Math.max(10, Math.round(size * 0.25));
   const allowInteraction = isInteractable && pressEnabled;
@@ -216,7 +245,10 @@ const PlayableSquare = React.memo(function PlayableSquare({
       >
         {piece && (
           <Animated.View style={[pieceStyle, { zIndex: 1 }]}>
-            <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} />
+            {/* Keep rotation on a non-animated View to update immediately */}
+            <View style={{ transform: [{ rotate: `${rotationDegrees}deg` }] }}>
+              <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} />
+            </View>
           </Animated.View>
         )}
       </View>

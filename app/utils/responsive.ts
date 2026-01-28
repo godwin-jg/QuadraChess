@@ -13,8 +13,12 @@ export const isTablet = W >= 600;
 export const isCompact = H < 700;
 
 // Layout helpers
-export const getHudHeight = () => Math.min(Math.max(Math.round(H * 0.15), 100), 180);
+export const getHudHeight = () => Math.min(Math.max(Math.round(H * 0.18), 110), 200);
 export const getBottomPadding = () => Math.min(Math.max(Math.round(H * 0.08), 60), 120);
 export const getBoardSize = () => isTablet 
   ? Math.min(W * 0.85, H * 0.55, 800) 
   : Math.min(W * 0.98, 600);
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

@@ -123,7 +123,7 @@ export default function GameOverModal({
     const scoreLine = `Scores: R ${scores.r} · B ${scores.b} · Y ${scores.y} · G ${scores.g}`;
     const captureLine = `Captures: R ${captureCounts.r} · B ${captureCounts.b} · Y ${captureCounts.y} · G ${captureCounts.g}`;
     const moveLine = `Moves: ${moveCount}`;
-    const message = `QuadChess Result\nWinner: ${winnerName}\n${scoreLine}\n${captureLine}\n${moveLine}`;
+    const message = `Quadrachess Result\nWinner: ${winnerName}\n${scoreLine}\n${captureLine}\n${moveLine}`;
     try {
       await Share.share({ message });
     } catch (error) {

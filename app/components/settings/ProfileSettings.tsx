@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -9,17 +9,34 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { hapticsService } from '@/services/hapticsService';
 import soundService from '@/services/soundService';
 import * as Haptics from 'expo-haptics';
 import { useSettings } from "../../../context/SettingsContext";
 import { getBoardTheme } from "../board/BoardThemeConfig";
 import Piece from "../board/Piece";
+import GridBackground from "../ui/GridBackground";
 import { generateRandomName } from "../../utils/nameGenerator";
+import type { BotDifficulty } from "../../../config/gameConfig";
 
 interface ProfileSettingsProps {
   onClose?: () => void;
 }
+
+const BOT_DIFFICULTY_OPTIONS: { key: BotDifficulty; label: string }[] = [
+  { key: "easy", label: "Easy" },
+  { key: "medium", label: "Medium" },
+  { key: "hard", label: "Hard" },
+  { key: "superHard", label: "Super Hard" },
+];
+
+const BOT_DIFFICULTY_DESCRIPTIONS: Record<BotDifficulty, string> = {
+  easy: "Easy: depth 1 — bots play independently",
+  medium: "Medium: depth 2 — bots play independently",
+  hard: "Hard: depth 3 — bots play independently",
+  superHard: "Super Hard: depth 3 — all bots play against you",
+};
 
 export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
   const router = useRouter();
@@ -40,6 +57,13 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
   } = useSettings();
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const developerTapStateRef = useRef({ count: 0, lastTapAt: 0 });
+  const developerTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const developerTapWindowMs = 1500;
+  const selectedBotDifficulty = (settings.game.botDifficulty || "easy") as BotDifficulty;
+  const botDifficultyDescription =
+    BOT_DIFFICULTY_DESCRIPTIONS[selectedBotDifficulty] ??
+    "Easy: depth 1 — bots play independently";
 
   const handleSaveSettings = async () => {
     try {
@@ -83,6 +107,33 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     );
   };
 
+  const handleDeveloperTitleTap = () => {
+    const now = Date.now();
+    const { count, lastTapAt } = developerTapStateRef.current;
+    const isContinuousTap = now - lastTapAt < developerTapWindowMs;
+    const nextCount = isContinuousTap ? count + 1 : 1;
+
+    developerTapStateRef.current = { count: nextCount, lastTapAt: now };
+
+    if (developerTapTimeoutRef.current) {
+      clearTimeout(developerTapTimeoutRef.current);
+    }
+
+    developerTapTimeoutRef.current = setTimeout(() => {
+      developerTapStateRef.current = { count: 0, lastTapAt: 0 };
+      developerTapTimeoutRef.current = null;
+    }, developerTapWindowMs);
+
+    if (nextCount >= 9) {
+      developerTapStateRef.current = { count: 0, lastTapAt: 0 };
+      if (developerTapTimeoutRef.current) {
+        clearTimeout(developerTapTimeoutRef.current);
+        developerTapTimeoutRef.current = null;
+      }
+      Alert.alert("Click OK if you’re gay");
+    }
+  };
+
   const renderBoardThemeOption = (theme: any) => {
     const boardTheme = getBoardTheme({
       ...settings,
@@ -93,8 +144,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={theme.key}
-        className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
-          isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
+        className={`flex-row items-center py-4 px-5 rounded-xl border min-w-[120px] flex-1 ${
+          isSelected ? 'bg-white/20 border-blue-400' : 'bg-white/10 border-white/10'
         }`}
         onPress={async () => {
           await hapticsService.selection();
@@ -145,8 +196,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={style.key}
-        className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
-          isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
+        className={`flex-row items-center py-4 px-5 rounded-xl border min-w-[120px] flex-1 ${
+          isSelected ? 'bg-white/20 border-blue-400' : 'bg-white/10 border-white/10'
         }`}
         onPress={async () => {
           await hapticsService.selection();
@@ -185,8 +236,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     return (
       <TouchableOpacity
         key={size.key}
-        className={`flex-row items-center py-4 px-5 bg-gray-900 rounded-xl border-2 min-w-[120px] flex-1 ${
-          isSelected ? 'bg-gray-800 border-white' : 'border-transparent'
+        className={`flex-row items-center py-4 px-5 rounded-xl border min-w-[120px] flex-1 ${
+          isSelected ? 'bg-white/20 border-blue-400' : 'bg-white/10 border-white/10'
         }`}
         onPress={() => updatePieces({ size: size.key })}
       >
@@ -204,50 +255,55 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
 
   if (isLoading) {
     return (
-      <View className="flex-1 justify-center items-center bg-black">
-        <Text className="text-base text-white">Loading settings...</Text>
-      </View>
+      <SafeAreaView style={{ flex: 1 }} className="bg-black">
+        <GridBackground />
+        <View className="flex-1 justify-center items-center" style={{ zIndex: 1 }}>
+          <Text className="text-base text-white">Loading settings...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View className="flex-1 bg-black">
-      {/* Header with Back Button */}
-      <View className="flex-row items-center justify-between px-4 pt-8 pb-4">
-        <TouchableOpacity
-          className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
-          onPress={async () => {
-            await hapticsService.selection();
-            if (onClose) {
-              onClose();
-            } else {
-              router.back();
-            }
-          }}
-        >
-          <Text className="text-xl text-white">←</Text>
-        </TouchableOpacity>
-        <Text className="text-xl font-bold text-white">Settings</Text>
-        <View className="w-10" />
-      </View>
+    <SafeAreaView style={{ flex: 1 }} className="bg-black">
+      <GridBackground />
+      <View className="flex-1" style={{ zIndex: 1 }}>
+        {/* Header with Back Button */}
+        <View className="flex-row items-center justify-between px-6 pt-4 pb-3">
+          <TouchableOpacity
+            className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
+            onPress={async () => {
+              await hapticsService.selection();
+              if (onClose) {
+                onClose();
+              } else {
+                router.back();
+              }
+            }}
+          >
+            <Text className="text-xl text-white">←</Text>
+          </TouchableOpacity>
+          <Text className="text-lg font-bold text-white tracking-wide">Settings</Text>
+          <View className="w-10" />
+        </View>
 
-      {/* Scrollable Content */}
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+        {/* Scrollable Content */}
+        <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         {/* Profile Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
           <Text className="text-xl font-bold text-white mb-4 tracking-wide">👤 Profile</Text>
           <View className="mb-2">
             <Text className="text-base font-semibold text-gray-300 mb-3">Player Name</Text>
-            <View className="flex-row items-center">
+            <View className="flex-row items-center bg-white/10 border border-white/20 rounded-xl px-3 py-1">
               <TextInput
-                className="flex-1 px-0 py-4 text-xl text-white bg-transparent font-medium"
+                className="flex-1 py-3 text-lg text-white font-medium"
                 value={settings.profile.name}
                 onChangeText={(text) => updateProfile({ name: text })}
                 placeholder="Enter your name or roll a dice"
-                placeholderTextColor="#6B7280"
+                placeholderTextColor="#94A3B8"
               />
               <TouchableOpacity
-                className="ml-3 px-4 py-2 bg-blue-600 rounded-lg"
+                className="ml-2 px-3 py-2 rounded-lg border border-blue-400/40 bg-blue-500/80"
                 onPress={async () => {
                   await hapticsService.selection();
                   const randomName = generateRandomName();
@@ -262,8 +318,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Board Theme Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
-          <Text className="text-xl font-bold text-white mb-4 tracking-wide">🎨 Board Theme</Text>
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">Board Theme</Text>
           <View className="flex-row flex-wrap gap-3">
             {[
               {
@@ -286,8 +342,8 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Piece Style Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
-          <Text className="text-xl font-bold text-white mb-4 tracking-wide">♟️ Piece Style</Text>
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">Piece Style</Text>
           <View className="flex-row flex-wrap gap-3">
             {[
               { key: "solid", name: "Solid" },
@@ -300,10 +356,10 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Piece Size Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
-          <Text className="text-xl font-bold text-white mb-4 tracking-wide">📏 Size</Text>
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">Size</Text>
           {/* Segmented Control */}
-          <View className="flex-row bg-gray-800 rounded-lg p-1 mt-4">
+          <View className="flex-row bg-white/10 border border-white/20 rounded-xl p-1 mt-4">
             {[
               { key: "small", name: "S" },
               { key: "medium", name: "M" },
@@ -315,12 +371,12 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                   await hapticsService.selection();
                   updatePieces({ size: size.key as "small" | "medium" | "large" });
                 }}
-                className={`flex-1 items-center py-2 rounded-md ${
-                  settings.pieces.size === size.key ? 'bg-blue-600' : 'bg-transparent'
+                className={`flex-1 items-center py-2 rounded-lg border ${
+                  settings.pieces.size === size.key ? 'bg-blue-500/30 border-blue-400' : 'border-transparent'
                 }`}
               >
                 <Text className={`font-bold ${
-                  settings.pieces.size === size.key ? 'text-white' : 'text-gray-400'
+                  settings.pieces.size === size.key ? 'text-white' : 'text-gray-300'
                 }`}>
                   {size.name}
                 </Text>
@@ -330,25 +386,24 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Game Settings Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
           <Text className="text-xl font-bold text-white mb-4 tracking-wide">🎮 Game Settings</Text>
           <View>
-            <View className="py-4 border-b border-gray-700">
+            <View className="py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300">AI Difficulty</Text>
               <Text className="text-sm text-gray-400 mt-1">
                 Applies to single player bots
               </Text>
-              <View className="flex-row bg-gray-800 rounded-lg p-1 mt-4">
-                {[
-                  { key: "easy", label: "Easy" },
-                  { key: "medium", label: "Medium" },
-                  { key: "hard", label: "Hard" },
-                ].map((level) => (
+              <View className="flex-row bg-white/10 border border-white/20 rounded-xl p-1 mt-4">
+                {BOT_DIFFICULTY_OPTIONS.map((level) => (
                   <TouchableOpacity
                     key={level.key}
                     onPress={async () => {
                       await hapticsService.selection();
-                      updateGame({ botDifficulty: level.key as "easy" | "medium" | "hard" });
+                      updateGame({
+                        botDifficulty: level.key,
+                        botTeamMode: level.key === "superHard",
+                      });
                       try {
                         await saveSettings();
                         console.log("✅ Bot difficulty auto-saved successfully");
@@ -356,17 +411,17 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                         console.error("❌ Failed to auto-save bot difficulty:", error);
                       }
                     }}
-                    className={`flex-1 items-center py-2 rounded-md ${
+                    className={`flex-1 items-center py-2 rounded-lg border ${
                       settings.game.botDifficulty === level.key
-                        ? "bg-blue-600"
-                        : "bg-transparent"
+                        ? "bg-blue-500/30 border-blue-400"
+                        : "border-transparent"
                     }`}
                   >
                     <Text
                       className={`font-bold ${
                         settings.game.botDifficulty === level.key
                           ? "text-white"
-                          : "text-gray-400"
+                          : "text-gray-300"
                       }`}
                     >
                       {level.label}
@@ -374,31 +429,11 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                   </TouchableOpacity>
                 ))}
               </View>
+              <Text className="text-xs text-gray-500 mt-2">
+                {botDifficultyDescription}
+              </Text>
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
-              <View className="flex-1">
-                <Text className="text-lg font-semibold text-gray-300">Bot Team Mode</Text>
-                <Text className="text-sm text-gray-400 mt-1">
-                  All bots cooperate against you
-                </Text>
-              </View>
-              <Switch
-                value={settings.game.botTeamMode}
-                onValueChange={async (value) => {
-                  await hapticsService.selection();
-                  updateGame({ botTeamMode: value });
-                  try {
-                    await saveSettings();
-                    console.log("✅ Bot team mode auto-saved successfully");
-                  } catch (error) {
-                    console.error("❌ Failed to auto-save bot team mode:", error);
-                  }
-                }}
-                trackColor={{ false: "#374151", true: "#ef4444" }}
-                thumbColor={settings.game.botTeamMode ? "#fca5a5" : "#9ca3af"}
-              />
-            </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Sound Effects</Text>
               <Switch
                 value={settings.game.soundEnabled}
@@ -451,7 +486,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 thumbColor={settings.game.soundEnabled ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Animations</Text>
               <Switch
                 value={settings.game.animationsEnabled}
@@ -474,7 +509,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 }
               />
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Tap to Move</Text>
               <Switch
                 value={settings.game.tapToMoveEnabled}
@@ -492,7 +527,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 thumbColor={settings.game.tapToMoveEnabled ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Drag to Move</Text>
               <Switch
                 value={settings.game.dragToMoveEnabled}
@@ -510,7 +545,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 thumbColor={settings.game.dragToMoveEnabled ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Move Hints</Text>
               <Switch
                 value={settings.game.showMoveHints}
@@ -522,7 +557,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 thumbColor={settings.game.showMoveHints ? "#FFFFFF" : "#9CA3AF"}
               />
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Haptic Feedback</Text>
               <Switch
                 value={settings.game.hapticsEnabled}
@@ -546,10 +581,10 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Accessibility Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
           <Text className="text-xl font-bold text-white mb-4 tracking-wide">♿ Accessibility</Text>
           <View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">High Contrast</Text>
               <Switch
                 value={settings.accessibility.highContrast}
@@ -563,7 +598,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                 }
               />
             </View>
-            <View className="flex-row justify-between items-center py-4 border-b border-gray-700">
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Large Text</Text>
               <Switch
                 value={settings.accessibility.largeText}
@@ -595,10 +630,15 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
         </View>
 
         {/* Developer Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
-          <Text className="text-xl font-bold text-white mb-4 tracking-wide">
-            🛠️ Developer (will be removed in release)
-          </Text>
+        <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
+          <TouchableOpacity
+            onPress={handleDeveloperTitleTap}
+            activeOpacity={0.8}
+          >
+            <Text className="text-xl font-bold text-white mb-4 tracking-wide">
+              🛠️ Developer
+            </Text>
+          </TouchableOpacity>
           <View>
             <View className="flex-row justify-between items-center py-4">
               <View className="flex-1">
@@ -622,12 +662,12 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
 
 
         {/* Reset Section */}
-        <View className="bg-gray-900 rounded-xl p-4 mx-4 my-2">
+        <View className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mx-4 my-2">
           <TouchableOpacity
             className="py-2"
             onPress={() => setShowResetConfirm(true)}
           >
-            <Text className="text-base font-medium text-red-500 text-center">
+            <Text className="text-base font-medium text-red-300 text-center">
               Reset all settings to default
             </Text>
           </TouchableOpacity>
@@ -635,15 +675,18 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
 
         {/* Add padding to prevent content from hiding behind the footer */}
         <View className="h-24" />
-      </ScrollView>
+        </ScrollView>
 
-      {/* Auto-save status */}
-      <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/60 border-t border-gray-600">
-        <Text className="text-sm text-gray-400 text-center font-medium">
-          {isSaving ? "Saving changes..." : "Changes are saved automatically"}
-        </Text>
+        {/* Auto-save status */}
+        {isSaving && (
+          <View className="absolute bottom-0 left-0 right-0 p-4 bg-black/70 border-t border-white/10">
+            <Text className="text-sm text-gray-300 text-center font-medium">
+              Saving changes...
+            </Text>
+          </View>
+        )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

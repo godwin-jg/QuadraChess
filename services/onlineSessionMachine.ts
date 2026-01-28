@@ -8,19 +8,16 @@ import {
   setIsConnected,
 } from "../state/gameSlice";
 import { onlineDataClient, OnlineGameSnapshot } from "./onlineDataClient";
-import { getBotConfig } from "../config/gameConfig";
-import { computeBestMove } from "./botService";
 import {
   createEmptyPieceBitboards,
   deserializeBitboardPieces,
   rebuildBitboardStateFromPieces,
 } from "../src/logic/bitboardSerialization";
-import { bitboardToArray, bitScanForward } from "../src/logic/bitboardUtils";
-import { getPinnedPiecesMask, isKingInCheck } from "../src/logic/bitboardLogic";
+import { bitboardToArray } from "../src/logic/bitboardUtils";
+import { getPinnedPiecesMask } from "../src/logic/bitboardLogic";
 import { updateAllCheckStatus } from "../state/gameHelpers";
 import { syncBitboardsFromArray } from "../state/gameSlice";
 import { buildMoveKey, consumeSkipNextMoveAnimation, sendGameFlowEvent } from "./gameFlowService";
-import { getValidMovesBB } from "../src/logic/moveGeneration";
 
 type OnlineSessionState =
   | "idle"
@@ -133,6 +130,8 @@ class OnlineSessionMachine {
       .filter((player) => player.isBot)
       .map((player) => player.color);
 
+    console.log(`[OnlineSession] Players from snapshot:`, playersArray.map(p => ({ color: p.color, isBot: p.isBot })));
+    console.log(`[OnlineSession] Extracted botPlayers:`, botPlayers);
     store.dispatch(setBotPlayers(botPlayers));
 
     const user = onlineDataClient.getCurrentUser();
@@ -146,7 +145,7 @@ class OnlineSessionMachine {
     const baseMs = rawState.timeControl?.baseMs ?? 5 * 60 * 1000;
     const teamAssignments = rawState.teamAssignments ?? { r: "A", y: "A", b: "B", g: "B" };
     const snapshotState: GameState = {
-      ...(game.gameState as GameState),
+      ...(game.gameState as unknown as GameState),
       boardState,
       bitboardState,
       eliminatedPieceBitboards,
@@ -167,6 +166,7 @@ class OnlineSessionMachine {
       teamMode: !!rawState.teamMode,
       teamAssignments,
       winningTeam: rawState.winningTeam ?? null,
+      premove: null, // Premove is local-only state, not synced from network
     };
     snapshotState.checkStatus = updateAllCheckStatus(snapshotState);
     snapshotState.bitboardState.pinnedMask = getPinnedPiecesMask(
@@ -209,98 +209,18 @@ class OnlineSessionMachine {
     this.maybeHandleBotTurn(store.getState().game);
   }
 
-  private findFallbackMove(state: GameState, botColor: string): MoveRequest | null {
-    const pieces = state.bitboardState?.pieces;
-    if (!pieces) return null;
-
-    for (const [pieceCode, bb] of Object.entries(pieces)) {
-      if (!pieceCode.startsWith(botColor) || !bb || bb === 0n) continue;
-      let temp = bb as bigint;
-      while (temp > 0n) {
-        const sqIdx = Number(bitScanForward(temp));
-        temp &= temp - 1n;
-        const from = { row: Math.floor(sqIdx / 14), col: sqIdx % 14 };
-        const validMoves = getValidMovesBB(pieceCode, from, state);
-        if (validMoves === 0n) continue;
-        const toIdx = Number(bitScanForward(validMoves));
-        return {
-          from,
-          to: { row: Math.floor(toIdx / 14), col: toIdx % 14 },
-          pieceCode,
-          playerColor: botColor,
-        };
-      }
-    }
-
-    return null;
-  }
-
   private async maybeHandleBotTurn(state: GameState) {
     if (this.botMoveInFlight) return;
     if (!state.botPlayers.includes(state.currentPlayerTurn)) return;
     if (!state.isHost) return;
     if (state.promotionState.isAwaiting) return;
     if (state.gameStatus !== "active") return;
+    if (!this.currentGameId) return;
 
-    this.botMoveInFlight = true;
-    try {
-      const botConfig = getBotConfig(
-        state.gameMode === "online" ? "single" : state.gameMode,
-        state.botDifficulty
-      );
-      const delayMs = botConfig.MOVE_DELAY ?? 0;
-      if (delayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-
-      const latest = store.getState().game;
-      if (
-        latest.gameStatus !== "active" ||
-        latest.promotionState.isAwaiting ||
-        latest.currentPlayerTurn !== state.currentPlayerTurn ||
-        !latest.botPlayers.includes(latest.currentPlayerTurn) ||
-        latest.eliminatedPlayers.includes(latest.currentPlayerTurn)
-      ) {
-        return;
-      }
-
-      const cancellationToken = { cancelled: false };
-      const chosenMove = computeBestMove(
-        latest,
-        latest.currentPlayerTurn,
-        cancellationToken
-      );
-      if (cancellationToken.cancelled) return;
-
-      const movePayload = chosenMove
-        ? {
-            from: chosenMove.from,
-            to: { row: chosenMove.to.row, col: chosenMove.to.col },
-            pieceCode: chosenMove.pieceCode!,
-            playerColor: latest.currentPlayerTurn,
-            isEnPassant: chosenMove.isEnPassant,
-            enPassantTarget: chosenMove.enPassantTarget,
-          }
-        : this.findFallbackMove(latest, latest.currentPlayerTurn);
-
-      if (movePayload) {
-        await this.makeMove(movePayload);
-        return;
-      }
-
-      const status = isKingInCheck(latest.currentPlayerTurn, latest)
-        ? "checkmate"
-        : "stalemate";
-      if (this.currentGameId) {
-        await onlineDataClient.resolveNoLegalMoves(
-          this.currentGameId,
-          latest.currentPlayerTurn,
-          status
-        );
-      }
-    } finally {
-      this.botMoveInFlight = false;
-    }
+    // Delegate to the centralized online bot service
+    // This service handles timeouts, retries, and atomic transactions
+    const { onlineBotService } = require("./onlineBotService");
+    onlineBotService.scheduleBotMove(this.currentGameId, state.currentPlayerTurn, state);
   }
 
   async connectToGame(gameId: string): Promise<void> {

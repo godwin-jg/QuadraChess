@@ -1,8 +1,13 @@
-import auth from "@react-native-firebase/auth";
-import database from "@react-native-firebase/database";
+import { getAuth, signInAnonymously } from "@react-native-firebase/auth";
+import { getDatabase, onValue, ref } from "@react-native-firebase/database";
 import type { Player } from "../app/services/networkService";
 import type { EnPassantTarget, SerializedGameState } from "../state/types";
+import { ensureFirebaseApp } from "./firebaseInit";
 import realtimeDatabaseService from "./realtimeDatabaseService";
+
+ensureFirebaseApp();
+const authInstance = getAuth();
+const db = getDatabase();
 
 export interface OnlineGameSnapshot {
   id: string;
@@ -49,24 +54,24 @@ export interface OnlinePromotionRequest {
 
 class OnlineDataClient {
   async signInAnonymously(): Promise<string> {
-    const currentUser = auth().currentUser;
+    const currentUser = authInstance.currentUser;
     if (currentUser) {
       return currentUser.uid;
     }
-    const userCredential = await auth().signInAnonymously();
+    const userCredential = await signInAnonymously(authInstance);
     return userCredential.user.uid;
   }
 
   getCurrentUser() {
-    return auth().currentUser;
+    return authInstance.currentUser;
   }
 
   subscribeToGame(
     gameId: string,
     onUpdate: (game: OnlineGameSnapshot | null) => void
   ): () => void {
-    const gameRef = database().ref(`games/${gameId}`);
-    const listener = gameRef.on("value", (snapshot) => {
+    const gameRef = ref(db, `games/${gameId}`);
+    const unsubscribe = onValue(gameRef, (snapshot) => {
       if (!snapshot.exists()) {
         onUpdate(null);
         return;
@@ -75,9 +80,7 @@ class OnlineDataClient {
       onUpdate(gameData);
     });
 
-    return () => {
-      gameRef.off("value", listener);
-    };
+    return () => unsubscribe();
   }
 
   async submitMove(gameId: string, moveData: Omit<OnlineMoveRequest, "playerId" | "timestamp">): Promise<void> {

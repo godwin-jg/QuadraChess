@@ -15,12 +15,14 @@ import {
 } from "./bitboardUtils";
 
 export const isKingInCheck = (kingColor: string, state: GameState): boolean => {
-  const kingBit = state.bitboardState.pieces[`${kingColor}K`] ?? 0n;
+  const kingBit = state.bitboardState?.pieces?.[`${kingColor}K`] ?? 0n;
+  const eliminatedPlayers = state.eliminatedPlayers ?? [];
+  const attackMaps = state.bitboardState?.attackMaps;
 
   let enemyAttacks = 0n;
   for (const player of turnOrder) {
-    if (player !== kingColor && !state.eliminatedPlayers.includes(player)) {
-      enemyAttacks |= state.bitboardState.attackMaps[player];
+    if (player !== kingColor && !eliminatedPlayers.includes(player)) {
+      enemyAttacks |= attackMaps?.[player] ?? 0n;
     }
   }
 

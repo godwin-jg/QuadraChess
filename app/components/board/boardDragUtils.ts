@@ -28,3 +28,29 @@ export const getBoardPointFromLocal = (
     col < 14;
   return { x: localX, y: localY, rawX: localX, rawY: localY, row, col, inside };
 };
+
+export const getDragLiftOffset = (lift: number, boardRotation: number) => {
+  "worklet";
+  const rot = ((Math.round(boardRotation) % 360) + 360) % 360;
+  switch (rot) {
+    case 0:
+      return { x: 0, y: lift };
+    case 90:
+      return { x: lift, y: 0 };
+    case 180:
+      return { x: 0, y: -lift };
+    case 270:
+      return { x: -lift, y: 0 };
+    default: {
+      const radians = (rot * Math.PI) / 180;
+      return {
+        x: -lift * Math.sin(radians),
+        y: lift * Math.cos(radians),
+      };
+    }
+  }
+};
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

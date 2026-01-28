@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { View, Text, Image } from "react-native";
+import { View, Image, Text, StyleSheet } from "react-native";
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -18,13 +18,23 @@ interface MiniPlayerCircleProps {
   isCurrentTurn: boolean;
   isEliminated?: boolean;
   boardRotation?: number;
+  timeMs?: number;
 }
+
+const formatTime = (ms?: number) => {
+  if (typeof ms !== "number") return "--:--";
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
 
 export default function MiniPlayerCircle({
   player,
   isCurrentTurn,
   isEliminated = false,
   boardRotation = 0,
+  timeMs,
 }: MiniPlayerCircleProps) {
   // Animation values
   const scale = useSharedValue(1);
@@ -132,61 +142,31 @@ export default function MiniPlayerCircle({
     }
   };
 
-  // Calculate adjusted padding based on board rotation
-  const getAdjustedPadding = () => {
-    const basePadding = 4;
-    switch (boardRotation) {
-      case 0: // Red player - no rotation, use original padding
-        return {
-          paddingTop: basePadding,
-          paddingBottom: basePadding,
-          paddingLeft: basePadding,
-          paddingRight: basePadding,
-        };
-      case 90: // Blue player - 90° clockwise
-        return {
-          paddingTop: basePadding + 2, // Slightly more top padding
-          paddingBottom: basePadding - 1, // Slightly less bottom padding
-          paddingLeft: basePadding + 2, // Slightly more left padding
-          paddingRight: basePadding - 1, // Slightly less right padding
-        };
-      case 180: // Yellow player - 180°
-        return {
-          paddingTop: basePadding + 2, // Slightly more top padding
-          paddingBottom: basePadding - 1, // Slightly less bottom padding
-          paddingLeft: basePadding,
-          paddingRight: basePadding,
-        };
-      case 270: // Green player - 270° clockwise
-        return {
-          paddingTop: basePadding + 2, // Slightly more top padding
-          paddingBottom: basePadding - 1, // Slightly less bottom padding
-          paddingLeft: basePadding - 1, // Slightly less left padding
-          paddingRight: basePadding + 2, // Slightly more right padding
-        };
-      default:
-        return {
-          paddingTop: basePadding,
-          paddingBottom: basePadding,
-          paddingLeft: basePadding,
-          paddingRight: basePadding,
-        };
-    }
-  };
-
-  const adjustedPadding = getAdjustedPadding();
+  // Smaller avatar to fit timer below within 3x3 corner region (~78px total height)
+  const AVATAR_SIZE = 56;
+  const TIMER_HEIGHT = 18;
+  const GAP = 4;
 
   return (
-    <View style={{ overflow: 'visible', zIndex: 10 }}>
-      <Animated.View style={[eliminationAnimatedStyle, adjustedPadding]} className="items-center justify-center">
-        {/* Avatar Container - Glass Effect */}
-        <Animated.View
+    <Animated.View 
+      style={[
+        eliminationAnimatedStyle, 
+        { 
+          width: 70,
+          height: AVATAR_SIZE + GAP + TIMER_HEIGHT,
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+        }
+      ]}
+    >
+      {/* Avatar Container - Glass Effect */}
+      <Animated.View
         style={[
           avatarAnimatedStyle,
           {
-            width: 72,
-            height: 72,
-            borderRadius: 36,
+            width: AVATAR_SIZE,
+            height: AVATAR_SIZE,
+            borderRadius: AVATAR_SIZE / 2,
             backgroundColor: isEliminated 
               ? 'rgba(107, 114, 128, 0.3)' // Gray glass for eliminated
               : isCurrentTurn
@@ -201,13 +181,12 @@ export default function MiniPlayerCircle({
               ? 'rgba(255, 255, 255, 0.8)'
               : 'rgba(255, 255, 255, 0.4)',
             shadowColor: '#000',
-            shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 0.3,
-            shadowRadius: 16,
-            elevation: 12,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.25,
+            shadowRadius: 8,
+            elevation: 8,
             justifyContent: 'center',
             alignItems: 'center',
-            padding: 8,
           }
         ]}
       >
@@ -216,11 +195,10 @@ export default function MiniPlayerCircle({
         <Image
           source={getPlayerCrestSource(player.color)}
           style={{
-            width: 40,
-            height: 40,
+            width: 32,
+            height: 32,
             opacity: isEliminated ? 0.5 : 1,
             zIndex: 1,
-            padding: 8,
           }}
           resizeMode="contain"
         />
@@ -260,8 +238,66 @@ export default function MiniPlayerCircle({
             />
           </Animated.View>
         )}
+
       </Animated.View>
-      </Animated.View>
-    </View>
+
+      {/* Timer Badge - Below avatar */}
+      {timeMs !== undefined && (
+        <View 
+          style={[
+            styles.timerBadge,
+            {
+              backgroundColor: isEliminated 
+                ? 'rgba(107, 114, 128, 0.9)' 
+                : isCurrentTurn
+                  ? 'rgba(0, 0, 0, 0.85)'
+                  : 'rgba(0, 0, 0, 0.7)',
+              borderColor: isEliminated
+                ? 'rgba(107, 114, 128, 0.6)'
+                : isCurrentTurn
+                  ? (player.color === 'r' ? 'rgba(239, 68, 68, 0.8)' : 
+                     player.color === 'b' ? 'rgba(59, 130, 246, 0.8)' : 
+                     player.color === 'y' ? 'rgba(124, 58, 237, 0.8)' : 'rgba(16, 185, 129, 0.8)')
+                  : 'rgba(255, 255, 255, 0.3)',
+            }
+          ]}
+        >
+          <Text 
+            style={[
+              styles.timerText,
+              {
+                color: isEliminated 
+                  ? '#9CA3AF' 
+                  : (timeMs <= 10000 && !isEliminated)
+                    ? '#F87171' // Red when low time
+                    : isCurrentTurn 
+                      ? '#FFFFFF' 
+                      : '#D1D5DB',
+              }
+            ]}
+          >
+            {formatTime(timeMs)}
+          </Text>
+        </View>
+      )}
+    </Animated.View>
   );
 }
+
+const styles = StyleSheet.create({
+  timerBadge: {
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    minWidth: 54,
+    alignItems: 'center',
+  },
+  timerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.5,
+  },
+});

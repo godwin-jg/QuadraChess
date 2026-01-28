@@ -1,5 +1,6 @@
 // Import the name generator
 import { generateRandomName } from "../app/utils/nameGenerator";
+import type { BotDifficulty } from "../config/gameConfig";
 
 // Try to import AsyncStorage, fallback to in-memory storage
 let AsyncStorage: {
@@ -48,7 +49,7 @@ export interface UserSettings {
     animationsEnabled: boolean;
     showMoveHints: boolean;
     hapticsEnabled: boolean;
-    botDifficulty: "easy" | "medium" | "hard";
+    botDifficulty: BotDifficulty;
     botTeamMode: boolean; // If true, all bots cooperate against human
     tapToMoveEnabled: boolean;
     dragToMoveEnabled: boolean;
@@ -101,6 +102,15 @@ const DEFAULT_SETTINGS: UserSettings = {
   },
 };
 
+const normalizeGameSettings = (
+  game: UserSettings["game"]
+): UserSettings["game"] => {
+  if (game.botDifficulty === "superHard" || game.botTeamMode) {
+    return { ...game, botDifficulty: "superHard", botTeamMode: true };
+  }
+  return { ...game, botTeamMode: false };
+};
+
 const SETTINGS_KEY = "user_settings";
 
 export class SettingsService {
@@ -119,13 +129,14 @@ export class SettingsService {
       const stored = await AsyncStorage.getItem(SETTINGS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+        const mergedGame = { ...DEFAULT_SETTINGS.game, ...(parsed.game || {}) };
         this.settings = {
           ...DEFAULT_SETTINGS,
           ...parsed,
           profile: { ...DEFAULT_SETTINGS.profile, ...(parsed.profile || {}) },
           board: { ...DEFAULT_SETTINGS.board, ...(parsed.board || {}) },
           pieces: { ...DEFAULT_SETTINGS.pieces, ...(parsed.pieces || {}) },
-          game: { ...DEFAULT_SETTINGS.game, ...(parsed.game || {}) },
+          game: normalizeGameSettings(mergedGame),
           accessibility: {
             ...DEFAULT_SETTINGS.accessibility,
             ...(parsed.accessibility || {}),
@@ -146,6 +157,7 @@ export class SettingsService {
   async saveSettings(settings: Partial<UserSettings>): Promise<void> {
     try {
       this.settings = { ...this.settings, ...settings };
+      this.settings.game = normalizeGameSettings(this.settings.game);
       await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(this.settings));
     } catch (error) {
       console.error("Failed to save settings:", error);

@@ -141,7 +141,7 @@ export function useBoardAnimationOrchestration({
     () => buildPiecesMap(displayBoardState),
     [displayBoardState]
   );
-  
+
   // Ref to access currentPiecesMap without triggering useMemo re-runs
   const currentPiecesMapRef = useRef(currentPiecesMap);
   currentPiecesMapRef.current = currentPiecesMap;
@@ -263,7 +263,7 @@ export function useBoardAnimationOrchestration({
     const indices: number[] = [];
     pendingPlan.anims.forEach((_, key) => indices.push(key));
     pendingPlan.fadings.forEach((_, key) => indices.push(key));
-    
+
     if (indices.length > 0) {
       // Freeze the pieces map for this animation plan to avoid flicker
       planPiecesRef.current = currentPiecesMap;
@@ -327,3 +327,7 @@ export function useBoardAnimationOrchestration({
     skipNextAnimationRef,
   };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

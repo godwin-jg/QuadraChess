@@ -24,6 +24,7 @@ export const baseInitialState: GameState = {
   bitboardState: initialBitboardState,
   eliminatedPieceBitboards: createEmptyPieceBitboards(initialBitboardState.pieces),
   currentPlayerTurn: "r", // Red starts first
+  premove: null, // Premove for online play
   gameStatus: "active",
   version: 0,
   selectedPiece: null,

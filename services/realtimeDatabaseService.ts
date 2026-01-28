@@ -1,5 +1,22 @@
-import database from "@react-native-firebase/database";
-import auth from "@react-native-firebase/auth";
+import { getAuth, onAuthStateChanged, signInAnonymously } from "@react-native-firebase/auth";
+import {
+  equalTo,
+  get,
+  getDatabase,
+  increment,
+  limitToFirst,
+  onChildAdded,
+  onValue,
+  orderByChild,
+  push,
+  query,
+  ref,
+  runTransaction,
+  serverTimestamp,
+  set,
+  update,
+} from "@react-native-firebase/database";
+import { ensureFirebaseApp } from "./firebaseInit";
 import { GameState, SerializedGameState, turnOrder } from "../state/types";
 import { Player } from "../app/services/networkService";
 import { BOT_CONFIG, GAME_BONUSES, PIECE_VALUES } from "../config/gameConfig";
@@ -26,6 +43,10 @@ import {
 import { hasAnyLegalMoves } from "../src/logic/gameLogic";
 import { getValidMovesBB } from "../src/logic/moveGeneration";
 import { syncBitboardsFromArray } from "../state/gameSlice";
+
+ensureFirebaseApp();
+const authInstance = getAuth();
+const db = getDatabase();
 
 const DEFAULT_TIME_CONTROL = { baseMs: 5 * 60 * 1000, incrementMs: 0 };
 const CLOCK_COLORS = ["r", "b", "y", "g"] as const;
@@ -127,10 +148,11 @@ class RealtimeDatabaseService {
       pieces = fallbackBitboards.pieces;
 
       if (gameId) {
-        const backfillRef = database().ref(
+        const backfillRef = ref(
+          db,
           `games/${gameId}/gameState/bitboardState/pieces`
         );
-        backfillRef.set(serializeBitboardPieces(pieces)).catch((error) => {
+        set(backfillRef, serializeBitboardPieces(pieces)).catch((error) => {
           console.warn("Failed to backfill bitboard pieces:", error);
         });
       }
@@ -1154,7 +1176,7 @@ class RealtimeDatabaseService {
 
     try {
       
-      const currentUser = auth().currentUser;
+      const currentUser = authInstance.currentUser;
       if (currentUser) {
         this.currentUser = currentUser;
         this.setupLightweightAuthListener();
@@ -1164,7 +1186,7 @@ class RealtimeDatabaseService {
       
       // Sign in anonymously
       const userCredential = await withTimeout(
-        auth().signInAnonymously(),
+        signInAnonymously(authInstance),
         10000,
         "Authentication"
       );
@@ -1192,7 +1214,7 @@ class RealtimeDatabaseService {
     if (this.authListenerSetup) return;
     this.authListenerSetup = true;
 
-    auth().onAuthStateChanged((user) => {
+    onAuthStateChanged(authInstance, (user) => {
       if (user) {
         this.currentUser = user;
       } else {
@@ -1226,7 +1248,7 @@ class RealtimeDatabaseService {
   }
 
   getCurrentUser() {
-    return this.currentUser || auth().currentUser;
+    return this.currentUser || authInstance.currentUser;
   }
 
   // Check authentication status
@@ -1240,8 +1262,8 @@ class RealtimeDatabaseService {
       
       // Test a simple read operation with better error handling
       try {
-        const testRef = database().ref("games");
-        const snapshot = await testRef.limitToFirst(1).once("value");
+        const testRef = ref(db, "games");
+        const snapshot = await get(query(testRef, limitToFirst(1)));
         
         if (snapshot.exists()) {
           return true;
@@ -1374,7 +1396,7 @@ class RealtimeDatabaseService {
       players: { [user.uid]: hostPlayer },
       gameState: newGameState,
       status: "waiting", // CRITICAL: This must be "waiting" for games to show in lobby
-      createdAt: database.ServerValue.TIMESTAMP,
+      createdAt: serverTimestamp(),
       maxPlayers: 4,
       currentPlayerTurn: "r",
       winner: null,
@@ -1386,11 +1408,12 @@ class RealtimeDatabaseService {
     // Creating game with data
 
     // Push the new game to the database
-    const gameRef = await database().ref("games").push(gameData);
+    const gameRef = push(ref(db, "games"));
+    await set(gameRef, gameData);
     const gameId = gameRef.key as string;
 
     // Update the game with its ID
-    await gameRef.update({ id: gameId });
+    await update(gameRef, { id: gameId });
 
     // Add bots if requested
     if (botColors.length > 0) {
@@ -1399,7 +1422,7 @@ class RealtimeDatabaseService {
 
     
     // Verify the game was created correctly
-    const verifySnapshot = await gameRef.once("value");
+    const verifySnapshot = await get(gameRef);
     if (verifySnapshot.exists()) {
       const createdGame = verifySnapshot.val();
     } else {
@@ -1410,37 +1433,44 @@ class RealtimeDatabaseService {
   }
 
   async joinGame(gameId: string, playerName: string): Promise<void> {
-    try {
-      const user = this.getCurrentUser();
-      if (!user) throw new Error("User not authenticated");
+    const user = this.getCurrentUser();
+    if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}`);
-      const gameSnapshot = await gameRef.once("value");
-
-      if (!gameSnapshot.exists()) {
-        throw new Error("Game not found");
+    const gameRef = ref(db, `games/${gameId}`);
+    
+    // Use transaction to atomically check and join game
+    const result = await runTransaction(gameRef, (gameData) => {
+      if (gameData === null) {
+        // Game doesn't exist - abort transaction
+        return undefined;
       }
 
-      const gameData = gameSnapshot.val() as RealtimeGame;
-
-      if (Object.keys(gameData.players).length >= gameData.maxPlayers) {
-        throw new Error("Game is full");
+      // Check if game is full (4 players max including bots)
+      const playerCount = Object.keys(gameData.players || {}).length;
+      if (playerCount >= (gameData.maxPlayers || 4)) {
+        // Game is full - abort transaction by returning undefined
+        return undefined;
       }
 
+      // Check if game is still in waiting status
       if (gameData.status !== "waiting") {
-        throw new Error("Game is not available for joining");
+        return undefined;
       }
 
       // Check if player is already in the game
-      if (gameData.players[user.uid]) {
-        return; // Player already in game
+      if (gameData.players && gameData.players[user.uid]) {
+        return gameData; // Player already in game, no changes needed
       }
 
-      // Assign color based on order of joining
+      // Assign color based on order of joining (first available color)
       const colors = ["r", "b", "y", "g"];
-      const usedColors = Object.values(gameData.players).map((p) => p.color);
-      const availableColor =
-        colors.find((color) => !usedColors.includes(color)) || "g";
+      const usedColors = Object.values(gameData.players || {}).map((p: any) => p.color);
+      const availableColor = colors.find((color) => !usedColors.includes(color));
+      
+      if (!availableColor) {
+        // No available colors - game is effectively full
+        return undefined;
+      }
 
       const newPlayer: Player = {
         id: user.uid,
@@ -1448,16 +1478,40 @@ class RealtimeDatabaseService {
         color: availableColor,
         isHost: false,
         isOnline: true,
+        lastSeen: Date.now(),
       };
 
-      await gameRef.update({
-        [`players/${user.uid}`]: newPlayer,
-        lastActivity: Date.now(),
-        "gameState/version": database.ServerValue.increment(1),
-      });
-    } catch (error) {
-      console.error("Error joining game:", error);
-      throw error;
+      // Initialize players object if it doesn't exist
+      if (!gameData.players) {
+        gameData.players = {};
+      }
+      
+      gameData.players[user.uid] = newPlayer;
+      gameData.lastActivity = Date.now();
+      gameData.gameState.version = (gameData.gameState.version || 0) + 1;
+
+      return gameData;
+    });
+
+    // Check transaction result
+    if (!result.committed) {
+      // Transaction was aborted - need to determine why
+      const snapshot = await get(gameRef);
+      if (!snapshot.exists()) {
+        throw new Error("Game not found");
+      }
+      
+      const gameData = snapshot.val();
+      const playerCount = Object.keys(gameData.players || {}).length;
+      
+      if (playerCount >= (gameData.maxPlayers || 4)) {
+        throw new Error("Game is full");
+      }
+      if (gameData.status !== "waiting") {
+        throw new Error("Game is not available for joining");
+      }
+      
+      throw new Error("Failed to join game. Please try again.");
     }
   }
 
@@ -1499,7 +1553,7 @@ class RealtimeDatabaseService {
 
     // ✅ CRITICAL FIX: Check if game exists before attempting to leave
     try {
-      const gameSnapshot = await database().ref(`games/${gameId}`).once('value');
+      const gameSnapshot = await get(ref(db, `games/${gameId}`));
       if (!gameSnapshot.exists()) {
         console.log(`Game ${gameId} does not exist - player already left or game was deleted`);
         return; // Game doesn't exist, consider this success
@@ -1509,7 +1563,7 @@ class RealtimeDatabaseService {
       // Continue with leave attempt anyway
     }
 
-    const gameRef = database().ref(`games/${gameId}`);
+    const gameRef = ref(db, `games/${gameId}`);
     
     // Add retry logic with exponential backoff and max retries
     let retryCount = 0;
@@ -1518,7 +1572,7 @@ class RealtimeDatabaseService {
     
     while (retryCount < maxRetries) {
       try {
-        const result = await gameRef.transaction((gameData) => {
+        const result = await runTransaction(gameRef, (gameData) => {
           if (gameData === null) {
             console.warn(`Game ${gameId} not found`);
             return null;
@@ -1599,8 +1653,8 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}`);
-      const gameSnapshot = await gameRef.once("value");
+      const gameRef = ref(db, `games/${gameId}`);
+      const gameSnapshot = await get(gameRef);
 
       if (!gameSnapshot.exists()) {
         throw new Error("Game not found");
@@ -1616,10 +1670,16 @@ class RealtimeDatabaseService {
         throw new Error("Need exactly 4 players to start");
       }
 
-      await gameRef.update({
+      // Get the host's assigned color to start the game with their turn
+      const hostPlayer = gameData.players[user.uid];
+      const startingColor = hostPlayer?.color || "r";
+
+      await update(gameRef, {
         status: "playing",
+        currentPlayerTurn: startingColor,
         "gameState/gameStatus": "active",
-        "gameState/version": database.ServerValue.increment(1),
+        "gameState/currentPlayerTurn": startingColor,
+        "gameState/version": increment(1),
         "gameState/timeControl": {
           baseMs: DEFAULT_TIME_CONTROL.baseMs,
           incrementMs: DEFAULT_TIME_CONTROL.incrementMs,
@@ -1644,9 +1704,9 @@ class RealtimeDatabaseService {
     gameId: string,
     onUpdate: (game: RealtimeGame | null) => void
   ): () => void {
-    const gameRef = database().ref(`games/${gameId}`);
+    const gameRef = ref(db, `games/${gameId}`);
 
-    const listener = gameRef.on("value", (snapshot) => {
+    const unsubscribe = onValue(gameRef, (snapshot) => {
       if (snapshot.exists()) {
         const gameData = { id: gameId, ...snapshot.val() } as RealtimeGame;
 
@@ -1680,20 +1740,19 @@ class RealtimeDatabaseService {
       }
     });
 
-    return () => {
-      gameRef.off("value", listener);
-    };
+    return () => unsubscribe();
   }
 
   subscribeToAvailableGames(
     onUpdate: (games: RealtimeGame[]) => void
   ): () => void {
-    const gamesRef = database()
-      .ref("games")
-      .orderByChild("status")
-      .equalTo("waiting");
+    const gamesRef = query(
+      ref(db, "games"),
+      orderByChild("status"),
+      equalTo("waiting")
+    );
 
-    const listener = gamesRef.on("value", (snapshot) => {
+    const unsubscribe = onValue(gamesRef, (snapshot) => {
       const games: RealtimeGame[] = [];
       if (snapshot && snapshot.exists()) {
         // ✅ CRITICAL FIX: Replace problematic forEach with Object.entries for better reliability
@@ -1720,9 +1779,7 @@ class RealtimeDatabaseService {
       onUpdate(games);
     });
 
-    return () => {
-      gamesRef.off("value", listener);
-    };
+    return () => unsubscribe();
   }
 
   // Make a promotion move in online game
@@ -1734,7 +1791,7 @@ class RealtimeDatabaseService {
       playerColor: string;
     }
   ): Promise<void> {
-    const gameRef = database().ref(`games/${gameId}`);
+    const gameRef = ref(db, `games/${gameId}`);
     const user = this.getCurrentUser();
     
     if (!user) {
@@ -1743,15 +1800,47 @@ class RealtimeDatabaseService {
 
 
     try {
-      const result = await gameRef.transaction((gameData) => {
+      const result = await runTransaction(gameRef, (gameData) => {
         if (gameData === null) {
           console.warn(`Promotion failed: Game ${gameId} not found`);
           return null;
         }
 
-        // Validate player turn
-        if (gameData.gameState.currentPlayerTurn !== promotionData.playerColor) {
-          console.warn(`Promotion validation failed: player=${promotionData.playerColor}, currentTurn=${gameData.gameState.currentPlayerTurn}`);
+        const gameState = gameData.gameState as GameState;
+        gameState.promotionState = gameState.promotionState || {
+          isAwaiting: false,
+          position: null,
+          color: null,
+        };
+        gameState.eliminatedPlayers = gameState.eliminatedPlayers || [];
+        gameState.enPassantTargets = gameState.enPassantTargets || [];
+
+        const awaitingPromotion = !!gameState.promotionState.isAwaiting;
+        const promotionColor = gameState.promotionState.color;
+
+        if (awaitingPromotion) {
+          if (promotionColor !== promotionData.playerColor) {
+            console.warn(
+              `Promotion validation failed: expected=${promotionColor}, received=${promotionData.playerColor}`
+            );
+            return gameData;
+          }
+          if (gameState.promotionState.position) {
+            const expected = gameState.promotionState.position;
+            if (
+              expected.row !== promotionData.position.row ||
+              expected.col !== promotionData.position.col
+            ) {
+              console.warn(
+                `Promotion position mismatch: expected=(${expected.row},${expected.col}), received=(${promotionData.position.row},${promotionData.position.col})`
+              );
+              return gameData;
+            }
+          }
+        } else if (gameState.currentPlayerTurn !== promotionData.playerColor) {
+          console.warn(
+            `Promotion validation failed: player=${promotionData.playerColor}, currentTurn=${gameState.currentPlayerTurn}`
+          );
           return gameData;
         }
 
@@ -1762,7 +1851,6 @@ class RealtimeDatabaseService {
           return gameData;
         }
 
-        const gameState = gameData.gameState as GameState;
         let pieces = deserializeBitboardPieces(gameState.bitboardState?.pieces);
         if (
           (!gameState.bitboardState || !gameState.bitboardState.pieces) &&
@@ -1844,6 +1932,31 @@ class RealtimeDatabaseService {
       });
 
       if (!result.committed) {
+        const snapshotValue = result.snapshot?.val?.();
+        const snapshotState = snapshotValue?.gameState as GameState | undefined;
+        const promotionResolved = (() => {
+          if (!snapshotState) return false;
+          if (!snapshotState.promotionState?.isAwaiting) {
+            return true;
+          }
+          if (!snapshotState.bitboardState?.pieces) {
+            return false;
+          }
+          const snapshotPieces = deserializeBitboardPieces(
+            snapshotState.bitboardState.pieces
+          );
+          const pieceAt = getPieceAtFromBitboard(
+            snapshotPieces,
+            promotionData.position.row,
+            promotionData.position.col
+          );
+          return pieceAt !== `${promotionData.playerColor}P`;
+        })();
+
+        if (promotionResolved) {
+          return;
+        }
+
         console.error("Promotion transaction failed:", result);
         throw new Error(`Promotion transaction failed: Transaction not committed`);
       }
@@ -1871,8 +1984,8 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}`);
-      const result = await gameRef.transaction((gameData) => {
+      const gameRef = ref(db, `games/${gameId}`);
+      const result = await runTransaction(gameRef, (gameData) => {
         if (gameData === null) {
           console.warn(`Game ${gameId} not found`);
           return null;
@@ -1925,8 +2038,8 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}`);
-      const result = await gameRef.transaction((gameData) => {
+      const gameRef = ref(db, `games/${gameId}`);
+      const result = await runTransaction(gameRef, (gameData) => {
         if (gameData === null) {
           console.warn(`Game ${gameId} not found`);
           return null;
@@ -1984,8 +2097,8 @@ class RealtimeDatabaseService {
 
   async timeoutPlayer(gameId: string, playerColor: string): Promise<void> {
     try {
-      const gameRef = database().ref(`games/${gameId}`);
-      const result = await gameRef.transaction((gameData) => {
+      const gameRef = ref(db, `games/${gameId}`);
+      const result = await runTransaction(gameRef, (gameData) => {
         if (gameData === null) {
           console.warn(`Game ${gameId} not found`);
           return null;
@@ -2031,7 +2144,7 @@ class RealtimeDatabaseService {
     if (!user) throw new Error("User not authenticated");
 
 
-    const gameRef = database().ref(`games/${gameId}`);
+    const gameRef = ref(db, `games/${gameId}`);
     
     // Add retry logic with exponential backoff and max retries
     let retryCount = 0;
@@ -2040,7 +2153,7 @@ class RealtimeDatabaseService {
     
     while (retryCount < maxRetries) {
       try {
-        const result = await gameRef.transaction((gameData) => {
+        const result = await runTransaction(gameRef, (gameData) => {
           if (gameData === null) {
             console.warn(`Game ${gameId} not found`);
             return null;
@@ -2233,9 +2346,12 @@ class RealtimeDatabaseService {
     onMove: (move: RealtimeMove) => void
   ): () => void {
     
-    const movesRef = database().ref(`moves/${gameId}`).orderByChild("timestamp");
+    const movesRef = query(
+      ref(db, `moves/${gameId}`),
+      orderByChild("timestamp")
+    );
     
-    const listener = movesRef.on("child_added", (snapshot) => {
+    const unsubscribe = onChildAdded(movesRef, (snapshot) => {
       const moveData = snapshot.val();
       if (moveData && !moveData.isOptimistic) {
         // Only process non-optimistic moves (server-confirmed)
@@ -2251,9 +2367,7 @@ class RealtimeDatabaseService {
       }
     });
 
-    return () => {
-      movesRef.off("child_added", listener);
-    };
+    return () => unsubscribe();
   }
 
   // Player presence management
@@ -2262,8 +2376,8 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}/players/${user.uid}`);
-      await gameRef.update({
+      const gameRef = ref(db, `games/${gameId}/players/${user.uid}`);
+      await update(gameRef, {
         isOnline,
         lastSeen: Date.now(),
       });
@@ -2283,8 +2397,8 @@ class RealtimeDatabaseService {
     this.keepAliveInterval = setInterval(async () => {
       try {
         // Perform a lightweight operation to keep connection alive
-        const testRef = database().ref(".info/connected");
-        await testRef.once("value");
+        const testRef = ref(db, ".info/connected");
+        await get(testRef);
       } catch (error) {
         console.warn("Keep-alive: Connection check failed:", error);
       }
@@ -2349,10 +2463,10 @@ class RealtimeDatabaseService {
 
   // Create a rematch game with the same players and bots
   async createRematchGame(currentGameId: string): Promise<string> {
-    const currentGameRef = database().ref(`games/${currentGameId}`);
+    const currentGameRef = ref(db, `games/${currentGameId}`);
     
     try {
-      const snapshot = await currentGameRef.once("value");
+      const snapshot = await get(currentGameRef);
       if (!snapshot.exists()) {
         throw new Error("Current game not found");
       }
@@ -2361,9 +2475,9 @@ class RealtimeDatabaseService {
       const players = Object.values(currentGame.players || {});
       
       // Create new game with same host
-      const newGameId = database().ref().push().key;
+      const newGameRef = push(ref(db, "games"));
+      const newGameId = newGameRef.key;
       if (!newGameId) throw new Error("Failed to generate game ID");
-      const newGameRef = database().ref(`games/${newGameId}`);
       
       const { initialBoardState } = require("../state/boardState");
       const initialBitboards = syncBitboardsFromArray(initialBoardState);
@@ -2464,7 +2578,7 @@ class RealtimeDatabaseService {
       newGameData.players = playersToAdd;
       
       // Create the new game
-      await newGameRef.set(newGameData);
+      await set(newGameRef, newGameData);
       
       return newGameId;
       
@@ -2476,10 +2590,10 @@ class RealtimeDatabaseService {
 
   // Clear justEliminated flag from server
   async clearJustEliminated(gameId: string): Promise<void> {
-    const gameRef = database().ref(`games/${gameId}`);
+    const gameRef = ref(db, `games/${gameId}`);
     
     try {
-      await gameRef.transaction((gameData) => {
+      await runTransaction(gameRef, (gameData) => {
         if (gameData === null) {
           console.warn(`RealtimeDatabaseService: Game ${gameId} not found when clearing justEliminated`);
           return null;
@@ -2501,8 +2615,8 @@ class RealtimeDatabaseService {
   // Add bots to a game with specific colors
   private async addBotsToGame(gameId: string, botColors: string[]): Promise<void> {
     try {
-      const gameRef = database().ref(`games/${gameId}`);
-      const snapshot = await gameRef.once("value");
+      const gameRef = ref(db, `games/${gameId}`);
+      const snapshot = await get(gameRef);
       
       if (!snapshot.exists()) {
         throw new Error("Game not found");
@@ -2534,7 +2648,7 @@ class RealtimeDatabaseService {
         };
       }
 
-      await gameRef.update(botUpdates);
+      await update(gameRef, botUpdates);
     } catch (error) {
       console.error("Error adding bots to game:", error);
       throw error;
@@ -2544,8 +2658,10 @@ class RealtimeDatabaseService {
   // Update bot configuration for a game (host only)
   async updateBotConfiguration(gameId: string, botColors: string[]): Promise<void> {
     try {
-      const gameRef = database().ref(`games/${gameId}`);
-      const snapshot = await gameRef.once("value");
+      console.log(`[BotConfig] updateBotConfiguration called with colors:`, botColors);
+      
+      const gameRef = ref(db, `games/${gameId}`);
+      const snapshot = await get(gameRef);
       
       if (!snapshot.exists()) {
         throw new Error("Game not found");
@@ -2553,18 +2669,88 @@ class RealtimeDatabaseService {
 
       const gameData = snapshot.val();
       const currentPlayers = gameData.players || {};
+      const allColors = ["r", "b", "y", "g"];
+      
+      console.log(`[BotConfig] Current players:`, Object.entries(currentPlayers).map(([id, p]: [string, any]) => ({
+        id: id.slice(0, 10),
+        color: p.color,
+        isBot: p.isBot,
+      })));
+      
+      // Separate human players from bots
+      const humanPlayers: { [id: string]: any } = {};
+      const existingBots: { [id: string]: any } = {};
+      
+      Object.entries(currentPlayers).forEach(([playerId, player]: [string, any]) => {
+        if (player.isBot) {
+          existingBots[playerId] = player;
+        } else {
+          humanPlayers[playerId] = player;
+        }
+      });
+      
+      const humanCount = Object.keys(humanPlayers).length;
+      const requestedBotCount = botColors.length;
+      
+      // Ensure we don't exceed 4 total players - silently return if would exceed
+      if (humanCount + requestedBotCount > 4) {
+        console.log(`[BotConfig] Cannot add ${requestedBotCount} bots with ${humanCount} human players. Maximum is 4 total. Ignoring request.`);
+        return;
+      }
+      
+      // Get colors used by humans
+      const humanColors = Object.values(humanPlayers).map((p: any) => p.color);
+      
+      // Check if any requested bot color conflicts with a human player
+      const conflictingColors = botColors.filter(color => humanColors.includes(color));
+      
+      const updates: any = {};
+      
+      if (conflictingColors.length > 0) {
+        console.log(`[BotConfig] Conflict detected: humans on colors ${conflictingColors.join(', ')}`);
+        
+        // Find available colors (not used by humans and not requested for bots)
+        const availableColors = allColors.filter(
+          color => !humanColors.includes(color) && !botColors.includes(color)
+        );
+        
+        // Reassign conflicting humans to available colors
+        for (const conflictColor of conflictingColors) {
+          if (availableColors.length === 0) {
+            throw new Error(`Cannot add bot to color ${conflictColor}: no available colors for human player`);
+          }
+          
+          // Find the human player on this color
+          const humanEntry = Object.entries(humanPlayers).find(
+            ([_, p]: [string, any]) => p.color === conflictColor
+          );
+          
+          if (humanEntry) {
+            const [humanId, humanPlayer] = humanEntry;
+            const newColor = availableColors.shift()!;
+            
+            console.log(`[BotConfig] Reassigning human ${humanId.slice(0, 10)} from ${conflictColor} to ${newColor}`);
+            
+            // Update human player's color
+            updates[`players/${humanId}/color`] = newColor;
+            
+            // Update our tracking
+            humanColors.splice(humanColors.indexOf(conflictColor), 1);
+            humanColors.push(newColor);
+          }
+        }
+      }
       
       // Remove existing bots
-      const updates: any = {};
-      Object.keys(currentPlayers).forEach(playerId => {
-        if (currentPlayers[playerId].isBot) {
-          updates[`players/${playerId}`] = null; // Remove bot
-        }
+      Object.keys(existingBots).forEach(playerId => {
+        console.log(`[BotConfig] Removing bot: ${playerId} (color: ${existingBots[playerId].color})`);
+        updates[`players/${playerId}`] = null;
       });
 
       // Add new bots for specified colors
       for (const botColor of botColors) {
         const botId = `bot_${botColor}_${Date.now()}`;
+        console.log(`[BotConfig] Adding bot: ${botId} for color: ${botColor}`);
         updates[`players/${botId}`] = {
           id: botId,
           name: `Bot ${botColor.toUpperCase()}`,
@@ -2576,9 +2762,11 @@ class RealtimeDatabaseService {
         };
       }
 
-      updates["gameState/version"] = database.ServerValue.increment(1);
+      console.log(`[BotConfig] Updates to apply:`, Object.keys(updates));
+      updates["gameState/version"] = increment(1);
       updates.lastActivity = Date.now();
-      await gameRef.update(updates);
+      await update(gameRef, updates);
+      console.log(`[BotConfig] Update complete`);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       throw error;
@@ -2594,8 +2782,8 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      const gameRef = database().ref(`games/${gameId}`);
-      const snapshot = await gameRef.once("value");
+      const gameRef = ref(db, `games/${gameId}`);
+      const snapshot = await get(gameRef);
 
       if (!snapshot.exists()) {
         throw new Error("Game not found");
@@ -2612,11 +2800,11 @@ class RealtimeDatabaseService {
 
       const normalizedAssignments = normalizeTeamAssignments(teamAssignments);
 
-      await gameRef.update({
+      await update(gameRef, {
         "gameState/teamMode": teamMode,
         "gameState/teamAssignments": normalizedAssignments,
         "gameState/winningTeam": null,
-        "gameState/version": database.ServerValue.increment(1),
+        "gameState/version": increment(1),
         lastActivity: Date.now(),
       });
     } catch (error) {
@@ -2643,8 +2831,8 @@ class RealtimeDatabaseService {
     try {
       
       // Quick connection test - just check if we can access the database
-      const gamesRef = database().ref("games");
-      const snapshot = await gamesRef.limitToFirst(1).once("value");
+      const gamesRef = ref(db, "games");
+      const snapshot = await get(query(gamesRef, limitToFirst(1)));
       
       return true;
     } catch (error) {
@@ -2656,8 +2844,8 @@ class RealtimeDatabaseService {
   // Enhanced cleanup for corrupted games with comprehensive detection
   async cleanupCorruptedGames(): Promise<number> {
     try {
-      const gamesRef = database().ref("games");
-      const snapshot = await gamesRef.once("value");
+      const gamesRef = ref(db, "games");
+      const snapshot = await get(gamesRef);
       
       if (!snapshot.exists()) {
         return 0;
@@ -2778,7 +2966,7 @@ class RealtimeDatabaseService {
           updates[gameId] = null;
         });
         
-        await gamesRef.update(updates);
+        await update(gamesRef, updates);
         return corruptedGames.length;
       } else {
         return 0;

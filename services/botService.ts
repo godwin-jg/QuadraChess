@@ -577,14 +577,14 @@ const getBotEvaluation = (
   movedPieceTarget?: { row: number; col: number }
 ): number => {
   const scores = evaluateBoard(gameState);
-  
+
   // Team Mode: All bots cooperate against human players
   const isTeamMode = gameState.botTeamMode;
   const botPlayers = gameState.botPlayers || [];
   const humanPlayers = TURN_ORDER.filter((c) => !botPlayers.includes(c) && !gameState.eliminatedPlayers.includes(c));
-  
+
   let evaluation: number;
-  
+
   if (isTeamMode && botPlayers.includes(botColor)) {
     // Bot in team mode: maximize bot team score, minimize human score
     const botTeamScore = botPlayers
@@ -657,28 +657,45 @@ const buildEnPassantMask = (targets: EnPassantTarget[]): bigint => {
   return mask;
 };
 
-// ✅ BITBOARD ONLY: Simplified - just ensure occupancy is consistent (self-healing)
+// ✅ BITBOARD ONLY: Ensure occupancy, attack maps, and checks are consistent
 const syncStateForSearch = (state: GameState): GameState => {
-  // Rebuild occupancy from piece bitboards to ensure consistency
-  let occupancy = 0n;
-  Object.values(state.bitboardState.pieces).forEach((bb) => {
-    occupancy |= bb;
-  });
-  
-  // Check if occupancy needs healing
-  if (occupancy === state.bitboardState.occupancy && occupancy === state.bitboardState.allPieces) {
-    return state; // Already consistent
-  }
+  const pieces = state.bitboardState.pieces;
 
-  // Self-heal occupancy mismatch
+  // Rebuild occupancy + color bitboards from pieces
+  let occupancy = 0n;
+  const colorBits = { r: 0n, b: 0n, y: 0n, g: 0n };
+  Object.entries(pieces).forEach(([code, bb]) => {
+    if (bb === 0n) return;
+    occupancy |= bb;
+    const color = code[0] as keyof typeof colorBits;
+    if (colorBits[color] !== undefined) {
+      colorBits[color] |= bb;
+    }
+  });
+
+  // Rebuild en passant mask from targets
   const enPassantMask = buildEnPassantMask(state.enPassantTargets || []);
+
+  // Rebuild attack maps from pieces/occupancy (critical for correct check detection)
+  const nextAttackMaps = {
+    r: state.eliminatedPlayers.includes("r") ? 0n : generateAttackMap("r", pieces, occupancy),
+    b: state.eliminatedPlayers.includes("b") ? 0n : generateAttackMap("b", pieces, occupancy),
+    y: state.eliminatedPlayers.includes("y") ? 0n : generateAttackMap("y", pieces, occupancy),
+    g: state.eliminatedPlayers.includes("g") ? 0n : generateAttackMap("g", pieces, occupancy),
+  };
+
   const nextState: GameState = {
     ...state,
     bitboardState: {
       ...state.bitboardState,
       allPieces: occupancy,
-      occupancy: occupancy,
+      occupancy,
       enPassantTarget: enPassantMask,
+      r: colorBits.r,
+      b: colorBits.b,
+      y: colorBits.y,
+      g: colorBits.g,
+      attackMaps: nextAttackMaps,
     },
   };
   const nextCheckStatus = updateAllCheckStatus(nextState);
@@ -805,7 +822,7 @@ const see = (
   // Iterate exchanges
   for (let iter = 0; iter < 32; iter++) {
     depth++;
-    
+
     // Find the least valuable attacker for the opponent
     const defenders = TURN_ORDER.filter(
       (c) => c !== sideToMove && !state.eliminatedPlayers.includes(c)
@@ -1037,7 +1054,7 @@ const givesCheckAfterMove = (state: GameState, move: MoveOption): boolean => {
     const capturedIdx = capturedPos.row * 14 + capturedPos.col;
     const capturedMask = squareBit(capturedIdx);
     // Use move.capturedPieceCode (set by generators) or fast O(1) lookup
-    const capturedPiece = move.capturedPieceCode ?? 
+    const capturedPiece = move.capturedPieceCode ??
       getPieceCodeAt(nextPieces, capturedMask);  // O(24) fallback for rare cases
     if (capturedPiece) {
       nextPieces[capturedPiece] ^= capturedMask;
@@ -1331,8 +1348,8 @@ const getCapturesOnly = (
           if (isCapture) {
             const enPassantTarget = moveInfo.isEnPassant
               ? gameState.enPassantTargets.find(
-                  (t) => t.position.row === moveInfo.row && t.position.col === moveInfo.col
-                ) || null
+                (t) => t.position.row === moveInfo.row && t.position.col === moveInfo.col
+              ) || null
               : null;
             const capturedPieceCode = !moveInfo.isEnPassant ? boardTarget : null;
 
@@ -1360,7 +1377,7 @@ const getCapturesOnly = (
     const victimB = PIECE_VALUES[(b.capturedPieceCode?.[1] || "P") as keyof typeof PIECE_VALUES] || 0;
     const attackerA = PIECE_VALUES[(a.pieceCode?.[1] || "P") as keyof typeof PIECE_VALUES] || 0;
     const attackerB = PIECE_VALUES[(b.pieceCode?.[1] || "P") as keyof typeof PIECE_VALUES] || 0;
-    
+
     // MVV-LVA score: prioritize high victim, penalize high attacker
     const scoreA = victimA * 10 - attackerA;
     const scoreB = victimB * 10 - attackerB;
@@ -1389,20 +1406,22 @@ const getAllLegalMoves = (
     gameState.bitboardState.attackMaps[playerColor as "r" | "b" | "y" | "g"];
   // Build O(1) lookup table once at start
   const pieceLookup = buildPieceLookup(pieces);
-  
+
   // ✅ FIX: Track if we were cancelled - return partial results instead of empty
   let wasCancelled = false;
-  
+
   // ✅ SANITY CHECK: Verify current turn matches playerColor
   if (gameState.currentPlayerTurn !== playerColor) {
     console.error(`[BOT BUG] getAllLegalMoves called for ${playerColor} but currentTurn is ${gameState.currentPlayerTurn}`);
     // Return empty - this is a bug, don't generate wrong moves
     recordTime("getAllLegalMoves", fnStart);
-      return [];
-    }
-    
+    return [];
+  }
+
   for (const [pieceCode, bb] of Object.entries(pieces)) {
     if (!pieceCode.startsWith(playerColor)) continue;
+    // Debug: Skip if piece type has no pieces
+    if (bb === 0n) continue;
     let temp = bb;
 
     while (temp > 0n) {
@@ -1437,10 +1456,10 @@ const getAllLegalMoves = (
             (boardTarget != null && boardTarget[0] !== playerColor);
           const enPassantTarget = moveInfo.isEnPassant
             ? gameState.enPassantTargets.find(
-                (target) =>
-                  target.position.row === moveInfo.row &&
-                  target.position.col === moveInfo.col
-              ) || null
+              (target) =>
+                target.position.row === moveInfo.row &&
+                target.position.col === moveInfo.col
+            ) || null
             : null;
           const capturedPieceCode =
             isCapture && !moveInfo.isEnPassant ? boardTarget : null;
@@ -1471,26 +1490,26 @@ const getAllLegalMoves = (
             quietCandidates.push({ move: moveOption, score });
           }
         }
-        
+
         // ✅ FIX: Break out of while loop if cancelled in inner for loop
         if (wasCancelled) break;
       }
 
       temp &= temp - 1n;
     }
-    
+
     // ✅ FIX: Break out of outer for loop if cancelled
     if (wasCancelled) break;
   }
 
   const quietLimit = maxMovesToCalculate
     ? Math.max(
-        0,
-        Math.min(
-          QUIET_MOVE_LIMIT,
-          maxMovesToCalculate - captures.length - checks.length
-        )
+      0,
+      Math.min(
+        QUIET_MOVE_LIMIT,
+        maxMovesToCalculate - captures.length - checks.length
       )
+    )
     : QUIET_MOVE_LIMIT;
 
   quietCandidates.sort((a, b) => b.score - a.score);
@@ -1616,7 +1635,7 @@ const getOrderedMoves = (
         for (const opponent of opponentsInCheck) {
           if (!hasAnyLegalMoves(opponent, stateAfter)) {
             isCheckmateMove = true;
-      break;
+            break;
           }
         }
       }
@@ -1698,7 +1717,7 @@ const getOrderedMoves = (
 
     return 0;
   }).map((entry) => entry.move);
-  
+
   recordTime("getOrderedMoves", orderStart);
   return sorted;
 };
@@ -1875,7 +1894,7 @@ const minimax = (
       ...gameState,
       currentPlayerTurn: nextPlayer,
     };
-    
+
     const nullMoveResult = minimax(
       nullMoveState,
       depth - 1 - NULL_MOVE_REDUCTION,
@@ -1890,7 +1909,7 @@ const minimax = (
       false, // Don't allow consecutive null moves
       false
     );
-    
+
     // FIX: No negation needed - scores are always from bot's perspective
     // If even with a free move for opponent, our score >= beta, we can prune
     if (nullMoveResult.score >= beta) {
@@ -1906,8 +1925,8 @@ const minimax = (
     depth <= 1
       ? Math.min(baseMaxMoves, 8)
       : depth === 2
-      ? Math.min(baseMaxMoves, 12)
-      : undefined;
+        ? Math.min(baseMaxMoves, 12)
+        : undefined;
   const preferredKeys = buildPreferredMoveKeys(
     preferredMoveKey,
     tableEntry?.move ? moveKey(tableEntry.move) : undefined,
@@ -1918,7 +1937,7 @@ const minimax = (
   if (isRoot && gameState.currentPlayerTurn !== botColor) {
     console.error(`[BOT BUG] Root minimax called with wrong turn: currentTurn=${gameState.currentPlayerTurn}, botColor=${botColor}`);
   }
-  
+
   let moves = getOrderedMoves(
     gameState.currentPlayerTurn,
     gameState,
@@ -1927,6 +1946,11 @@ const minimax = (
     preferredKeys,
     { isRoot }
   );
+
+  // Debug: Log root move count
+  if (isRoot && moves.length < 3) {
+    console.warn(`[BOT DEBUG] ${botColor.toUpperCase()} Root only ${moves.length} moves found!`);
+  }
 
   // ✅ Root safety filter: avoid hanging moves if any safe moves exist
   if (isRoot && !isInCheck && moves.length > 0) {
@@ -1943,10 +1967,19 @@ const minimax = (
     }
     if (safeMoves.length > 0) {
       moves = safeMoves;
+    } else if (moves.length > 0) {
+      // Debug: All moves were filtered as hanging!
+      console.warn(`[BOT DEBUG] ${botColor.toUpperCase()} All ${moves.length} root moves filtered as hanging!`);
     }
   }
 
   if (moves.length === 0) {
+    // Debug: Log when no moves found at root
+    if (isRoot) {
+      const pieceEntries = Object.entries(gameState.bitboardState.pieces).filter(([k]) => k.startsWith(botColor));
+      const totalPieces = pieceEntries.reduce((sum, [, bb]) => sum + Number(bb !== 0n ? (bb as bigint).toString(2).replace(/0/g, '').length : 0), 0);
+      console.warn(`[BOT DEBUG] ${botColor.toUpperCase()} Root no moves! pieces=${totalPieces}, isInCheck=${isInCheck}, currentTurn=${gameState.currentPlayerTurn}`);
+    }
     const terminalScore = isInCheck
       ? currentPlayer === botColor
         ? -CHECKMATE_SCORE
@@ -1977,7 +2010,7 @@ const minimax = (
     }
 
     const nextState = simulateMoveBitboard(gameState, move);
-    
+
     // Check Extension: If the move puts opponent in check, extend by 1 ply
     // Cap the extended depth to prevent search explosion (max 2 ply extension from root)
     const nextPlayer = nextState.currentPlayerTurn;
@@ -1985,7 +2018,7 @@ const minimax = (
     const maxDepth = rootDepth ?? depth;
     const newDepth = depth - 1 + (nextPlayerInCheck ? 1 : 0);
     const cappedDepth = Math.min(newDepth, maxDepth + 2);
-    
+
     const evaluation = minimax(
       nextState,
       cappedDepth,
@@ -2008,7 +2041,7 @@ const minimax = (
         console.error(`[BOT BUG] Root move for wrong color: move.pieceCode=${move.pieceCode}, botColor=${botColor}, currentTurn=${gameState.currentPlayerTurn}`);
         continue; // Skip this invalid move
       }
-      
+
       const score = getBotEvaluation(
         nextState,
         botColor,
@@ -2079,8 +2112,9 @@ export const computeBestMove = (
   cancellationToken?: { cancelled: boolean },
   timeBudgetOverrideMs?: number
 ): MoveOption | null => {
-  const botConfigMode = resolveBotConfigMode(gameState.gameMode);
-  const botConfig = getBotConfig(botConfigMode, gameState.botDifficulty);
+  const searchState = syncStateForSearch(gameState);
+  const botConfigMode = resolveBotConfigMode(searchState.gameMode);
+  const botConfig = getBotConfig(botConfigMode, searchState.botDifficulty);
   const timeBudgetMs = timeBudgetOverrideMs ?? botConfig.BRAIN_TIMEOUT ?? 1200;
   const timeGuardMs = Math.max(50, Math.floor(timeBudgetMs * 0.25));
   const isLocalMode = isBotLocalMode(botConfigMode);
@@ -2101,7 +2135,7 @@ export const computeBestMove = (
 
     const rootScores: { move: MoveOption; score: number }[] = [];
     const result = minimax(
-      gameState,
+      searchState,
       depth,
       -Infinity,
       Infinity,
@@ -2121,7 +2155,7 @@ export const computeBestMove = (
 
     if (result.move) {
       const pieceAtFrom = getPieceAtFromBitboard(
-        gameState.bitboardState.pieces,
+        searchState.bitboardState.pieces,
         result.move.from.row,
         result.move.from.col
       );
@@ -2141,7 +2175,7 @@ export const computeBestMove = (
       const move = entry.move;
       if (!move) return false;
       const pieceAtFrom = getPieceAtFromBitboard(
-        gameState.bitboardState.pieces,
+        searchState.bitboardState.pieces,
         move.from.row,
         move.from.col
       );
@@ -2176,16 +2210,16 @@ export const computeBestMove = (
 };
 
 const makeBotMove = (botColor: string, retryCount: number = 0) => {
-  
+
   // ✅ CRITICAL: Prevent multiple bots from moving simultaneously
   if (botMoveInProgress) {
     return;
   }
-  
+
   // Prevent infinite retry loops - force resignation to advance the game
   if (retryCount >= MAX_BOT_RETRIES) {
     console.warn(`Bot ${botColor} exceeded max retries, forcing resignation`);
-    
+
     // ✅ FIX: Don't leave game stuck - resign to advance the turn
     try {
       const notificationService = require('./notificationService').default;
@@ -2193,11 +2227,11 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     } catch (notificationError) {
       console.warn("Failed to show bot resignation notification:", notificationError);
     }
-    
+
     store.dispatch(resignGame(botColor));
     return;
   }
-  
+
   const baseState = store.getState().game;
   const gameState = syncStateForSearch(baseState);
 
@@ -2246,20 +2280,20 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
   } catch {
     // ignore if time label isn't supported
   }
-  
+
   const isLocalMode = isBotLocalMode(resolveBotConfigMode(gameState.gameMode));
   const timeBudgetMs = botConfig.BRAIN_TIMEOUT;
   const timeGuardMs = Math.min(
     SEARCH_TIME_GUARD_MS,
     Math.floor(timeBudgetMs * 0.25)
   );
-  
+
   // ⚡ PERFORMANCE FIX: Set a timeout to prevent bot from taking too long
   const cancellationToken = { cancelled: false };
   const moveTimeout = setTimeout(() => {
     cancellationToken.cancelled = true;
     endTiming("timeout");
-    
+
     // Notify user about bot thinking hard
     try {
       const notificationService = require('./notificationService').default;
@@ -2268,7 +2302,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
       console.warn("Failed to show bot thinking notification:", notificationError);
     }
   }, timeBudgetMs);
-  
+
   const searchStartTime = Date.now();
   const maxDepth = botConfig.MAX_DEPTH ?? (isLocalMode ? 2 : 2);
   const quiescenceDepth = botConfig.QUIESCENCE_DEPTH ?? QUIESCENCE_MAX_DEPTH_DEFAULT;
@@ -2304,7 +2338,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
       `[BOT TIMING] ${botColor.toUpperCase()} depth ${depth} ${Date.now() - depthStart}ms`
     );
 
-  if (cancellationToken.cancelled) {
+    if (cancellationToken.cancelled) {
       break;
     }
 
@@ -2326,7 +2360,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
 
   if (isLocalMode && lastRootScores && lastRootScores.length > 1) {
     lastRootScores.sort((a, b) => b.score - a.score);
-    
+
     // ✅ FIX: Filter out any moves that aren't valid for this bot's pieces
     // This prevents stale/invalid moves from being selected
     const validRootScores = lastRootScores.filter((entry) => {
@@ -2335,7 +2369,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
       const pieceAtFrom = getPieceAtFromBitboard(gameState.bitboardState.pieces, move.from.row, move.from.col);
       return pieceAtFrom && pieceAtFrom[0] === botColor;
     });
-    
+
     if (validRootScores.length < 2) {
       // Not enough valid moves for randomization, keep chosenMove from search
     } else {
@@ -2376,7 +2410,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     endTiming("cancelled");
-    
+
     // FIX: Retry instead of getting stuck - the bot should always try to make a move
     if (store.getState().game.currentPlayerTurn === botColor && retryCount < MAX_BOT_RETRIES) {
       console.log(`Bot ${botColor} timed out, retrying...`);
@@ -2393,27 +2427,27 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     // Bot has no legal moves - check if it's checkmate or stalemate
     const { isKingInCheck } = require("../src/logic/bitboardLogic");
     const isInCheck = isKingInCheck(botColor, gameState);
-    
+
     // In 4-player chess, having no legal moves = elimination (checkmate or stalemate)
     // Both cases should eliminate the player
     const eliminationReason = isInCheck ? "checkmated" : "stalemated";
-      
-      // Notify user about bot elimination
-      try {
-        const notificationService = require('./notificationService').default;
+
+    // Notify user about bot elimination
+    try {
+      const notificationService = require('./notificationService').default;
       notificationService.show(
-        `Bot ${botColor.toUpperCase()} ${eliminationReason}!`, 
-        isInCheck ? "error" : "warning", 
+        `Bot ${botColor.toUpperCase()} ${eliminationReason}!`,
+        isInCheck ? "error" : "warning",
         4000
       );
-      } catch (notificationError) {
-        console.warn("Failed to show bot elimination notification:", notificationError);
-      }
-      
-      // Auto-eliminate the bot by dispatching a resign action
+    } catch (notificationError) {
+      console.warn("Failed to show bot elimination notification:", notificationError);
+    }
+
+    // Auto-eliminate the bot by dispatching a resign action
     // This advances the turn to the next player
-      store.dispatch(resignGame(botColor));
-    
+    store.dispatch(resignGame(botColor));
+
     clearTimeout(moveTimeout);
     botMoveInProgress = false; // Release the lock
     endTiming("no-legal-move");
@@ -2424,16 +2458,16 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
   const currentGameState = store.getState().game;
   // ✅ BITBOARD ONLY: Read from bitboards
   const pieceCode = getPieceAtFromBitboard(currentGameState.bitboardState.pieces, chosenMove.from.row, chosenMove.from.col);
-  
+
   if (!pieceCode || pieceCode[0] !== botColor) {
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     endTiming("invalid-piece");
-    
+
     // ✅ FIX: Clear TT before retry - the cached move is stale/invalid
     transpositionTable.clear();
     console.warn(`Bot ${botColor} invalid-piece at (${chosenMove.from.row}, ${chosenMove.from.col}), expected ${botColor} piece, got: ${pieceCode || 'null'}`);
-    
+
     // Retry with fresh state if it's still our turn
     if (currentGameState.currentPlayerTurn === botColor && retryCount < MAX_BOT_RETRIES) {
       setTimeout(() => makeBotMove(botColor, retryCount + 1), 50);
@@ -2444,7 +2478,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     }
     return;
   }
-  
+
   // Check if it's still this bot's turn
   if (currentGameState.currentPlayerTurn !== botColor) {
     clearTimeout(moveTimeout);
@@ -2499,16 +2533,16 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
 // Handle bot pawn promotion
 const handleBotPromotion = (botColor: string) => {
   const gameState = store.getState().game;
-  
+
   // Check if there's a pending promotion for this bot
-  if (gameState.promotionState.isAwaiting && 
-      gameState.promotionState.color === botColor) {
-    
+  if (gameState.promotionState.isAwaiting &&
+    gameState.promotionState.color === botColor) {
+
     // Bot always promotes to Queen (most valuable piece)
     store.dispatch(completePromotion({ pieceType: 'Q' }));
     return true;
   }
-  
+
   return false;
 };
 

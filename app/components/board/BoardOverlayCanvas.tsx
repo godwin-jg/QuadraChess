@@ -19,6 +19,8 @@ interface BoardOverlayCanvasProps {
   // Check status - which kings are in check
   checkSquares: Array<{ row: number; col: number }>;
   lastMove: { from: { row: number; col: number }; to: { row: number; col: number } } | null;
+  // Premove indicator for online play
+  premove?: { from: { row: number; col: number }; to: { row: number; col: number }; pieceCode: string } | null;
 }
 
 // Colors for valid move dots
@@ -32,8 +34,12 @@ const CAPTURE_RING_COLORS: Record<string, string> = {
 
 // Check overlay color
 const CHECK_OVERLAY_COLOR = "rgba(239, 68, 68, 0.5)"; // red-500/50
-const LAST_MOVE_FROM_COLOR = "rgba(99, 102, 241, 0.18)";
-const LAST_MOVE_TO_COLOR = "rgba(99, 102, 241, 0.28)";
+const LAST_MOVE_FROM_COLOR = "rgba(99, 102, 241, 0.22)";
+const LAST_MOVE_TO_COLOR = "rgba(99, 102, 241, 0.32)";
+
+// Premove indicator colors (yellow/amber tint)
+const PREMOVE_FROM_COLOR = "rgba(251, 191, 36, 0.35)"; // amber-400/35
+const PREMOVE_TO_COLOR = "rgba(251, 191, 36, 0.5)"; // amber-400/50
 
 // Note: Selected square colors are now handled by Square.tsx to render behind pieces
 
@@ -53,6 +59,7 @@ const BoardOverlayCanvas = React.memo(function BoardOverlayCanvas({
   selectedPieceColor,
   checkSquares,
   lastMove,
+  premove,
 }: BoardOverlayCanvasProps) {
   // Pre-calculate dot sizes
   const dotRadius = squareSize / 6; // 1/3 of square as diameter
@@ -88,7 +95,8 @@ const BoardOverlayCanvas = React.memo(function BoardOverlayCanvas({
     moves.length > 0 || 
     captures.length > 0 || 
     checkSquares.length > 0 ||
-    !!lastMove;
+    !!lastMove ||
+    !!premove;
 
   if (!hasContent) {
     return null;
@@ -119,6 +127,28 @@ const BoardOverlayCanvas = React.memo(function BoardOverlayCanvas({
             color={LAST_MOVE_TO_COLOR}
             style="stroke"
             strokeWidth={lastMoveStroke}
+          />
+        </Group>
+      )}
+
+      {/* Premove indicator */}
+      {premove && (
+        <Group>
+          <RoundedRect
+            x={premove.from.col * squareSize}
+            y={premove.from.row * squareSize}
+            width={squareSize}
+            height={squareSize}
+            r={0}
+            color={PREMOVE_FROM_COLOR}
+          />
+          <RoundedRect
+            x={premove.to.col * squareSize}
+            y={premove.to.row * squareSize}
+            width={squareSize}
+            height={squareSize}
+            r={0}
+            color={PREMOVE_TO_COLOR}
           />
         </Group>
       )}

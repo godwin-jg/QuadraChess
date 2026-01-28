@@ -52,3 +52,7 @@ export function useBoardGlowAnimation(
 
   return { glowOpacity, glowScale };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

@@ -93,3 +93,7 @@ export function useDragPerformance(enabled: boolean): UseDragPerformanceReturn {
 
   return { perfRef, logDragPerf, nowMs };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

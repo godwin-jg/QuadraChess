@@ -1,6 +1,6 @@
-# QuadChess Sound Effects
+# Quadrachess Sound Effects
 
-This folder contains sound effects for the QuadChess game. Add the following sound files with these exact names:
+This folder contains sound effects for the Quadrachess game. Add the following sound files with these exact names:
 
 ## Required Sound Files:
 

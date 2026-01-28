@@ -120,3 +120,7 @@ export const getPieceColor = (piece: string): string => {
       return "#000";
   }
 };
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

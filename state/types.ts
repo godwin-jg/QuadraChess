@@ -71,7 +71,7 @@ export interface SerializedBitboardState {
 
 export type SerializedGameState = Omit<
   GameState,
-  "bitboardState" | "boardState" | "eliminatedPieceBitboards" | "history" | "moveCache"
+  "bitboardState" | "boardState" | "eliminatedPieceBitboards" | "history" | "moveCache" | "premove"
 > & {
   bitboardState: SerializedBitboardState;
   boardState?: (string | null)[][];
@@ -80,6 +80,13 @@ export type SerializedGameState = Omit<
   moveCache?: { [key: string]: MoveInfo[] };
 };
 
+// Premove state for online play
+export interface PremoveState {
+  from: Position;
+  to: Position;
+  pieceCode: string;
+}
+
 export interface GameState {
   boardState: (string | null)[][];
   bitboardState: BitboardState;
@@ -87,6 +94,8 @@ export interface GameState {
   // Visual-only pieces for eliminated players (rendered but not in logic)
   eliminatedPieceBitboards: Record<string, Bitboard>;
   currentPlayerTurn: string;
+  // Premove for online play - queued move to execute when it's your turn
+  premove: PremoveState | null;
   gameStatus:
     | "waiting"
     | "active"

@@ -1,17 +1,18 @@
 import React, { useState } from "react";
 import { Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState } from "../../../state";
+import { RootState, setPlayers, setIsHost, setCanStartGame } from "../../../state";
 import { resignGame } from "../../../state/gameSlice";
 import onlineGameService from "../../../services/onlineGameService";
 import ResignConfirmationModal from "./ResignConfirmationModal";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import soundService from "../../../services/soundService";
 
 const PLAYER_NAMES: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
 
 export default function ResignButton() {
   const dispatch = useDispatch();
+  const router = useRouter();
   const [showModal, setShowModal] = useState(false);
   const [isResigning, setIsResigning] = useState(false);
   const { gameId, mode } = useLocalSearchParams<{ gameId?: string; mode?: string }>();
@@ -31,14 +32,38 @@ export default function ResignButton() {
           onlineGameService.resignGame(),
           new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
         ]);
+        soundService.playGameEndSound();
+        setShowModal(false);
+        
+        // ✅ CRITICAL FIX: Clear Redux lobby state before navigating
+        // This ensures OnlineLobbyScreen doesn't show the waiting room
+        dispatch(setPlayers([]));
+        dispatch(setIsHost(false));
+        dispatch(setCanStartGame(false));
+        
+        // Navigate to lobby after successful online resignation
+        // Use query param to signal that user just resigned and should clear game context
+        router.replace("/(tabs)/OnlineLobbyScreen?resigned=true");
       } else {
         dispatch(resignGame(localPlayerColor || undefined));
+        soundService.playGameEndSound();
+        setShowModal(false);
+        // For local games, stay on GameScreen to see the game over modal
       }
-      soundService.playGameEndSound();
-      setShowModal(false);
     } catch {
-      if (isOnlineMode) setShowModal(false);
-      else alert("Failed to resign. Please try again.");
+      if (isOnlineMode) {
+        setShowModal(false);
+        
+        // ✅ CRITICAL FIX: Clear Redux lobby state even on error
+        dispatch(setPlayers([]));
+        dispatch(setIsHost(false));
+        dispatch(setCanStartGame(false));
+        
+        // Still navigate away even if there was an error - player has left the game
+        router.replace("/(tabs)/OnlineLobbyScreen?resigned=true");
+      } else {
+        alert("Failed to resign. Please try again.");
+      }
     } finally {
       setIsResigning(false);
     }

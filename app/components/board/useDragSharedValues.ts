@@ -5,6 +5,7 @@ export interface DragSharedValues {
   dragX: SharedValue<number>;
   dragY: SharedValue<number>;
   dragScale: SharedValue<number>;
+  dragOffsetX: SharedValue<number>;
   dragOffsetY: SharedValue<number>;
   
   // Snap position
@@ -42,6 +43,7 @@ export function useDragSharedValues(): DragSharedValues {
     dragX: useSharedValue(0),
     dragY: useSharedValue(0),
     dragScale: useSharedValue(1),
+    dragOffsetX: useSharedValue(0),
     dragOffsetY: useSharedValue(0),
     
     // Snap position
@@ -69,3 +71,7 @@ export function useDragSharedValues(): DragSharedValues {
     uiState: useSharedValue(0),
   };
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

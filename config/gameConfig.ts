@@ -1,7 +1,7 @@
 /**
  * Centralized game configuration and constants
  * This file contains all the game rules, point values, and other constants
- * used throughout the QuadChess application.
+ * used throughout the Quadrachess application.
  */
 
 // Point values for captured pieces
@@ -67,7 +67,7 @@ export const BOARD_CONFIG = {
 
 // Animation durations (in milliseconds)
 export const ANIMATION_DURATIONS = {
-  PIECE_MOVE: 220, // Snappy move duration
+  PIECE_MOVE: 250, // Smooth ease-out duration
   CAPTURE_EFFECT: 200,
   GLOW_PULSE: 2500,
   FADE_IN: 400,
@@ -135,6 +135,15 @@ export const BOT_CONFIG = {
       MOVE_DELAY: 0, // Instant - serious competitive play
       MAX_DEPTH: 3, // Deeper search for stronger play
       QUIESCENCE_DEPTH: 3, // Reduced this for - major speedup
+      RANDOMNESS_SCORE_GAP: 1,
+      RANDOMNESS_TOP: 2,
+    },
+    superHard: {
+      MAX_MOVES_TO_CALCULATE: 12,
+      BRAIN_TIMEOUT: 3000,
+      MOVE_DELAY: 0,
+      MAX_DEPTH: 3,
+      QUIESCENCE_DEPTH: 3,
       RANDOMNESS_SCORE_GAP: 1,
       RANDOMNESS_TOP: 2,
     },

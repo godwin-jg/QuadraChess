@@ -34,20 +34,15 @@ const PLAYER_NAMES: Record<string, string> = {
 };
 
 const SCORE_ANIMATION = {
-  spring: { damping: 10, stiffness: 100, mass: 1 },
-  flashInMs: 100,
-  flashOutMs: 300,
+  spring: { damping: 14, stiffness: 220, mass: 0.7 },
+  popScale: 1.35,
+  popDownMs: 140,
+  flashInMs: 90,
+  flashOutMs: 220,
+  deltaHoldMs: 360,
 };
 
 const TURN_TRANSITION_MS = 140;
-
-const formatTime = (ms?: number) => {
-  if (typeof ms !== "number") return "--:--";
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-};
 
 const TurnColorText = React.memo(function TurnColorText({
   isActive,
@@ -99,11 +94,14 @@ const JuicyScore = React.memo(function JuicyScore({
       deltaProgress.value = 0;
       deltaProgress.value = withSequence(
         withTiming(1, { duration: 120 }),
-        withDelay(520, withTiming(0, { duration: 200 }))
+        withDelay(
+          SCORE_ANIMATION.deltaHoldMs,
+          withTiming(0, { duration: 180 })
+        )
       );
       scale.value = withSequence(
-        withSpring(1.5, SCORE_ANIMATION.spring),
-        withSpring(1, SCORE_ANIMATION.spring)
+        withSpring(SCORE_ANIMATION.popScale, SCORE_ANIMATION.spring),
+        withTiming(1, { duration: SCORE_ANIMATION.popDownMs })
       );
       flash.value = withSequence(
         withTiming(1, { duration: SCORE_ANIMATION.flashInMs }),
@@ -117,7 +115,12 @@ const JuicyScore = React.memo(function JuicyScore({
   }, [score]);
 
   const animatedStyle = useAnimatedStyle(() => {
-    const color = interpolateColor(flash.value, [0, 1], [baseColor, playerColor]);
+    // Use scale to determine color: when scale > 1 (upscaling), show player color
+    const scaleProgress = Math.min(
+      1,
+      (scale.value - 1) / (SCORE_ANIMATION.popScale - 1)
+    ); // 0 at scale=1, 1 at scale>=popScale
+    const color = interpolateColor(Math.max(0, scaleProgress), [0, 1], [baseColor, playerColor]);
     return {
       color,
       transform: [{ scale: scale.value }],
@@ -157,7 +160,7 @@ const JuicyScore = React.memo(function JuicyScore({
 
 export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelProps) {
   const c = isCompact; // compact mode flag
-  
+
   return (
     <View style={[styles.panel, panelType === 'top' ? styles.topPanel : styles.bottomPanel]}>
       <View style={styles.playersContainer}>
@@ -171,94 +174,65 @@ export default function PlayerHUDPanel({ players, panelType }: PlayerHUDPanelPro
           const isActive = !player.isEliminated && player.isCurrentTurn;
           const nameActiveColor = player.isEliminated ? "#9CA3AF" : playerColor;
           const nameInactiveColor = player.isEliminated ? "#9CA3AF" : "#D1D5DB";
-          const isLowTime = !player.isEliminated && (player.timeMs ?? 0) <= 10000;
-          const timeActiveColor = player.isEliminated
-            ? "#9CA3AF"
-            : isLowTime
-              ? "#F87171"
-              : "#FFFFFF";
-          const timeInactiveColor = player.isEliminated
-            ? "#9CA3AF"
-            : isLowTime
-              ? "#F87171"
-              : "#D1D5DB";
-          const capturedActiveColor = player.isEliminated ? "#9CA3AF" : "#FFFFFF";
-          const capturedInactiveColor = player.isEliminated ? "#9CA3AF" : "#D1D5DB";
           const smallActiveColor = player.isEliminated ? "#9CA3AF" : "#FFFFFF";
           const smallInactiveColor = player.isEliminated ? "#9CA3AF" : "#9CA3AF";
           return (
             <View key={player.color} style={styles.playerSection}>
               <View style={styles.playerInfo}>
-              <TurnColorText
-                isActive={isActive}
-                activeColor={nameActiveColor}
-                inactiveColor={nameInactiveColor}
-                style={[
-                  styles.playerName,
-                  { textDecorationLine: player.isEliminated ? "line-through" : "none" },
-                ]}
-              >
-                {PLAYER_NAMES[player.color] || "Unknown"}
-              </TurnColorText>
-              <TurnColorText
-                isActive={isActive}
-                activeColor={timeActiveColor}
-                inactiveColor={timeInactiveColor}
-                style={styles.playerTime}
-              >
-                {formatTime(player.timeMs)}
-              </TurnColorText>
-              {player.teamLabel && (
-                <Text style={styles.teamLabel}>
-                  {player.teamLabel}
-                </Text>
-              )}
-              <JuicyScore
-                score={player.score}
-                baseColor={scoreColor}
-                playerColor={playerColor}
-                isEliminated={player.isEliminated}
-              />
-              {player.isEliminated && <Text style={styles.eliminatedText}>ELIMINATED</Text>}
-            </View>
+                <TurnColorText
+                  isActive={isActive}
+                  activeColor={nameActiveColor}
+                  inactiveColor={nameInactiveColor}
+                  style={[
+                    styles.playerName,
+                    { textDecorationLine: player.isEliminated ? "line-through" : "none" },
+                  ]}
+                >
+                  {PLAYER_NAMES[player.color] || "Unknown"}
+                </TurnColorText>
+                {player.teamLabel && (
+                  <Text style={styles.teamLabel}>
+                    {player.teamLabel}
+                  </Text>
+                )}
+                <JuicyScore
+                  score={player.score}
+                  baseColor={scoreColor}
+                  playerColor={playerColor}
+                  isEliminated={player.isEliminated}
+                />
+                {player.isEliminated && <Text style={styles.eliminatedText}>ELIMINATED</Text>}
+              </View>
 
-            <View style={styles.capturedSection}>
-              <TurnColorText
-                isActive={isActive}
-                activeColor={capturedActiveColor}
-                inactiveColor={capturedInactiveColor}
-                style={styles.capturedLabel}
-              >
-                Captured
-              </TurnColorText>
-              <View style={styles.capturedPieces}>
-                {player.capturedPieces.length > 0 ? (
-                  player.capturedPieces.slice(0, 6).map((piece, i) => (
-                    <Piece key={`${piece}-${i}`} piece={piece} size={sw(c ? 10 : 12)} />
-                  ))
-                ) : (
-                  <TurnColorText
-                    isActive={isActive}
-                    activeColor={smallActiveColor}
-                    inactiveColor={smallInactiveColor}
-                    style={styles.smallText}
-                  >
-                    None
-                  </TurnColorText>
-                )}
-                {player.capturedPieces.length > 6 && (
-                  <TurnColorText
-                    isActive={isActive}
-                    activeColor={smallActiveColor}
-                    inactiveColor={smallInactiveColor}
-                    style={styles.smallText}
-                  >
-                    +{player.capturedPieces.length - 6}
-                  </TurnColorText>
-                )}
+              <View style={styles.capturedSection}>
+                <View style={styles.capturedPieces}>
+                  {player.capturedPieces.length > 0 ? (
+                    player.capturedPieces.slice(0, 6).map((piece, i) => (
+                      <Piece key={`${piece}-${i}`} piece={piece} size={sw(c ? 10 : 12)} />
+                    ))
+                  ) : (
+                    <TurnColorText
+                      isActive={isActive}
+                      activeColor={smallActiveColor}
+                      inactiveColor={smallInactiveColor}
+                      style={styles.smallText}
+                    >
+                      None
+                    </TurnColorText>
+                  )}
+                  {player.capturedPieces.length > 6 && (
+                    <TurnColorText
+                      isActive={isActive}
+                      activeColor={smallActiveColor}
+                      inactiveColor={smallInactiveColor}
+                      style={styles.smallText}
+                    >
+                      +{player.capturedPieces.length - 6}
+                    </TurnColorText>
+                  )}
+                </View>
               </View>
             </View>
-          </View>
           );
         })}
       </View>
@@ -273,7 +247,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     paddingHorizontal: sw(c ? 16 : 24),
-    paddingVertical: sh(c ? 10 : 16),
+    paddingTop: sh(c ? 6 : 10),
+    paddingBottom: sh(c ? 10 : 16),
     marginHorizontal: sw(12),
     marginVertical: sh(6),
   },
@@ -294,16 +269,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: sw(c ? 16 : 24),
+    overflow: 'visible',
   },
   playerSection: {
     flex: 1,
     alignItems: 'center',
     paddingHorizontal: sw(c ? 8 : 12),
     paddingVertical: sh(c ? 4 : 8),
+    overflow: 'visible',
   },
   playerInfo: {
     alignItems: 'center',
-    marginBottom: sh(c ? 4 : 8),
+    marginBottom: sh(c ? 2 : 4),
     overflow: 'visible',
   },
   playerName: {
@@ -332,12 +309,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FACC15',
   },
-  playerTime: {
-    fontSize: sf(c ? 11 : 13),
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    marginBottom: sh(4),
-  },
   teamLabel: {
     fontSize: sf(c ? 9 : 11),
     color: '#9CA3AF',
@@ -353,13 +324,7 @@ const styles = StyleSheet.create({
   },
   capturedSection: {
     alignItems: 'center',
-    height: sh(c ? 38 : 50),
-  },
-  capturedLabel: {
-    fontSize: sf(c ? 10 : 12),
-    fontWeight: '600',
-    letterSpacing: 1.0,
-    marginBottom: sh(4),
+    height: sh(c ? 30 : 40),
   },
   capturedPieces: {
     flexDirection: 'row',

@@ -40,3 +40,7 @@ export const BOARD_THEMES: Record<UserSettings["board"]["theme"], BoardTheme> =
 export const getBoardTheme = (settings: UserSettings): BoardTheme => {
   return BOARD_THEMES[settings.board.theme];
 };
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

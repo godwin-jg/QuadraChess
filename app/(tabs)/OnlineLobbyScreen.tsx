@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useDispatch, useSelector } from "react-redux";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { RootState } from "../../state/store";
 import { setPlayers, setIsHost, setCanStartGame, resetGame } from "../../state";
@@ -30,6 +30,7 @@ const DEFAULT_TEAM_ASSIGNMENTS: TeamAssignments = { r: "A", y: "A", b: "B", g: "
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
   const router = useRouter();
+  const { resigned } = useLocalSearchParams<{ resigned?: string }>();
   const { settings, updateProfile } = useSettings();
   const insets = useSafeAreaInsets();
   
@@ -66,6 +67,22 @@ const OnlineLobbyScreen: React.FC = () => {
     }
     setTeamMode(!!gameState.teamMode);
   }, [gameState.teamAssignments, gameState.teamMode]);
+
+  // ✅ CRITICAL FIX: Clear game context immediately when user resigned
+  // This ensures the waiting room is not shown after resignation
+  useEffect(() => {
+    if (resigned === "true") {
+      console.log("[OnlineLobby] User resigned from game, clearing game context immediately");
+      setCurrentGameId(null);
+      setBotPlayers([]);
+      dispatch(setPlayers([]));
+      dispatch(setIsHost(false));
+      dispatch(setCanStartGame(false));
+      
+      // Clear the query param to avoid re-triggering on subsequent renders
+      router.setParams({ resigned: undefined });
+    }
+  }, [resigned, dispatch, router]);
 
   const initializeAuth = useCallback(
     async (statusLabel?: string) => {
@@ -126,6 +143,31 @@ const OnlineLobbyScreen: React.FC = () => {
       currentGameId,
       (game) => {
         if (game) {
+          const user = realtimeDatabaseService.getCurrentUser();
+          
+          // Check if current user is still a participant in the game
+          const isUserInGame = user && game.players && game.players[user.uid];
+          
+          // If user is not in the game anymore (resigned/left), clear the game context
+          if (!isUserInGame) {
+            console.log("[OnlineLobby] User is no longer in the game, clearing game context");
+            setCurrentGameId(null);
+            dispatch(setPlayers([]));
+            dispatch(setIsHost(false));
+            dispatch(setCanStartGame(false));
+            return;
+          }
+          
+          // If game is finished, clear the game context
+          if (game.status === "finished") {
+            console.log("[OnlineLobby] Game is finished, clearing game context");
+            setCurrentGameId(null);
+            dispatch(setPlayers([]));
+            dispatch(setIsHost(false));
+            dispatch(setCanStartGame(false));
+            return;
+          }
+          
           const normalizedPlayers = Object.entries(game.players || {}).map(
             ([playerId, player]) => ({
               id: player.id || playerId,
@@ -140,16 +182,19 @@ const OnlineLobbyScreen: React.FC = () => {
           );
           dispatch(setPlayers(normalizedPlayers));
 
-          const user = realtimeDatabaseService.getCurrentUser();
           dispatch(setIsHost(!!user && game.hostId === user.uid));
           dispatch(setCanStartGame(game.status === "waiting" && normalizedPlayers.length === 4));
 
           const botPlayersFromGame = normalizedPlayers
             .filter((player: any) => player.isBot === true)
             .map((player: any) => player.color);
+          console.log(`[BotSnapshot] Players from Firebase:`, normalizedPlayers.map(p => ({ color: p.color, isBot: p.isBot })));
+          console.log(`[BotSnapshot] Extracted botPlayers:`, botPlayersFromGame);
           setBotPlayers(botPlayersFromGame);
           
-          // Check if game status changed to playing
+          // Only redirect to game if:
+          // 1. Game status is "playing"
+          // 2. User is still an active participant (checked above)
           if (game.status === "playing") {
             router.push(
               `/(tabs)/GameScreen?gameId=${currentGameId}&mode=online`
@@ -336,7 +381,11 @@ const OnlineLobbyScreen: React.FC = () => {
 
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = async (color: string) => {
+    console.log(`[BotToggle] Toggle called for color: ${color}, isHost: ${isHost}, gameId: ${currentGameId}`);
+    console.log(`[BotToggle] Current botPlayers state:`, botPlayers);
+    
     if (!isHost || !currentGameId) {
+      console.log(`[BotToggle] Aborting - not host or no game`);
       return;
     }
     
@@ -344,11 +393,13 @@ const OnlineLobbyScreen: React.FC = () => {
       ? botPlayers.filter(c => c !== color)
       : [...botPlayers, color];
     
+    console.log(`[BotToggle] New botPlayers will be:`, newBotPlayers);
     setBotPlayers(newBotPlayers);
     
     // Update bot configuration in database
     try {
       await realtimeDatabaseService.updateBotConfiguration(currentGameId, newBotPlayers);
+      console.log(`[BotToggle] Update successful`);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       // Revert local state on error
@@ -416,11 +467,20 @@ const OnlineLobbyScreen: React.FC = () => {
       player && player.id && player.name && player.color
     );
     const playerCount = validPlayers.length;
+    const isFull = playerCount >= (item.maxPlayers || 4);
 
     return (
       <TouchableOpacity
-        className="bg-white/10 p-4 rounded-xl mb-3 border border-white/20"
+        className={`p-4 rounded-xl mb-3 border ${
+          isFull 
+            ? "bg-white/5 border-white/10 opacity-60" 
+            : "bg-white/10 border-white/20"
+        }`}
         onPress={() => {
+          if (isFull) {
+            Alert.alert("Game Full", "This game already has 4 players.");
+            return;
+          }
           // ✅ Add haptic feedback for buttons that don't play sounds
           try {
             const { hapticsService } = require('../../services/hapticsService');
@@ -429,11 +489,11 @@ const OnlineLobbyScreen: React.FC = () => {
           }
           joinGame(item.id);
         }}
-        disabled={isLoading}
+        disabled={isLoading || isFull}
       >
         <View className="flex-row justify-between items-center">
           <View>
-            <Text className="text-white text-lg font-bold">
+            <Text className={`text-lg font-bold ${isFull ? "text-gray-400" : "text-white"}`}>
               {item.hostName}'s Game
             </Text>
             <Text className="text-gray-300 text-sm">
@@ -441,7 +501,9 @@ const OnlineLobbyScreen: React.FC = () => {
             </Text>
           </View>
           <View className="items-end">
-            <Text className="text-green-400 text-sm">Available</Text>
+            <Text className={`text-sm ${isFull ? "text-red-400" : "text-green-400"}`}>
+              {isFull ? "Full" : "Available"}
+            </Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -560,23 +622,33 @@ const OnlineLobbyScreen: React.FC = () => {
                     const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
                     const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
                     
+                    // Check if adding a bot would exceed 4 players
+                    // Count humans (players minus current bots) + would-be bots
+                    const humanCount = players.filter(p => !p.isBot).length;
+                    const wouldBeBotCount = isBot ? botPlayers.length - 1 : botPlayers.length + 1;
+                    const wouldExceedMax = !isBot && (humanCount + wouldBeBotCount > 4);
+                    
                     return (
                       <TouchableOpacity
                         key={color}
                         className={`flex-1 mx-1 py-3 px-2 rounded-lg border-2 ${
-                          isBot ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'
+                          isBot ? 'border-green-400 bg-green-500/20' : 
+                          wouldExceedMax ? 'border-gray-600 bg-gray-800/50 opacity-50' : 
+                          'border-white/30 bg-white/10'
                         }`}
                         onPress={() => {
+                          if (wouldExceedMax) return; // Don't allow if would exceed max
                           hapticsService.selection();
                           toggleBotPlayer(color);
                         }}
+                        disabled={wouldExceedMax}
                       >
                         <View className="items-center">
                           <View className={`w-4 h-4 rounded-full mb-1 ${colorClass}`} />
-                          <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : 'text-gray-300'}`}>
+                          <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : wouldExceedMax ? 'text-gray-500' : 'text-gray-300'}`}>
                             {colorName}
                           </Text>
-                          <Text className={`text-xs ${isBot ? 'text-green-300' : 'text-gray-400'}`}>
+                          <Text className={`text-xs ${isBot ? 'text-green-300' : wouldExceedMax ? 'text-gray-500' : 'text-gray-400'}`}>
                             {isBot ? '🤖 Bot' : '👤 Human'}
                           </Text>
                         </View>

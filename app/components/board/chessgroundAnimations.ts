@@ -136,3 +136,7 @@ export const keyToRowCol = (key: Key): { row: number; col: number } => ({
   row: Math.floor(key / BOARD_SIZE),
   col: key % BOARD_SIZE,
 });
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

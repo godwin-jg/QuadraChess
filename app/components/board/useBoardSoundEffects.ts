@@ -91,3 +91,7 @@ export function useBoardSoundEffects({
 }
 
 export { usePrevious };
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

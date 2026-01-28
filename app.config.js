@@ -6,7 +6,7 @@ export default ({ config }) => {
     ...config,
     expo: {
       ...config.expo,
-      name: "QuadChess",
+      name: "Quadrachess",
       slug: "FourPlayer",
       version: "1.0.4",
       scheme: "FourPlayer",
@@ -18,7 +18,7 @@ export default ({ config }) => {
       },
       android: {
         ...config.expo?.android,
-        package: "com.chess4d",
+        package: "com.quadrachess",
         adaptiveIcon: {
           foregroundImage: "./assets/images/chess.png",
           backgroundColor: "#000000"
@@ -29,11 +29,11 @@ export default ({ config }) => {
         targetSdkVersion: 35, // Android 15 - required by Google Play Store
         compileSdkVersion: 35, // Android 15 - required for dependencies
         // Privacy policy URL for camera permission
-        privacyPolicy: "https://godwin-jg.github.io/quadchess-privacy"
+        privacyPolicy: "https://godwin-jg.github.io/quadrachess-privacy"
       },
       ios: {
         ...config.expo?.ios,
-        bundleIdentifier: "com.chess4d",
+        bundleIdentifier: "com.quadrachess",
         screenOrientation: "portrait",
         requireFullScreen: true
       },

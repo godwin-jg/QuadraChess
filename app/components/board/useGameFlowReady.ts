@@ -38,3 +38,7 @@ export function useGameFlowReady(gameFlowState: unknown): GameFlowReadyReturn {
     return { isFlowReady, isFlowAnimating };
   }, [gameFlowState]);
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

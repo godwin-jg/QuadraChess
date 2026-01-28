@@ -144,3 +144,7 @@ export function findBestMoveNearTap(
 
   return bestMove;
 }
+
+const RoutePlaceholder = () => null;
+
+export default RoutePlaceholder;

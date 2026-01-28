@@ -15,6 +15,7 @@ import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
 import { resetGame, setBotPlayers, setBotDifficulty, setBotTeamMode, setGameMode } from '../../state/gameSlice';
 import { useSettings } from "../../context/SettingsContext";
+import type { BotDifficulty } from "../../config/gameConfig";
 // import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
 import GridBackground from "../components/ui/GridBackground";
@@ -123,13 +124,20 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
   );
 };
 
+const DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+  superHard: "Super Hard",
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
   const { settings } = useSettings();
   const [isNavigating, setIsNavigating] = useState(false);
-  const botDifficulty = settings.game.botDifficulty || "easy";
-  const difficultyLabel = botDifficulty.charAt(0).toUpperCase() + botDifficulty.slice(1);
+  const botDifficulty = (settings.game.botDifficulty || "easy") as BotDifficulty;
+  const difficultyLabel = DIFFICULTY_LABELS[botDifficulty] ?? "Easy";
 
   const handleStartSinglePlayer = () => {
     // Set default bot players and start single player game
@@ -137,11 +145,7 @@ export default function HomeScreen() {
     dispatch(resetGame()); // ✅ CRITICAL FIX: Reset game state first
     dispatch(setGameMode("single")); // Set game mode to single player
     dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Yellow, Green)
-    dispatch(
-      setBotDifficulty(
-        (settings.game.botDifficulty || "easy") as "easy" | "medium" | "hard"
-      )
-    );
+    dispatch(setBotDifficulty(botDifficulty));
     dispatch(setBotTeamMode(settings.game.botTeamMode || false));
     router.push("/(tabs)/GameScreen");
   };

@@ -2,7 +2,7 @@ import { useLocalSearchParams } from "expo-router";
 import React, { useMemo, useRef } from "react";
 import { Text, View, useWindowDimensions } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
-import Animated, { 
+import Animated, {
   withTiming,
   runOnUI
 } from "react-native-reanimated";
@@ -11,6 +11,8 @@ import { useSettings } from "../../../context/SettingsContext";
 import {
   deselectPiece,
   selectDerivedBoardState,
+  setPremove,
+  clearPremove,
 } from "../../../state/gameSlice";
 import { RootState } from "../../../state/store";
 import { getBoardTheme } from "./BoardThemeConfig";
@@ -25,7 +27,7 @@ import {
 } from "../../../services/gameFlowService";
 import MoveAnimator from "./MoveAnimator";
 import SkiaMoveAnimator from "./SkiaMoveAnimator";
-import { getBoardPointFromLocal } from "./boardDragUtils";
+import { getBoardPointFromLocal, getDragLiftOffset } from "./boardDragUtils";
 
 // Set to true to use GPU-accelerated Skia animations
 const USE_SKIA_ANIMATIONS = true;
@@ -56,6 +58,7 @@ import {
 import { useBoardAnimationOrchestration } from "./useBoardAnimationOrchestration";
 import { useGameFlowReady } from "./useGameFlowReady";
 import { useBoardGestures } from "./useBoardGestures";
+import type { PremoveState } from "../../../state/types";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -70,20 +73,23 @@ interface BoardProps {
     capturedPieces: string[];
     isCurrentTurn: boolean;
     isEliminated: boolean;
+    timeMs?: number;
   }>;
   // floatingPoints and onFloatingPointComplete removed for performance optimization
   boardRotation?: number;
+  viewerColor?: string | null;
   displayTurn?: string;
 }
 
-type Premove = {
-  from: Position;
-  to: Position;
-  piece: string;
-  moveInfo?: MoveInfo;
-};
 
-export default function Board({ onCapture, playerData, boardRotation = 0, displayTurn }: BoardProps) {
+
+export default function Board({
+  onCapture,
+  playerData,
+  boardRotation = 0,
+  viewerColor = null,
+  displayTurn,
+}: BoardProps) {
   const { width } = useWindowDimensions();
   // Board dimensions - adapts to screen size with tablet support
   const boardSize = React.useMemo(() => getBoardSize(), [width]);
@@ -95,7 +101,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   const boardTheme = useMemo(() => getBoardTheme(settings), [settings]);
   const { handleSquarePress: handleSquareSelection, getMovesForSquare, isValidMove } =
     useChessEngine();
-  
+
   // Use solo mode from settings if enabled, otherwise use the route mode
   const effectiveMode = settings.developer.soloMode ? "solo" : mode;
 
@@ -107,7 +113,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   // ✅ BITBOARD ONLY: Use selector that derives board from bitboards
   const boardState = useSelector(selectDerivedBoardState);
   const selectedPiece = useSelector((state: RootState) => state.game.selectedPiece);
-  
+
   // Memoize validMoves to use historical state when viewing history
   const displayValidMoves = useMemo(() => {
     if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
@@ -120,7 +126,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   const gameStatus = useSelector((state: RootState) => state.game.gameStatus);
   const eliminatedPlayers = useSelector((state: RootState) => state.game.eliminatedPlayers);
   const enPassantTargets = useSelector((state: RootState) => state.game.enPassantTargets);
-  
+
   // ✅ BITBOARD ONLY: Display board derives from bitboards, with history fallback
   const displayBoardState = useMemo(() => {
     if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
@@ -131,7 +137,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   // OPTIMIZATION: Use separate selectors to avoid creating new objects
   const currentPlayerTurn = useSelector((state: RootState) => state.game.currentPlayerTurn);
   const players = useSelector((state: RootState) => state.game.players);
-  
+
   // Get last move for highlighting
   const lastMove = useSelector((state: RootState) => state.game.lastMove);
   const displayLastMove = useMemo(() => {
@@ -141,27 +147,29 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
     return lastMove;
   }, [viewingHistoryIndex, history, lastMove]);
   const botPlayers = useSelector((state: RootState) => state.game.botPlayers);
+  const premove = useSelector((state: RootState) => state.game.premove);
+  const gameMode = useSelector((state: RootState) => state.game.gameMode);
   const [gameFlowState, gameFlowSend] = useGameFlowMachine();
-  
+
   const glowTurn = displayTurn ?? currentPlayerTurn;
   // Animation values for current player glow (extracted hook)
   const { glowOpacity, glowScale } = useBoardGlowAnimation(glowTurn);
-  
+
   // Drag state
   const [dragState, setDragState] = React.useState<{
     piece: string;
     from: { row: number; col: number };
   } | null>(null);
-  
+
   // Drag shared values (extracted hook)
   const dragSharedValues = useDragSharedValues();
   const {
-    dragX, dragY, dragScale, dragOffsetY,
+    dragX, dragY, dragScale, dragOffsetX, dragOffsetY,
     dragSnapActive, dragSnapTargets,
     validMoveMap, dragStartPos, lastSnappedKey, lastCursorKey,
     ghostOpacity, uiState,
   } = dragSharedValues;
-  
+
   // Visibility mask for zero-flicker piece hiding (extracted hook)
   const { visibilityMask, animationRunning, setMaskIndices, clearMask } = useVisibilityMask();
 
@@ -178,6 +186,8 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   const dragEndedRef = useRef(false);
   const suppressTapRef = useRef(false);
   const suppressTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentPlayerColorRef = useRef<string | null>(null);
+  const premovePendingRef = useRef<PremoveState | null>(null);
 
   // Drag performance logging (dev mode only)
   const ENABLE_DRAG_PERF_LOG = __DEV__;
@@ -249,7 +259,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
     visibilityMask,
     animationRunning,
   });
-  
+
   const dragValidMoveMap = useMemo(() => {
     const map = new Map<number, "move" | "capture">();
     dragValidMoves.forEach((move) => {
@@ -262,7 +272,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   const checkSquares = useMemo(() => {
     const squares: Array<{ row: number; col: number }> = [];
     if (!displayBoardState) return squares;
-    
+
     // Find all kings that are in check
     for (let row = 0; row < 14; row++) {
       const rowData = displayBoardState[row];
@@ -295,12 +305,24 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
           uiState.value = 0;
         })();
       };
-      
+
       if (!dragToMoveEnabled) {
         resetUiState();
         return;
       }
-      if (!isFlowReady || animationRunning.value === 1 || isViewingHistory) {
+      const localPlayerColor = currentPlayerColorRef.current;
+      const allowPremoveDuringAnimation =
+        effectiveMode === "online" &&
+        localPlayerColor &&
+        currentPlayerTurn !== localPlayerColor;
+      const canBypassFlowBlock =
+        allowPremoveDuringAnimation && (isFlowAnimating || animationRunning.value === 1);
+
+      if ((!isFlowReady || animationRunning.value === 1) && !canBypassFlowBlock) {
+        resetUiState();
+        return;
+      }
+      if (isViewingHistory) {
         resetUiState();
         return;
       }
@@ -326,7 +348,16 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
         resetUiState();
         return;
       }
-      if (piece[0] !== currentPlayerTurn) {
+      // In online mode, allow dragging your pieces for premove even when not your turn
+      // localPlayerColor is the local player's assigned color from onlineGameService
+      if (effectiveMode === "online" && localPlayerColor) {
+        // Only allow dragging pieces that belong to the local player
+        if (piece[0] !== localPlayerColor) {
+          resetUiState();
+          return;
+        }
+      } else if (piece[0] !== currentPlayerTurn) {
+        // In non-online modes, only allow dragging current turn's pieces
         resetUiState();
         return;
       }
@@ -357,7 +388,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       runOnUI(setMaskIndices)([hiddenIndex], true);
       dragStartRef.current = { x: point.x, y: point.y };
       dragStartPos.value = { row: point.row, col: point.col };
-      
+
       // Note: uiState.value = 1 is set by the gesture's onStart on UI thread
 
       dragValidMovesRef.current = getMovesForSquare({ row: point.row, col: point.col });
@@ -374,7 +405,9 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       dragHoverRef.current = null;
       setDragHover(null);
       dragScale.value = 1.45;
-      dragOffsetY.value = squareSize * DRAG_OFFSET_Y;
+      const liftOffset = getDragLiftOffset(squareSize * DRAG_OFFSET_Y, boardRotation);
+      dragOffsetX.value = liftOffset.x;
+      dragOffsetY.value = liftOffset.y;
       ghostOpacity.value = withTiming(0, { duration: 80 });
       suppressTapRef.current = true;
       if (suppressTapTimeoutRef.current) {
@@ -386,20 +419,24 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
     },
     [
       clearActiveAnimationPlan,
+      effectiveMode,
       dragToMoveEnabled,
       currentPlayerTurn,
       displayBoardState,
       animationRunning,
+      boardRotation,
       eliminatedPlayers,
       gameStatus,
       getMovesForSquare,
       handleSquareSelection,
+      isFlowAnimating,
       isFlowReady,
       isViewingHistory,
       resolveBoardPoint,
       selectedPiece,
       squareSize,
       dragScale,
+      dragOffsetX,
       dragOffsetY,
       dragSnapActive,
       dragSnapTargets,
@@ -407,7 +444,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       dragStartPos,
       lastSnappedKey,
       lastCursorKey,
-    setMaskIndices,
+      setMaskIndices,
       ghostOpacity,
       logDragPerf,
       nowMs,
@@ -440,6 +477,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
     runOnUI(clearMask)();
     dragSnapActive.value = 0;
     dragScale.value = 1;
+    dragOffsetX.value = 0;
     dragOffsetY.value = 0;
     ghostOpacity.value = 0;
     dragHoverRef.current = null;
@@ -463,6 +501,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   }, [
     dragState,
     dragScale,
+    dragOffsetX,
     dragOffsetY,
     ghostOpacity,
     clearPanStart,
@@ -522,49 +561,124 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
     displayBoardState,
     enPassantTargets,
     abortPendingDrop,
+    botPlayers,
   });
-
-  const [premove, setPremove] = React.useState<Premove | null>(null);
-  const canPremove =
-    !!currentPlayerColor && currentPlayerColor !== currentPlayerTurn;
-
   React.useEffect(() => {
-    if (!premove) return;
-    if (!currentPlayerColor) {
-      setPremove(null);
+    currentPlayerColorRef.current = currentPlayerColor;
+  }, [currentPlayerColor]);
+
+  // Premove execution - when it becomes your turn, execute pending premove
+  React.useEffect(() => {
+    if (!premove) {
+      premovePendingRef.current = null;
       return;
     }
-    if (currentPlayerTurn !== currentPlayerColor) return;
-    if (!isFlowReady || isViewingHistory || gameStatus !== "active") {
-      setPremove(null);
+
+    const isSamePremove = (a: PremoveState, b: PremoveState) =>
+      a.from.row === b.from.row &&
+      a.from.col === b.from.col &&
+      a.to.row === b.to.row &&
+      a.to.col === b.to.col &&
+      a.pieceCode === b.pieceCode;
+
+    const isPremoveApplied = () => {
+      const matchesLastMove =
+        lastMove &&
+        lastMove.from.row === premove.from.row &&
+        lastMove.from.col === premove.from.col &&
+        lastMove.to.row === premove.to.row &&
+        lastMove.to.col === premove.to.col;
+      if (matchesLastMove) {
+        return true;
+      }
+      const pieceAtTarget = displayBoardState?.[premove.to.row]?.[premove.to.col];
+      return pieceAtTarget === premove.pieceCode;
+    };
+
+    const pending = premovePendingRef.current;
+    if (pending && isSamePremove(pending, premove)) {
+      if (isPremoveApplied()) {
+        premovePendingRef.current = null;
+        dispatch(clearPremove());
+      }
       return;
     }
-    const pieceNow = displayBoardState?.[premove.from.row]?.[premove.from.col];
-    if (!pieceNow || pieceNow[0] !== currentPlayerColor) {
-      setPremove(null);
+
+    if (
+      effectiveMode !== "online" ||
+      !currentPlayerColor ||
+      currentPlayerTurn !== currentPlayerColor ||
+      gameStatus !== "active"
+    ) {
       return;
     }
-    if (!isValidMove(premove.from, premove.to, pieceNow)) {
-      setPremove(null);
+
+    // Validate the premove is still legal
+    const pieceAtFrom = displayBoardState?.[premove.from.row]?.[premove.from.col];
+    if (!pieceAtFrom || pieceAtFrom !== premove.pieceCode) {
+      // Piece moved or captured, clear premove
+      premovePendingRef.current = null;
+      dispatch(clearPremove());
       return;
     }
-    executeMoveFrom(premove.from, premove.to, premove.moveInfo);
-    setPremove(null);
+
+    // Check if move is still valid
+    const isStillValid = isValidMove(premove.from, premove.to, premove.pieceCode);
+    if (!isStillValid) {
+      premovePendingRef.current = null;
+      dispatch(clearPremove());
+      try {
+        const notificationService = require('../../../services/notificationService').default;
+        notificationService.show("Premove cancelled - no longer valid", "warning", 1500);
+      } catch {}
+      return;
+    }
+
+    // Execute the premove
+    const moveInfo = getMovesForSquare(premove.from).find(
+      (m) => m.row === premove.to.row && m.col === premove.to.col
+    );
+    
+    premovePendingRef.current = premove;
+    executeMoveFrom(premove.from, premove.to, moveInfo);
   }, [
+    effectiveMode,
     premove,
     currentPlayerColor,
     currentPlayerTurn,
-    isFlowReady,
-    isViewingHistory,
     gameStatus,
     displayBoardState,
-    executeMoveFrom,
+    lastMove,
     isValidMove,
+    getMovesForSquare,
+    executeMoveFrom,
+    dispatch,
   ]);
+
 
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
-    if (!isFlowReady || animationRunning.value === 1 || dragState || suppressTapRef.current) {
+    const allowPremoveDuringAnimation =
+      effectiveMode === "online" &&
+      currentPlayerColor &&
+      currentPlayerTurn !== currentPlayerColor;
+    const canBypassFlowBlock =
+      allowPremoveDuringAnimation && (isFlowAnimating || animationRunning.value === 1);
+
+    if ((!isFlowReady || animationRunning.value === 1) && !canBypassFlowBlock) {
+      return;
+    }
+    if (dragState || suppressTapRef.current) {
+      return;
+    }
+
+    // Toggle off premove by tapping its destination square again
+    if (
+      premove &&
+      premove.to.row === row &&
+      premove.to.col === col
+    ) {
+      dispatch(clearPremove());
       return;
     }
 
@@ -579,14 +693,10 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       return;
     }
 
-    // Toggle premove off if tapping the same target again
-    if (canPremove && premove && premove.to.row === row && premove.to.col === col) {
-      setPremove(null);
-      return;
-    }
+
 
     const pieceCode = displayBoardState[row][col];
-    
+
     // OPTIMIZATION: Use cached valid moves instead of recalculating
     const isAValidMove = displayValidMoves.some(
       (move) => move.row === row && move.col === col
@@ -608,20 +718,9 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       const moveInfo = displayValidMoves.find(
         (move) => move.row === row && move.col === col
       );
-      if (canPremove) {
-        const premovePiece = displayBoardState?.[selectedPiece.row]?.[selectedPiece.col];
-        if (premovePiece && premovePiece[0] === currentPlayerColor) {
-          setPremove({
-            from: { row: selectedPiece.row, col: selectedPiece.col },
-            to: { row, col },
-            piece: premovePiece,
-            moveInfo,
-          });
-          dispatch(deselectPiece());
-          return;
-        }
-      }
+
       executeMoveFrom(
+
         { row: selectedPiece.row, col: selectedPiece.col },
         { row, col },
         moveInfo
@@ -634,9 +733,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       }
 
       // Otherwise, just try to select the piece on the pressed square
-      if (pieceCode && canPremove && pieceCode[0] !== currentPlayerColor) {
-        return;
-      }
+
       handleSquareSelection({ row, col });
     }
   };
@@ -675,15 +772,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
     ]
   );
 
-  const premoveTarget = useMemo(() => {
-    if (!premove) return null;
-    const targetPiece = displayBoardState?.[premove.to.row]?.[premove.to.col];
-    return {
-      row: premove.to.row,
-      col: premove.to.col,
-      type: premove.moveInfo?.isCapture || !!targetPiece ? "capture" : "move",
-    } as DragTarget;
-  }, [premove, displayBoardState]);
+
 
   const commitMove = React.useCallback(
     (fromRow: number, fromCol: number, toRow: number, toCol: number) => {
@@ -694,21 +783,21 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
       if (pieceAtFrom) {
         pendingDropRef.current = { from, to, piece: pieceAtFrom };
       }
-      
+
       // Find move info
       const moveInfo = dragValidMovesRef.current.find(
         (m) => m.row === toRow && m.col === toCol
       );
-      
+
       // Skip animation for drag moves (set BEFORE dispatch)
       if (pieceAtFrom) {
         markSkipNextMoveAnimation();
         skipNextAnimationRef.current = true;
       }
-      
+
       // Execute move (Redux dispatch)
       executeMoveFrom(from, to, moveInfo);
-      
+
       // Note: We do NOT clear dragState here. We wait for the board update.
       // This keeps the "Drag View" visible at the target position until the real piece appears.
       // Sound is handled by the lastMove effect (single source of truth)
@@ -720,6 +809,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   const { boardGesture } = useBoardGestures({
     boardSize,
     squareSize,
+    boardRotation,
     sharedValues: dragSharedValues,
     enableTapToMove: tapToMoveEnabled,
     enableDragToMove: dragToMoveEnabled,
@@ -742,7 +832,7 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
           width: boardSize,
           height: boardSize,
           alignSelf: "center",
-          marginTop: 20,
+          // marginTop: 20,
           justifyContent: "center",
           alignItems: "center",
         }}
@@ -755,7 +845,12 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
   return (
     <GestureDetector gesture={boardGesture}>
       <View
-        style={{ width: boardSize, height: boardSize, alignSelf: "center", marginTop: 20 }}
+        style={{
+          width: boardSize,
+          height: boardSize,
+          alignSelf: "center",
+          transform: [{ rotate: `${boardRotation}deg` }],
+        }}
       >
         {/* SVG Border Glow Layer */}
         <BoardGlowSVG
@@ -776,163 +871,160 @@ export default function Board({ onCapture, playerData, boardRotation = 0, displa
           }}
         >
           {displayBoardState.map((row, rowIndex) => {
-          // Skip null rows (buffer rows in 4-player chess)
-          if (!row || !Array.isArray(row)) {
+            // Skip null rows (buffer rows in 4-player chess)
+            if (!row || !Array.isArray(row)) {
+              return (
+                <View
+                  key={rowIndex}
+                  style={{ flexDirection: "row", height: squareSize }}
+                >
+                  {Array.from({ length: 14 }, (_, colIndex) => {
+                    const isCornerSquare = (rowIndex < 3 && colIndex < 3) ||
+                      (rowIndex < 3 && colIndex > 10) ||
+                      (rowIndex > 10 && colIndex < 3) ||
+                      (rowIndex > 10 && colIndex > 10);
+
+                    return (
+                      <View
+                        key={`${rowIndex}-${colIndex}`}
+                        style={{
+                          width: squareSize,
+                          height: squareSize,
+                          backgroundColor: isCornerSquare ? "transparent" :
+                            (rowIndex + colIndex) % 2 === 0
+                              ? boardTheme.lightSquare
+                              : boardTheme.darkSquare,
+                        }}
+                      />
+                    );
+                  })}
+                </View>
+              );
+            }
+
             return (
-              <View
-                key={rowIndex}
-                style={{ flexDirection: "row", height: squareSize }}
-              >
-                {Array.from({ length: 14 }, (_, colIndex) => {
-                  const isCornerSquare = (rowIndex < 3 && colIndex < 3) ||
-                    (rowIndex < 3 && colIndex > 10) ||
-                    (rowIndex > 10 && colIndex < 3) ||
-                    (rowIndex > 10 && colIndex > 10);
-                  
+              <View key={rowIndex} style={{ flexDirection: "row" }}>
+                {row.map((piece, colIndex) => {
+                  const boardKey = rowIndex * 14 + colIndex;
+                  const isLight = (rowIndex + colIndex) % 2 === 0;
+                  const isCornerCenter =
+                    (rowIndex === 1 && colIndex === 1) ||
+                    (rowIndex === 1 && colIndex === 12) ||
+                    (rowIndex === 12 && colIndex === 1) ||
+                    (rowIndex === 12 && colIndex === 12);
+                  const moveType = moveTypeMap[boardKey];
+                  const captureColor =
+                    moveType === "capture" ? selectedPieceColor ?? undefined : undefined;
                   return (
-                    <View
+                    <Square
                       key={`${rowIndex}-${colIndex}`}
-                      style={{
-                        width: squareSize,
-                        height: squareSize,
-                        backgroundColor: isCornerSquare ? "transparent" :
-                          (rowIndex + colIndex) % 2 === 0
-                            ? boardTheme.lightSquare
-                            : boardTheme.darkSquare,
-                      }}
+                      piece={piece}
+                      color={isLight ? "light" : "dark"}
+                      size={squareSize}
+                      row={rowIndex}
+                      col={colIndex}
+                      onPress={undefined}
+                      pressEnabled={false}
+                      isSelected={
+                        selectedPiece?.row === rowIndex &&
+                        selectedPiece?.col === colIndex
+                      }
+                      moveType={moveType}
+                      capturingPieceColor={captureColor}
+                      isInCheck={
+                        !!(
+                          piece &&
+                          piece[1] === "K" &&
+                          checkStatus[piece[0] as keyof typeof checkStatus]
+                        )
+                      }
+                      isEliminated={isPieceEliminated(piece, eliminatedPlayers)}
+                      isInteractable={true}
+                      boardTheme={boardTheme}
+                      playerData={isCornerCenter ? playerData : undefined}
+                      boardRotation={boardRotation}
+                      viewerColor={viewerColor}
+                      visibilityMask={visibilityMask}
                     />
                   );
                 })}
               </View>
             );
-          }
+          })}
+        </View>
 
-          return (
-            <View key={rowIndex} style={{ flexDirection: "row" }}>
-              {row.map((piece, colIndex) => {
-                const boardKey = rowIndex * 14 + colIndex;
-                const isLight = (rowIndex + colIndex) % 2 === 0;
-                const isCornerCenter =
-                  (rowIndex === 1 && colIndex === 1) ||
-                  (rowIndex === 1 && colIndex === 12) ||
-                  (rowIndex === 12 && colIndex === 1) ||
-                  (rowIndex === 12 && colIndex === 12);
-                const moveType = moveTypeMap[boardKey];
-                const captureColor =
-                  moveType === "capture" ? selectedPieceColor ?? undefined : undefined;
-                return (
-                  <Square
-                    key={`${rowIndex}-${colIndex}`}
-                    piece={piece}
-                    color={isLight ? "light" : "dark"}
-                    size={squareSize}
-                    row={rowIndex}
-                    col={colIndex}
-                    onPress={undefined}
-                    pressEnabled={false}
-                    isSelected={
-                      selectedPiece?.row === rowIndex &&
-                      selectedPiece?.col === colIndex
-                    }
-                    moveType={moveType}
-                    capturingPieceColor={captureColor}
-                    isInCheck={
-                      !!(
-                        piece &&
-                        piece[1] === "K" &&
-                        checkStatus[piece[0] as keyof typeof checkStatus]
-                      )
-                    }
-                    isEliminated={isPieceEliminated(piece, eliminatedPlayers)}
-                    isInteractable={true}
-                    boardTheme={boardTheme}
-                    playerData={isCornerCenter ? playerData : undefined}
-                    boardRotation={boardRotation}
-                    visibilityMask={visibilityMask}
-                  />
-                );
-              })}
-            </View>
-          );
-        })}
+        {/* GPU-accelerated overlay canvas for valid moves, check indicators, highlights */}
+        <BoardOverlayCanvas
+          boardSize={boardSize}
+          squareSize={squareSize}
+          validMoves={displayValidMoves}
+          selectedPiece={selectedPiece}
+          selectedPieceColor={selectedPieceColor}
+          checkSquares={checkSquares}
+          lastMove={displayLastMove}
+          premove={premove}
+        />
+
+
+
+        {dragHover && (
+          <DragHoverIndicator
+            dragHover={dragHover}
+            squareSize={squareSize}
+            pieceColor={dragState?.piece?.[0]}
+          />
+        )}
+
+        {dragState && (
+          <DraggedPiece
+            piece={dragState.piece}
+            size={squareSize}
+            viewerColor={viewerColor}
+            dragX={dragX}
+            dragY={dragY}
+            dragScale={dragScale}
+            dragOffsetX={dragOffsetX}
+            dragOffsetY={dragOffsetY}
+          />
+        )}
+
+        {/* Optimistic UI: show piece at target immediately after drop */}
+        {/* REMOVED LENS VIEW */}
+
+        {effectivePlan && !dragState && (
+          USE_SKIA_ANIMATIONS ? (
+            <SkiaMoveAnimator
+              key={animationKey ?? "skia-move-animator"}
+              plan={effectivePlan}
+              piecesMap={animationPiecesMap}
+              movePieceOverrides={movePieceOverrides}
+              squareSize={squareSize}
+              viewerColor={viewerColor}
+              onComplete={handleAnimationComplete}
+              onCompleteUI={handleAnimationCompleteUI}
+              animationRunning={animationRunning}
+            />
+          ) : (
+            <MoveAnimator
+              key={animationKey ?? "move-animator"}
+              plan={effectivePlan}
+              piecesMap={animationPiecesMap}
+              movePieceOverrides={movePieceOverrides}
+              squareSize={squareSize}
+              viewerColor={viewerColor}
+              onComplete={handleAnimationComplete}
+              onCompleteUI={handleAnimationCompleteUI}
+              animationRunning={animationRunning}
+            />
+          )
+        )}
+
+        {/* 🎯 Capture Animation Layer - DISABLED */}
+        {/* AnimatedCapture and FloatingPointsText components removed for performance */}
+
+        {/* 💰 Floating Points Layer - DISABLED */}
+        {/* Components removed for performance optimization */}
       </View>
-
-      {/* GPU-accelerated overlay canvas for valid moves, check indicators, highlights */}
-      <BoardOverlayCanvas
-        boardSize={boardSize}
-        squareSize={squareSize}
-        validMoves={displayValidMoves}
-        selectedPiece={selectedPiece}
-        selectedPieceColor={selectedPieceColor}
-        checkSquares={checkSquares}
-        lastMove={displayLastMove}
-      />
-
-      {premoveTarget && premove && !isViewingHistory && (
-        <DragHoverIndicator
-          dragHover={premoveTarget}
-          squareSize={squareSize}
-          pieceColor={premove.piece?.[0]}
-        />
-      )}
-
-      {dragHover && (
-        <DragHoverIndicator
-          dragHover={dragHover}
-          squareSize={squareSize}
-          pieceColor={dragState?.piece?.[0]}
-        />
-      )}
-
-      {dragState && (
-        <DraggedPiece
-          piece={dragState.piece}
-          size={squareSize}
-          boardRotation={boardRotation}
-          dragX={dragX}
-          dragY={dragY}
-          dragScale={dragScale}
-          dragOffsetY={dragOffsetY}
-        />
-      )}
-
-      {/* Optimistic UI: show piece at target immediately after drop */}
-      {/* REMOVED LENS VIEW */}
-
-      {effectivePlan && !dragState && (
-        USE_SKIA_ANIMATIONS ? (
-          <SkiaMoveAnimator
-            key={animationKey ?? "skia-move-animator"}
-            plan={effectivePlan}
-            piecesMap={animationPiecesMap}
-            movePieceOverrides={movePieceOverrides}
-            squareSize={squareSize}
-            boardRotation={boardRotation}
-            onComplete={handleAnimationComplete}
-            onCompleteUI={handleAnimationCompleteUI}
-            animationRunning={animationRunning}
-          />
-        ) : (
-          <MoveAnimator
-            key={animationKey ?? "move-animator"}
-            plan={effectivePlan}
-            piecesMap={animationPiecesMap}
-            movePieceOverrides={movePieceOverrides}
-            squareSize={squareSize}
-            boardRotation={boardRotation}
-            onComplete={handleAnimationComplete}
-            onCompleteUI={handleAnimationCompleteUI}
-            animationRunning={animationRunning}
-          />
-        )
-      )}
-
-      {/* 🎯 Capture Animation Layer - DISABLED */}
-      {/* AnimatedCapture and FloatingPointsText components removed for performance */}
-      
-      {/* 💰 Floating Points Layer - DISABLED */}
-      {/* Components removed for performance optimization */}
-    </View>
-  </GestureDetector>
+    </GestureDetector>
   );
 }

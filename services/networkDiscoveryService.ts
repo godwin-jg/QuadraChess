@@ -78,28 +78,28 @@ class NetworkDiscoveryService {
 
     // Also listen for zeroconf events as backup
     this.zeroconf.on('found', (service: any) => {
-      // Reduced logging - only log QuadChess games
+      // Reduced logging - only log Quadrachess games
       if (service.name && service.name.includes("Game")) {
-        console.log('NetworkDiscovery: Zeroconf found QuadChess game:', service.name);
+        console.log('NetworkDiscovery: Zeroconf found Quadrachess game:', service.name);
       }
     });
 
     this.zeroconf.on('resolved', (service: any) => {
-      // Only log QuadChess games to reduce noise
+      // Only log Quadrachess games to reduce noise
       if (service.name && service.name.includes("Game")) {
         console.log('NetworkDiscovery: Zeroconf service resolved:', service.name);
         console.log('NetworkDiscovery: Service txt:', service.txt);
       }
       
-      // Check if this is a QuadChess game by looking at the TXT record
+      // Check if this is a Quadrachess game by looking at the TXT record
       const txt = service.txt || {};
       if (txt.gameId && txt.joinCode && txt.hostName) {
-        console.log('NetworkDiscovery: Found QuadChess game via TXT record:', service.name);
+        console.log('NetworkDiscovery: Found Quadrachess game via TXT record:', service.name);
         
         // Convert zeroconf service format to our format
         const gameService: GameService = {
           name: service.name,
-          type: '_quadchess._tcp.', // This is a QuadChess game
+          type: '_quadrachess._tcp.', // This is a Quadrachess game
           domain: 'local.',
           hostName: service.host,
           addresses: service.addresses,
@@ -108,7 +108,7 @@ class NetworkDiscoveryService {
         };
         this.handleServiceFound(gameService);
       } else {
-        console.log('NetworkDiscovery: Ignoring non-QuadChess service:', service.name);
+        console.log('NetworkDiscovery: Ignoring non-Quadrachess service:', service.name);
       }
     });
 
@@ -151,7 +151,7 @@ class NetworkDiscoveryService {
   private async stopCurrentScans(): Promise<void> {
     try {
       // Stop ServiceDiscovery
-      await ServiceDiscovery.stopSearch('quadchess');
+      await ServiceDiscovery.stopSearch('quadrachess');
       
       // Stop zeroconf scans
       this.zeroconf.stop();
@@ -166,12 +166,12 @@ class NetworkDiscoveryService {
   }
 
   private handleServiceFound(service: GameService): void {
-    // Only handle QuadChess games
-    if (service.type !== '_quadchess._tcp.') {
+    // Only handle Quadrachess games
+    if (service.type !== '_quadrachess._tcp.') {
       return;
     }
 
-    console.log('NetworkDiscovery: QuadChess game found:', service.name);
+    console.log('NetworkDiscovery: Quadrachess game found:', service.name);
 
     // Parse game info from TXT record
     const gameInfo = this.parseGameInfo(service);
@@ -187,12 +187,12 @@ class NetworkDiscoveryService {
   }
 
   private handleServiceLost(service: GameService): void {
-    // Only handle QuadChess games
-    if (service.type !== '_quadchess._tcp.') {
+    // Only handle Quadrachess games
+    if (service.type !== '_quadrachess._tcp.') {
       return;
     }
 
-    console.log('NetworkDiscovery: QuadChess game lost:', service.name);
+    console.log('NetworkDiscovery: Quadrachess game lost:', service.name);
 
     // Find and remove the game
     const gameId = this.findGameIdByName(service.name);
@@ -278,7 +278,7 @@ class NetworkDiscoveryService {
     await this.initializeIfNeeded();
 
     try {
-      console.log('NetworkDiscovery: Starting multi-interface discovery for _quadchess._tcp. services');
+      console.log('NetworkDiscovery: Starting multi-interface discovery for _quadrachess._tcp. services');
       
       // Get available network interfaces including hotspots
       const interfaces = await this.networkInterfaceService.getBestInterfaceForDiscovery();
@@ -291,7 +291,7 @@ class NetworkDiscoveryService {
       await this.startMultiInterfaceDiscovery();
       
       this.isSearching = true;
-      console.log('NetworkDiscovery: Started multi-interface discovery for QuadChess games');
+      console.log('NetworkDiscovery: Started multi-interface discovery for Quadrachess games');
     } catch (error) {
       console.error('NetworkDiscovery: Failed to start search:', error);
       throw error;
@@ -302,7 +302,7 @@ class NetworkDiscoveryService {
     try {
       // Start search with ServiceDiscovery first
       console.log('NetworkDiscovery: Starting ServiceDiscovery search...');
-      await ServiceDiscovery.startSearch('quadchess');
+      await ServiceDiscovery.startSearch('quadrachess');
       console.log('NetworkDiscovery: ServiceDiscovery search started');
       
       // Wait a bit for ServiceDiscovery to work
@@ -320,7 +320,7 @@ class NetworkDiscoveryService {
             
             try {
               // Scan on the specific interface
-              this.zeroconf.scan('_quadchess._tcp', 'tcp', 'local.');
+              this.zeroconf.scan('_quadrachess._tcp', 'tcp', 'local.');
               this.activeScans.add(scanKey);
               
               console.log(`NetworkDiscovery: Zeroconf scan started on ${iface.name}`);

@@ -3,6 +3,7 @@ import networkService, { Player } from "../app/services/networkService";
 import { getValidMoves, hasAnyLegalMoves } from "../src/logic/gameLogic";
 import { MoveInfo } from "../types";
 import { PIECE_VALUES, GAME_BONUSES, TURN_ORDER } from "../config/gameConfig";
+import type { BotDifficulty } from "../config/gameConfig";
 import { EnPassantTarget } from "./types";
 import { squareBit, getPieceAtFromBitboard } from "../src/logic/bitboardUtils";
 import { initialBoardState } from "./boardState";
@@ -204,49 +205,49 @@ const applyTimeoutLogic = (state: GameState, timedOutPlayer: ClockColor, now: nu
   if (state.teamMode) {
     endTeamGame(state, timedOutPlayer, "finished", now);
   } else {
-  state.clocks[timedOutPlayer] = 0;
+    state.clocks[timedOutPlayer] = 0;
 
-  if (!state.eliminatedPlayers.includes(timedOutPlayer)) {
-    state.eliminatedPlayers.push(timedOutPlayer);
-    state.justEliminated = timedOutPlayer;
-    cleanupEliminatedPlayer(state, timedOutPlayer);
-  }
-
-  // Clear selection
-  state.selectedPiece = null;
-  state.validMoves = [];
-
-  // Update check status for all players
-  state.checkStatus = updateAllCheckStatus(state);
-
-  // Check if the entire game is over
-  if (state.eliminatedPlayers.length === 3) {
-    const winner = turnOrder.find(
-      (player) => !state.eliminatedPlayers.includes(player)
-    );
-    if (winner) {
-      state.winner = winner;
-      state.gameStatus = "finished";
-      state.gameOverState = {
-        isGameOver: true,
-        status: "finished",
-        eliminatedPlayer: null,
-      };
+    if (!state.eliminatedPlayers.includes(timedOutPlayer)) {
+      state.eliminatedPlayers.push(timedOutPlayer);
+      state.justEliminated = timedOutPlayer;
+      cleanupEliminatedPlayer(state, timedOutPlayer);
     }
-    state.turnStartedAt = null;
-  } else {
-    const currentIndex = turnOrder.indexOf(timedOutPlayer as any);
-    const nextIndex = (currentIndex + 1) % turnOrder.length;
-    let nextActivePlayer = turnOrder[nextIndex];
-    while (state.eliminatedPlayers.includes(nextActivePlayer)) {
-      const activeIndex = turnOrder.indexOf(nextActivePlayer as any);
-      const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
-      nextActivePlayer = turnOrder[nextActiveIndex];
+
+    // Clear selection
+    state.selectedPiece = null;
+    state.validMoves = [];
+
+    // Update check status for all players
+    state.checkStatus = updateAllCheckStatus(state);
+
+    // Check if the entire game is over
+    if (state.eliminatedPlayers.length === 3) {
+      const winner = turnOrder.find(
+        (player) => !state.eliminatedPlayers.includes(player)
+      );
+      if (winner) {
+        state.winner = winner;
+        state.gameStatus = "finished";
+        state.gameOverState = {
+          isGameOver: true,
+          status: "finished",
+          eliminatedPlayer: null,
+        };
+      }
+      state.turnStartedAt = null;
+    } else {
+      const currentIndex = turnOrder.indexOf(timedOutPlayer as any);
+      const nextIndex = (currentIndex + 1) % turnOrder.length;
+      let nextActivePlayer = turnOrder[nextIndex];
+      while (state.eliminatedPlayers.includes(nextActivePlayer)) {
+        const activeIndex = turnOrder.indexOf(nextActivePlayer as any);
+        const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
+        nextActivePlayer = turnOrder[nextActiveIndex];
+      }
+      state.currentPlayerTurn = nextActivePlayer;
+      state.gameStatus = "active";
+      state.turnStartedAt = now;
     }
-    state.currentPlayerTurn = nextActivePlayer;
-    state.gameStatus = "active";
-    state.turnStartedAt = now;
-  }
   }
 
   // Clear move cache when game state changes
@@ -280,15 +281,15 @@ export { baseInitialState } from "./initialState";
 // ✅ Core game logic function - DRY principle implementation
 // This function contains all the shared logic for processing moves
 const _applyMoveLogic = (
-  state: GameState, 
-  move: { 
-    from: Position; 
-    to: Position; 
-    pieceCode: string; 
-    playerColor: string; 
-    capturedPiece: string | null; 
-    isCastling: boolean; 
-    isEnPassant: boolean; 
+  state: GameState,
+  move: {
+    from: Position;
+    to: Position;
+    pieceCode: string;
+    playerColor: string;
+    capturedPiece: string | null;
+    isCastling: boolean;
+    isEnPassant: boolean;
     isPromotion?: boolean;
     enPassantTarget?: EnPassantTarget | null; // ✅ Enhanced type safety
   }
@@ -307,7 +308,7 @@ const _applyMoveLogic = (
   const { row: startRow, col: startCol } = from;
   const { row: targetRow, col: targetCol } = to;
   const pieceType = pieceCode[1];
-  
+
   // ✅ BITBOARD ONLY: No boardState backup needed - derive from bitboards
   const prevState = {
     bitboardState: {
@@ -513,7 +514,7 @@ const _applyMoveLogic = (
   // Handle regular capture (only for non-castling moves and non-en passant captures)
   if (capturedPiece && !isCastling && !isEnPassant) {
     const capturedColor = capturedPiece[0];
-    
+
     // Skip if the "captured" piece belongs to an eliminated player (just visual)
     if (!state.eliminatedPlayers.includes(capturedColor)) {
       // Prevent king capture - kings cannot be captured
@@ -580,7 +581,7 @@ const _applyMoveLogic = (
 
   // Update check status for all players
   const newCheckStatus = updateAllCheckStatus(state);
-  
+
   state.checkStatus = newCheckStatus;
 
   // Check if the current player is in check after their move
@@ -761,7 +762,7 @@ const gameSlice = createSlice({
     },
     setBotDifficulty: (
       state,
-      action: PayloadAction<"easy" | "medium" | "hard">
+      action: PayloadAction<BotDifficulty>
     ) => {
       state.botDifficulty = action.payload;
     },
@@ -787,6 +788,18 @@ const gameSlice = createSlice({
       state.selectedPiece = null;
       state.validMoves = [];
     },
+    // Premove actions for online play
+    setPremove: (state, action: PayloadAction<{ from: Position; to: Position; pieceCode: string }>) => {
+      // Only allow premove in online mode
+      if (state.gameMode !== "online") return;
+      state.premove = action.payload;
+      // Clear selection after setting premove
+      state.selectedPiece = null;
+      state.validMoves = [];
+    },
+    clearPremove: (state) => {
+      state.premove = null;
+    },
     selectPiece: (state, action: PayloadAction<Position>) => {
       // OPTIMIZATION: Removed console.log statements for better performance
 
@@ -811,16 +824,20 @@ const gameSlice = createSlice({
         return;
       }
 
-      if (!pieceCode || pieceCode[0] !== state.currentPlayerTurn) {
+      // Check if the piece belongs to an eliminated player
+      const pieceColor = pieceCode?.charAt(0);
+      if (!pieceCode || (pieceColor && state.eliminatedPlayers.includes(pieceColor))) {
         state.selectedPiece = null;
         state.validMoves = [];
         return;
       }
 
-      // Check if the piece belongs to an eliminated player
-      const pieceColor = pieceCode.charAt(0);
-      if (state.eliminatedPlayers.includes(pieceColor)) {
-        return; // Do nothing if the piece belongs to an eliminated player
+      // In online mode, allow selecting pieces for premove even when not your turn
+      // In other modes, only allow selecting current player's pieces
+      if (state.gameMode !== "online" && pieceColor !== state.currentPlayerTurn) {
+        state.selectedPiece = null;
+        state.validMoves = [];
+        return;
       }
 
       const movesBB = getValidMovesBB(pieceCode, action.payload, state);
@@ -832,6 +849,11 @@ const gameSlice = createSlice({
       );
       state.selectedPiece = action.payload;
       
+      // Clear any existing premove when selecting a new piece
+      if (state.gameMode === "online") {
+        state.premove = null;
+      }
+
     },
     makeMove: (state, action: PayloadAction<MovePayload>) => {
       // Don't allow moves when viewing historical moves
@@ -851,7 +873,7 @@ const gameSlice = createSlice({
 
       // ✅ BITBOARD ONLY: Read from bitboards
       const pieceToMove = getPieceAtFromBitboard(state.bitboardState.pieces, startRow, startCol);
-      
+
       if (!pieceToMove) return;
 
       // Check if en passant opportunities should expire
@@ -880,7 +902,7 @@ const gameSlice = createSlice({
         if (pieceColor !== state.currentPlayerTurn) {
           return; // Don't make the move
         }
-        
+
         // Import the P2P service dynamically to avoid circular imports
         const p2pGameService = require("../services/p2pGameService").default;
         const moveData = {
@@ -889,12 +911,12 @@ const gameSlice = createSlice({
           pieceCode: pieceToMove,
           playerColor: pieceColor,
         };
-        
+
         // Send move through P2P service (this will handle validation and synchronization)
         p2pGameService.makeMove(moveData).catch((error: any) => {
           console.error("P2P move failed:", error);
         });
-        
+
         // Don't apply the move locally - let the P2P service handle it
         return;
       }
@@ -991,13 +1013,13 @@ const gameSlice = createSlice({
       const currentGameMode = state.gameMode;
       const currentBotPlayers = [...state.botPlayers]; // Create a copy to preserve
       const currentBotDifficulty = state.botDifficulty;
-      
+
       // ✅ CRITICAL FIX: Completely clear all state properties first
       // Delete all existing properties to ensure no stale data persists
       Object.keys(state).forEach(key => {
         delete (state as any)[key];
       });
-      
+
       // ✅ CRITICAL FIX: Assign the complete baseInitialState
       // This ensures ALL properties are properly reset
       Object.assign(state, {
@@ -1015,11 +1037,11 @@ const gameSlice = createSlice({
         state,
         state.currentPlayerTurn
       );
-      
+
       // Restore the game mode after reset
       state.gameMode = currentGameMode;
       state.botDifficulty = currentBotDifficulty;
-      
+
       // Set bots based on game mode and preserve user configuration
       if (currentGameMode === "single") {
         // For single player mode, always use the default bot configuration (Red is human, others are bots)
@@ -1032,7 +1054,7 @@ const gameSlice = createSlice({
       } else {
         state.botPlayers = []; // Other modes have no bots
       }
-      
+
       // Initialize history as empty - no initial snapshot
       state.history = [];
       state.historyIndex = 0; // This should be 0 for the current state, not viewing history
@@ -1067,9 +1089,9 @@ const gameSlice = createSlice({
     ) => {
       if (state.promotionState.isAwaiting && state.promotionState.position) {
         const { pieceType } = action.payload;
-        
+
         // ✅ Sound effects moved to UI layer (Board.tsx useEffect)
-        
+
         const { row, col } = state.promotionState.position;
         const pieceColor = state.promotionState.color!;
 
@@ -1121,7 +1143,7 @@ const gameSlice = createSlice({
         currentViewingHistoryIndex: state.viewingHistoryIndex,
         historyLength: state.history.length
       });
-      
+
       if (action.payload === "back") {
         // Start button: Always go to the first move (index 0) or back to live if already at first move
         if (state.viewingHistoryIndex === null) {
@@ -1147,8 +1169,8 @@ const gameSlice = createSlice({
         // Go one step forward in history
         state.viewingHistoryIndex++;
         console.log('Stepped forward to index:', state.viewingHistoryIndex);
-      } 
-      
+      }
+
       console.log('Final viewingHistoryIndex:', state.viewingHistoryIndex);
     },
     returnToLive: (state) => {
@@ -1333,7 +1355,7 @@ const gameSlice = createSlice({
       // Store the current justEliminated flag before processing the move
       const previousJustEliminated = state.justEliminated;
       const now = action.payload.timestamp ?? Date.now();
-      
+
       const { from, to, pieceCode, playerColor, isEnPassant = false, enPassantTarget } = action.payload;
 
       // ✅ Handle resignation messages
@@ -1421,7 +1443,7 @@ const gameSlice = createSlice({
       const { row: toRow, col: toCol } = to;
       // ✅ BITBOARD ONLY: Read from bitboards
       const capturedPiece = getPieceAtFromBitboard(state.bitboardState.pieces, toRow, toCol);
-      
+
       // Check if trying to capture a king - prevent king capture (unless eliminated)
       if (capturedPiece && capturedPiece[1] === "K") {
         const capturedColor = capturedPiece[0];
@@ -1493,7 +1515,8 @@ const gameSlice = createSlice({
     syncGameState: (state, action: PayloadAction<GameState>) => {
       // Sync the entire game state from network (create new state object)
       const networkState = action.payload;
-      const mergedState = { ...state, ...networkState };
+      const preservedPremove = state.premove; // Preserve local premove
+      const mergedState = { ...state, ...networkState, premove: preservedPremove };
       ensureClockState(mergedState);
       if (!mergedState.eliminatedPieceBitboards) {
         mergedState.eliminatedPieceBitboards = deriveEliminatedPieceBitboardsFromBoard(
@@ -1518,6 +1541,7 @@ const gameSlice = createSlice({
       const preservedSelectedPiece = state.selectedPiece;
       const preservedValidMoves = state.validMoves;
       const preservedViewingHistoryIndex = state.viewingHistoryIndex;
+      const preservedPremove = state.premove; // Preserve local premove
 
       const mergedState: GameState = {
         ...state,
@@ -1525,6 +1549,7 @@ const gameSlice = createSlice({
         selectedPiece: preservedSelectedPiece,
         validMoves: preservedValidMoves,
         viewingHistoryIndex: preservedViewingHistoryIndex,
+        premove: preservedPremove, // Premove is local-only, don't overwrite
         lastMove: lastMove ?? gameState.lastMove ?? null,
         version,
         gameMode: "online",
@@ -1562,6 +1587,7 @@ const gameSlice = createSlice({
     setGameState: (state, action: PayloadAction<GameState>) => {
       // Replace the entire game state (useful for syncing when game starts)
       const newState = action.payload;
+      const preservedPremove = state.premove; // Preserve local premove
       ensureClockState(newState);
       if (!newState.eliminatedPieceBitboards) {
         newState.eliminatedPieceBitboards = deriveEliminatedPieceBitboardsFromBoard(
@@ -1572,7 +1598,7 @@ const gameSlice = createSlice({
       }
       // Clear move cache when game state changes
       newState.moveCache = {};
-      
+
       // ✅ CRITICAL FIX: Recalculate check status when syncing from server
       refreshAllAttackMaps(newState);
       const recalculatedCheckStatus = updateAllCheckStatus(newState);
@@ -1581,8 +1607,8 @@ const gameSlice = createSlice({
         newState,
         newState.currentPlayerTurn
       );
-      
-      return { ...state, ...newState };
+
+      return { ...state, ...newState, premove: preservedPremove };
     },
     sendMoveToServer: (
       state,
@@ -1668,7 +1694,7 @@ const gameSlice = createSlice({
     // P2P Lobby state sync - only essential info
     syncP2PGameState: (state, action: PayloadAction<any>) => {
       const lobbyData = action.payload;
-      
+
       if (lobbyData) {
         // Only update lobby-related state, not the entire game state
         if (lobbyData.currentGame) {
@@ -1691,7 +1717,7 @@ const gameSlice = createSlice({
         state.canStartGame = false;
       }
     },
-    
+
     // Clear the justEliminated flag (used after notification is shown)
     clearJustEliminated: (state) => {
       state.justEliminated = null;
@@ -1703,6 +1729,8 @@ export const {
   setSelectedPiece,
   setValidMoves,
   deselectPiece,
+  setPremove,
+  clearPremove,
   selectPiece,
   makeMove,
   completePromotion,

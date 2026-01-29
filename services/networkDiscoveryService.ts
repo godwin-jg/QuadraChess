@@ -373,10 +373,10 @@ class NetworkDiscoveryService {
     return games;
   }
 
-  // Clean up games older than 10 minutes
+  // Clean up games older than 7 minutes from local discovery cache
   private cleanupOldGames(): void {
     const now = Date.now();
-    const maxAge = 7 * 60 * 1000; // 10 minutes in milliseconds
+    const maxAge = 7 * 60 * 1000; // 7 minutes in milliseconds
     
     console.log('NetworkDiscovery: Cleaning up old games, current count:', this.discoveredGames.size);
     

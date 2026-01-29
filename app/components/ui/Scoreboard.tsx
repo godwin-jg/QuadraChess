@@ -13,7 +13,7 @@ export default function Scoreboard() {
       case "b":
         return "Blue";
       case "y":
-        return "Yellow";
+        return "Purple";
       case "g":
         return "Green";
       default:
@@ -39,7 +39,7 @@ export default function Scoreboard() {
   const players = [
     { color: "r", name: "Red" },
     { color: "b", name: "Blue" },
-    { color: "y", name: "Yellow" },
+    { color: "y", name: "Purple" },
     { color: "g", name: "Green" },
   ];
 

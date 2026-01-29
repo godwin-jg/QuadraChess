@@ -50,7 +50,7 @@ export default function GameMenu() {
       case "b":
         return "Blue";
       case "y":
-        return "Yellow";
+        return "Purple";
       case "g":
         return "Green";
       default:

@@ -62,8 +62,8 @@ export default function GameOverModal({
   const maxModalHeight = height * 0.9;
   // Create leaderboard data first
   const createLeaderboard = (): PlayerResult[] => {
-    const colorNames = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
-    const colorEmojis = { r: "🔴", b: "🔵", y: "🟡", g: "🟢" };
+    const colorNames = { r: "Red", b: "Blue", y: "Purple", g: "Green" };
+    const colorEmojis = { r: "🔴", b: "🔵", y: "🟣", g: "🟢" };
     
     const results: PlayerResult[] = [];
     
@@ -115,7 +115,7 @@ export default function GameOverModal({
   const totalCaptures = captureCounts.r + captureCounts.b + captureCounts.y + captureCounts.g;
 
   const handleShare = async () => {
-    const colorNames = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+    const colorNames = { r: "Red", b: "Blue", y: "Purple", g: "Green" };
     const winningTeamPlayers = teamMode && winningTeam
       ? players.filter((p) => teamAssignments[p.color as keyof typeof teamAssignments] === winningTeam)
       : [];
@@ -296,7 +296,7 @@ export default function GameOverModal({
 
   const getMessage = () => {
     if (teamMode && winningTeam) {
-      const colorNames = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+      const colorNames = { r: "Red", b: "Blue", y: "Purple", g: "Green" };
       const winningTeamPlayers = players.filter(
         (p) => teamAssignments[p.color as keyof typeof teamAssignments] === winningTeam
       );

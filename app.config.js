@@ -8,7 +8,7 @@ export default ({ config }) => {
       ...config.expo,
       name: "Quadrachess",
       slug: "FourPlayer",
-      version: "1.0.4",
+      version: "1.0.9",
       scheme: "FourPlayer",
       icon: "./assets/images/chess.png",
       splash: {

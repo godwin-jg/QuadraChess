@@ -37,7 +37,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
 import { FontAwesome } from "@expo/vector-icons";
-import { getBoardSize, getHudHeight, sw, sh, TAB_BAR_HEIGHT, TAB_BAR_OFFSET } from "../utils/responsive";
+import { getHudHeight, sw, sh, TAB_BAR_HEIGHT, TAB_BAR_OFFSET } from "../utils/responsive";
 import * as Haptics from "expo-haptics";
 import { StatusBar } from "expo-status-bar";
 import Animated, { 
@@ -51,7 +51,7 @@ import Animated, {
 const PLAYER_NAMES: Record<string, string> = {
   r: "Red",
   b: "Blue",
-  y: "Yellow",
+  y: "Purple",
   g: "Green",
 };
 
@@ -70,16 +70,25 @@ export default function GameScreen() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // Responsive layout values
   const baseHudHeight = getHudHeight(windowHeight);
+  const minHudHeight = Math.max(70, baseHudHeight * 0.7); // Minimum HUD can shrink to
   const tabBarSpace = TAB_BAR_HEIGHT + TAB_BAR_OFFSET + 8; // extra 8 for breathing room above tab bar
-  const contentHeight = Math.max(0, windowHeight - insets.top - insets.bottom - tabBarSpace);
-  const maxBoardSize = Math.max(
-    0,
-    contentHeight - (baseHudHeight * 2) - (BOARD_PADDING_Y * 2)
-  );
-  const idealBoardSize = Math.min(getBoardSize(windowWidth, windowHeight), maxBoardSize);
-  const availableHudSpace = Math.max(0, contentHeight - idealBoardSize - (BOARD_PADDING_Y * 2));
-  const hudHeight = Math.max(baseHudHeight, Math.floor(availableHudSpace / 2));
-  const hudTextScale = clamp(hudHeight / baseHudHeight, 1, 1.2);
+  // Total available height for content (top HUD + board + bottom HUD)
+  const totalAvailable = Math.max(0, windowHeight - insets.top - insets.bottom - tabBarSpace);
+  
+  // Board size calculation: prioritize filling width, constrain by height
+  const isTablet = windowWidth >= 600;
+  const widthLimit = isTablet ? windowWidth * 0.85 : windowWidth * 0.98; // Use nearly full width
+  const boardHardCap = isTablet ? 800 : 600;
+  // Gap between HUD panels and board (prevents panels from touching board/timer edges)
+  const hudBoardGap = clamp(sh(20), 14, 32);
+  // Max board size that fits after minimum HUDs and gaps
+  const maxBoardForHeight = Math.max(0, totalAvailable - (minHudHeight * 2) - (hudBoardGap * 2));
+  const idealBoardSize = Math.min(widthLimit, maxBoardForHeight, boardHardCap);
+  
+  // HUDs use fixed base height
+  const topHudHeight = baseHudHeight;
+  const bottomHudHeight = baseHudHeight;
+  const hudTextScale = 1;
   
   const { connectionStatus, isOnline: isOnlineMode, isP2P: isP2PMode } =
     useGameConnection(mode, gameId);
@@ -751,10 +760,10 @@ export default function GameScreen() {
       {/* Top HUD Panel - Toggle between Player Info and Utilities */}
       <View
         style={{
-          paddingTop: HUD_PADDING_TOP,
-          height: hudHeight,
+          height: topHudHeight,
           overflow: "hidden",
           justifyContent: "flex-end",
+          marginBottom: hudBoardGap,
           zIndex: 1,
         }}
       >
@@ -769,38 +778,50 @@ export default function GameScreen() {
         )}
       </View>
 
-      {/* Main Game Area with breathing space */}
+      {/* Main Game Area - with gap from HUDs */}
       <View
-        className="flex-1 justify-center items-center"
-        style={{ paddingVertical: BOARD_PADDING_Y, zIndex: 2 }}
+        className="justify-center items-center"
+        style={{ height: idealBoardSize, zIndex: 2 }}
       >
-        <Animated.View
-          style={boardRotationStyle}
-          pointerEvents={introCountdown !== null ? "none" : "auto"}
-        >
-          <Board 
-            playerData={players}
-            boardRotation={visualPerspective.rotation}
-            viewerColor={visualPerspective.viewerColor}
-            displayTurn={displayTurn}
-            maxBoardSize={maxBoardSize}
-          />
-        </Animated.View>
-        {introCountdown !== null && (
-          <View pointerEvents="none" style={styles.countdownOverlay}>
-            <Text style={styles.countdownText}>{introCountdown}</Text>
-          </View>
-        )}
+        <View style={{ width: idealBoardSize, height: idealBoardSize }}>
+          <Animated.View
+            style={boardRotationStyle}
+            pointerEvents={introCountdown !== null ? "none" : "auto"}
+          >
+            <Board 
+              playerData={players}
+              boardRotation={visualPerspective.rotation}
+              viewerColor={visualPerspective.viewerColor}
+              displayTurn={displayTurn}
+              maxBoardSize={idealBoardSize}
+            />
+          </Animated.View>
+          {introCountdown !== null && (
+            <View 
+              pointerEvents="none" 
+              style={[
+                styles.countdownOverlay,
+                { 
+                  top: -8, 
+                  left: -8, 
+                  right: -8, 
+                  bottom: -12,
+                }
+              ]}
+            >
+              <Text style={styles.countdownText}>{introCountdown}</Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* Bottom HUD Panel - Home Players (Red & Blue) */}
       <View
         style={{
-          paddingBottom: HUD_PADDING_BOTTOM,
-          paddingTop: HUD_PADDING_TOP,
-          height: hudHeight,
+          height: bottomHudHeight,
           overflow: "hidden",
           justifyContent: "flex-start",
+          marginTop: hudBoardGap,
           zIndex: 1,
         }}
       >

@@ -265,19 +265,15 @@ export class P2PGameCoordinator {
       // Host: Send current game state to new client
       const gameState = this.gameStateManager.getGameState();
       if (gameState) {
-        this.webRTCManager.sendMessage(peerId, {
-          type: 'game-state',
-          gameState: gameState,
-        });
+        this.webRTCManager.sendMessage(peerId, this.buildMessage('game-state', gameState));
       }
     } else {
       // Client: Send join request to host
-      this.webRTCManager.sendMessage(peerId, {
-        type: 'join-request',
+      this.webRTCManager.sendMessage(peerId, this.buildMessage('join-request', {
         playerId: this.peerId,
         playerName: 'Player', // This should come from the join options
         gameId: this.gameStateManager.getGameState()?.id || '',
-      });
+      }));
     }
   }
 
@@ -285,16 +281,22 @@ export class P2PGameCoordinator {
    * Handle data channel messages
    */
   private handleDataChannelMessage(message: any, peerId: string): void {
-    
-    switch (message.type) {
+    const normalized = this.normalizeMessage(message);
+    if (!normalized) {
+      return;
+    }
+
+    const { type, payload } = normalized;
+
+    switch (type) {
       case 'join-request':
-        this.handleJoinRequest(message, peerId);
+        this.handleJoinRequest(payload, peerId);
         break;
       case 'game-state':
-        this.handleGameStateUpdate(message.gameState);
+        this.handleGameStateUpdate(payload);
         break;
       case 'lobby-state-sync':
-        this.handleLobbyStateSync(message.lobbyState);
+        this.handleLobbyStateSync(payload);
         break;
       default:
     }
@@ -303,15 +305,22 @@ export class P2PGameCoordinator {
   /**
    * Handle join request (host only)
    */
-  private handleJoinRequest(message: any, peerId: string): void {
+  private handleJoinRequest(
+    payload: { playerId?: string; playerName?: string } | null,
+    peerId: string
+  ): void {
     if (!this.isHost) {
+      return;
+    }
+
+    if (!payload || !payload.playerId || !payload.playerName) {
       return;
     }
 
     
     const player = this.gameStateManager.addPlayer({
-      playerId: message.playerId,
-      playerName: message.playerName,
+      playerId: payload.playerId,
+      playerName: payload.playerName,
     });
 
     if (player) {
@@ -324,6 +333,9 @@ export class P2PGameCoordinator {
    * Handle game state update (client only)
    */
   private handleGameStateUpdate(gameState: P2PGame): void {
+    if (!gameState) {
+      return;
+    }
     if (this.isHost) {
       return;
     }
@@ -335,6 +347,9 @@ export class P2PGameCoordinator {
    * Handle lobby state sync (client only)
    */
   private handleLobbyStateSync(lobbyState: any): void {
+    if (!lobbyState) {
+      return;
+    }
     if (this.isHost) {
       return;
     }
@@ -360,10 +375,64 @@ export class P2PGameCoordinator {
       players: this.gameStateManager.getPlayers(),
     };
 
-    this.webRTCManager.sendMessage('broadcast', {
-      type: 'lobby-state-sync',
-      lobbyState: lobbyState,
-    });
+    this.webRTCManager.sendMessage('broadcast', this.buildMessage('lobby-state-sync', lobbyState));
+  }
+
+  private buildMessage(type: string, payload?: any): any {
+    const message: any = {
+      type,
+      payload,
+      timestamp: Date.now(),
+    };
+
+    if (type === 'game-state') {
+      message.gameState = payload;
+    }
+    if (type === 'lobby-state-sync') {
+      message.lobbyState = payload;
+    }
+    if (type === 'join-request' && payload) {
+      message.playerId = payload.playerId;
+      message.playerName = payload.playerName;
+      message.gameId = payload.gameId;
+    }
+
+    return message;
+  }
+
+  private normalizeMessage(message: any): { type: string; payload: any; timestamp?: number } | null {
+    if (!message || typeof message !== 'object') {
+      return null;
+    }
+
+    const type = message.type;
+    if (!type) {
+      return null;
+    }
+
+    let payload = message.payload;
+    if (payload == null) {
+      switch (type) {
+        case 'game-state':
+          payload = message.gameState;
+          break;
+        case 'lobby-state-sync':
+          payload = message.lobbyState;
+          break;
+        case 'join-request':
+          payload = {
+            playerId: message.playerId,
+            playerName: message.playerName,
+            gameId: message.gameId,
+          };
+          break;
+        default:
+          break;
+      }
+    }
+
+    const timestamp = message.timestamp ?? payload?.timestamp;
+    return { type, payload, timestamp };
   }
 
   /**

@@ -77,12 +77,8 @@ const getTeamColors = (assignments: GameState["teamAssignments"], teamId: TeamId
 
 const getOpposingTeam = (teamId: TeamId): TeamId => (teamId === "A" ? "B" : "A");
 
-const syncTeamClocks = (state: GameState, teamId: TeamId, value: number) => {
-  const colors = getTeamColors(state.teamAssignments, teamId);
-  colors.forEach((color) => {
-    state.clocks[color] = value;
-  });
-};
+// ✅ REMOVED: syncTeamClocks - each player now has individual clock
+// Team mode only affects elimination, not clock synchronization
 
 const ensureClockState = (state: GameState) => {
   ensureTeamState(state);
@@ -115,21 +111,8 @@ const ensureClockState = (state: GameState) => {
 
 const applyElapsedToClock = (state: GameState, playerColor: ClockColor, now: number) => {
   ensureClockState(state);
-  if (state.teamMode) {
-    const teamId = getTeamForColor(state.teamAssignments, playerColor);
-    const teamColors = getTeamColors(state.teamAssignments, teamId);
-    const baseRemaining = Math.min(
-      ...teamColors.map((color) => state.clocks[color])
-    );
-    if (state.turnStartedAt === null) {
-      state.turnStartedAt = now;
-      return baseRemaining;
-    }
-    const elapsedMs = Math.max(0, now - state.turnStartedAt);
-    const remaining = Math.max(0, baseRemaining - elapsedMs);
-    syncTeamClocks(state, teamId, remaining);
-    return remaining;
-  }
+  // ✅ UPDATED: Each player has their own individual clock (even in team mode)
+  // Team mode only affects elimination - if one player times out, the whole team is eliminated
   if (state.turnStartedAt === null) {
     state.turnStartedAt = now;
     return state.clocks[playerColor];
@@ -167,7 +150,10 @@ const endTeamGame = (
   const losingColors = getTeamColors(state.teamAssignments, losingTeam);
   const winningColors = getTeamColors(state.teamAssignments, winningTeam);
 
-  syncTeamClocks(state, losingTeam, 0);
+  // ✅ UPDATED: Set each eliminated player's clock to 0 individually
+  losingColors.forEach((color) => {
+    state.clocks[color] = 0;
+  });
 
   losingColors.forEach((color) => {
     if (!state.eliminatedPlayers.includes(color)) {
@@ -182,10 +168,11 @@ const endTeamGame = (
   state.justEliminated = losingColor;
   state.winningTeam = winningTeam;
   state.winner = winningColors[0] ?? null;
-  state.gameStatus = status;
+  // In team mode, game ends when a team is eliminated, so always set "finished"
+  state.gameStatus = "finished";
   state.gameOverState = {
     isGameOver: true,
-    status,
+    status: "finished",
     eliminatedPlayer: losingColor,
   };
   state.currentPlayerTurn = winningColors[0] ?? state.currentPlayerTurn;
@@ -780,6 +767,22 @@ const gameSlice = createSlice({
       state.teamAssignments = { ...action.payload.teamAssignments };
       state.winningTeam = null;
     },
+    setTimeControl: (
+      state,
+      action: PayloadAction<{ baseMs: number; incrementMs: number }>
+    ) => {
+      state.timeControl = {
+        baseMs: action.payload.baseMs,
+        incrementMs: action.payload.incrementMs,
+      };
+      state.clocks = {
+        r: action.payload.baseMs,
+        b: action.payload.baseMs,
+        y: action.payload.baseMs,
+        g: action.payload.baseMs,
+      };
+      state.turnStartedAt = null;
+    },
     setValidMoves: (state, action: PayloadAction<MoveInfo[]>) => {
       state.validMoves = action.payload;
     },
@@ -848,7 +851,7 @@ const gameSlice = createSlice({
         state
       );
       state.selectedPiece = action.payload;
-      
+
       // Clear any existing premove when selecting a new piece
       if (state.gameMode === "online") {
         state.premove = null;
@@ -1548,7 +1551,34 @@ const gameSlice = createSlice({
       const preservedValidMoves = state.validMoves;
       const preservedViewingHistoryIndex = state.viewingHistoryIndex;
       const preservedPremove = state.premove; // Preserve local premove
+      // ✅ PERFORMANCE: Keep reference to existing history (no copy yet)
+      const existingHistory = state.history || [];
+      const existingHistoryIndex = state.historyIndex ?? 0;
 
+      // Check if this is a new move by comparing lastMove (O(1) comparison)
+      const currentLastMove = state.lastMove;
+      const newLastMove = lastMove ?? gameState.lastMove ?? null;
+      const isNewMove = newLastMove && (
+        !currentLastMove ||
+        currentLastMove.timestamp !== newLastMove.timestamp ||
+        currentLastMove.from?.row !== newLastMove.from?.row ||
+        currentLastMove.from?.col !== newLastMove.from?.col ||
+        currentLastMove.to?.row !== newLastMove.to?.row ||
+        currentLastMove.to?.col !== newLastMove.to?.col
+      );
+
+      // ✅ CRITICAL: Also check if board state changed (elimination, timeout, etc.)
+      // Compare eliminated players count - if changed, board needs recalculation
+      const eliminatedChanged = 
+        (state.eliminatedPlayers?.length ?? 0) !== (gameState.eliminatedPlayers?.length ?? 0);
+      
+      // Check if turn changed without a move (can happen on timeout/resignation)
+      const turnChangedWithoutMove = !isNewMove && state.currentPlayerTurn !== gameState.currentPlayerTurn;
+      
+      // Need recalculation if move, elimination, or turn change
+      const needsRecalculation = isNewMove || eliminatedChanged || turnChangedWithoutMove;
+
+      // Build merged state as a plain object (not Immer draft)
       const mergedState: GameState = {
         ...state,
         ...gameState,
@@ -1556,7 +1586,10 @@ const gameSlice = createSlice({
         validMoves: preservedValidMoves,
         viewingHistoryIndex: preservedViewingHistoryIndex,
         premove: preservedPremove, // Premove is local-only, don't overwrite
-        lastMove: lastMove ?? gameState.lastMove ?? null,
+        // ✅ PERFORMANCE: Reuse existing history reference (no copy on every sync)
+        history: existingHistory,
+        historyIndex: existingHistoryIndex,
+        lastMove: newLastMove,
         version,
         gameMode: "online",
       };
@@ -1580,13 +1613,40 @@ const gameSlice = createSlice({
         );
       }
 
-      mergedState.moveCache = {};
-      refreshAllAttackMaps(mergedState);
-      mergedState.checkStatus = updateAllCheckStatus(mergedState);
-      mergedState.bitboardState.pinnedMask = getPinnedPiecesMask(
-        mergedState,
-        mergedState.currentPlayerTurn
-      );
+      // ✅ PERFORMANCE: Only recalculate expensive attack maps when board changes
+      // On regular syncs (clock updates, presence), skip these O(n) operations
+      if (needsRecalculation) {
+        mergedState.moveCache = {};
+        refreshAllAttackMaps(mergedState);
+        mergedState.checkStatus = updateAllCheckStatus(mergedState);
+        mergedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+          mergedState,
+          mergedState.currentPlayerTurn
+        );
+      } else {
+        // Preserve existing attack maps and check status when no board change
+        mergedState.moveCache = state.moveCache ?? {};
+        if (state.bitboardState?.attackMaps) {
+          mergedState.bitboardState.attackMaps = state.bitboardState.attackMaps;
+        }
+        if (state.checkStatus) {
+          mergedState.checkStatus = state.checkStatus;
+        }
+        if (state.bitboardState?.pinnedMask !== undefined) {
+          mergedState.bitboardState.pinnedMask = state.bitboardState.pinnedMask;
+        }
+      }
+
+      // ✅ PERFORMANCE: Only copy/modify history when a new move is detected
+      if (isNewMove) {
+        // Create new array only when adding a move (not on every sync)
+        const baseHistory = existingHistoryIndex < existingHistory.length - 1
+          ? existingHistory.slice(0, existingHistoryIndex + 1)
+          : existingHistory;
+        // Add current state to history
+        mergedState.history = [...baseHistory, createStateSnapshot(mergedState)];
+        mergedState.historyIndex = mergedState.history.length - 1;
+      }
 
       return mergedState;
     },
@@ -1594,28 +1654,36 @@ const gameSlice = createSlice({
       // Replace the entire game state (useful for syncing when game starts)
       const newState = action.payload;
       const preservedPremove = state.premove; // Preserve local premove
-      ensureClockState(newState);
-      if (!newState.eliminatedPieceBitboards) {
-        newState.eliminatedPieceBitboards = deriveEliminatedPieceBitboardsFromBoard(
-          newState.boardState,
-          newState.eliminatedPlayers,
-          newState.bitboardState.pieces
+
+      // ✅ FIX: Copy payload properties to the Immer draft state first
+      // This avoids mutating the frozen action.payload object
+      Object.assign(state, newState);
+
+      // Now we can safely mutate the draft state
+      state.premove = preservedPremove;
+
+      ensureClockState(state);
+      if (!state.eliminatedPieceBitboards) {
+        state.eliminatedPieceBitboards = deriveEliminatedPieceBitboardsFromBoard(
+          state.boardState,
+          state.eliminatedPlayers,
+          state.bitboardState.pieces
         );
       }
       // Clear move cache when game state changes
-      newState.moveCache = {};
+      state.moveCache = {};
 
       // ✅ CRITICAL FIX: Recalculate check status when syncing from server
-      refreshAllAttackMaps(newState);
-      const recalculatedCheckStatus = updateAllCheckStatus(newState);
-      newState.checkStatus = recalculatedCheckStatus;
-      newState.bitboardState.pinnedMask = getPinnedPiecesMask(
-        newState,
-        newState.currentPlayerTurn
+      refreshAllAttackMaps(state);
+      const recalculatedCheckStatus = updateAllCheckStatus(state);
+      state.checkStatus = recalculatedCheckStatus;
+      state.bitboardState.pinnedMask = getPinnedPiecesMask(
+        state,
+        state.currentPlayerTurn
       );
-
-      return { ...state, ...newState, premove: preservedPremove };
+      // Immer draft is mutated in place, no return needed
     },
+
     sendMoveToServer: (
       state,
       action: PayloadAction<{ row: number; col: number }>
@@ -1760,6 +1828,7 @@ export const {
   setBotDifficulty,
   setBotTeamMode,
   setTeamConfig,
+  setTimeControl,
   // P2P Lobby actions
   setCurrentGame,
   setDiscoveredGames,

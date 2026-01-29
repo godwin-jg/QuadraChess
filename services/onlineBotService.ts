@@ -12,6 +12,7 @@ import {
 } from '../src/logic/bitboardSerialization';
 import { isCastlingMove, getRookCastlingCoords, getRookIdentifier } from '../state/gameHelpers';
 import { ensureFirebaseApp } from "./firebaseInit";
+import realtimeDatabaseService from './realtimeDatabaseService';
 
 ensureFirebaseApp();
 const db = getDatabase();
@@ -184,6 +185,7 @@ class OnlineBotService {
       // ✅ CRITICAL FIX: Only apply the final chosen move to the database
       // This ensures no intermediate moves are shown during calculation
       const gameRef = ref(db, `games/${gameId}`);
+      let botTimedOut = false;
 
       // Simplified transaction for faster bot moves
       const result = await runTransaction(gameRef, (gameData) => {
@@ -210,9 +212,34 @@ class OnlineBotService {
           return gameData;
         }
 
+        const moveTimestamp = realtimeDatabaseService.getServerNow();
+
         // ✅ BITBOARD FIX: Use bitboardState instead of boardState (boardState is not stored in Firebase)
         if (!gameData.gameState.bitboardState?.pieces) {
           console.warn(`[BotDebug] No bitboardState.pieces`);
+          return gameData;
+        }
+
+        // ✅ BOT CLOCK: Deduct think time from bot's clock
+        const baseMs = gameData.gameState.timeControl?.baseMs ?? 5 * 60 * 1000;
+        const incrementMs = gameData.gameState.timeControl?.incrementMs ?? 0;
+        if (
+          !gameData.gameState.clocks ||
+          typeof gameData.gameState.clocks !== "object" ||
+          Array.isArray(gameData.gameState.clocks)
+        ) {
+          gameData.gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+        }
+        const turnStartedAt =
+          typeof gameData.gameState.turnStartedAt === "number"
+            ? gameData.gameState.turnStartedAt
+            : moveTimestamp;
+        const elapsedMs = Math.max(0, moveTimestamp - turnStartedAt);
+        const rawClock = gameData.gameState.clocks[botColor];
+        const currentClock = Number.isFinite(rawClock) ? rawClock : baseMs;
+        const remainingMs = Math.max(0, currentClock - elapsedMs);
+        if (remainingMs <= 0) {
+          botTimedOut = true;
           return gameData;
         }
 
@@ -285,6 +312,11 @@ class OnlineBotService {
         // Serialize pieces back to Firebase format
         gameData.gameState.bitboardState.pieces = serializeBitboardPieces(pieces);
 
+        // ✅ BOT CLOCK: Apply increment after move
+        const finalRemainingMs =
+          incrementMs > 0 ? Math.max(0, remainingMs + incrementMs) : remainingMs;
+        gameData.gameState.clocks[botColor] = finalRemainingMs;
+
         // Update turn
         const currentTurn = gameData.gameState.currentPlayerTurn;
         const nextPlayer = this.getNextPlayer(currentTurn, gameData.gameState.eliminatedPlayers || []);
@@ -292,7 +324,6 @@ class OnlineBotService {
         gameData.currentPlayerTurn = nextPlayer;
 
         // Update move history
-        const moveTimestamp = Date.now();
         gameData.lastMove = {
           from: moveData.from,
           to: moveData.to,
@@ -304,7 +335,7 @@ class OnlineBotService {
         };
 
         // Setting lastMove for bot
-        gameData.lastActivity = Date.now();
+        gameData.lastActivity = moveTimestamp;
 
         // Update version for sync
         gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
@@ -315,6 +346,11 @@ class OnlineBotService {
         return gameData;
 
       });
+
+      if (botTimedOut) {
+        await realtimeDatabaseService.timeoutPlayer(gameId, botColor);
+        return;
+      }
 
       if (result && result.committed) {
         console.log(`[BotDebug] Transaction committed for ${botColor}`);

@@ -147,7 +147,7 @@ export default function HomeScreen() {
     hapticsService.buttonPress();
     dispatch(resetGame()); // ✅ CRITICAL FIX: Reset game state first
     dispatch(setGameMode("single")); // Set game mode to single player
-    dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Yellow, Green)
+    dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Purple, Green)
     dispatch(setBotDifficulty(botDifficulty));
     dispatch(setBotTeamMode(settings.game.botTeamMode || false));
     router.push("/(tabs)/GameScreen");

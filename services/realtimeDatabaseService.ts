@@ -74,17 +74,8 @@ const getTeamColors = (assignments: TeamAssignments, teamId: TeamId): ClockColor
 
 const getOpposingTeam = (teamId: TeamId): TeamId => (teamId === "A" ? "B" : "A");
 
-const syncTeamClocks = (
-  clocks: { r: number; b: number; y: number; g: number },
-  assignments: TeamAssignments,
-  teamId: TeamId,
-  value: number
-) => {
-  const colors = getTeamColors(assignments, teamId);
-  colors.forEach((color) => {
-    clocks[color] = value;
-  });
-};
+// ✅ REMOVED: syncTeamClocks - each player now has individual clock
+// Team mode only affects elimination, not clock synchronization
 
 export interface RealtimeGame {
   id: string;
@@ -124,6 +115,35 @@ class RealtimeDatabaseService {
   private currentUser: any = null;
   private gameUnsubscribe: (() => void) | null = null;
   private movesUnsubscribe: (() => void) | null = null;
+  private serverTimeOffsetMs = 0;
+  private serverTimeOffsetUnsubscribe: (() => void) | null = null;
+
+  private ensureGameState(gameData: any, context: string): GameState | null {
+    if (!gameData?.gameState) {
+      console.warn(`[RealtimeDB] Missing gameState in ${context}`);
+      return null;
+    }
+    return gameData.gameState as GameState;
+  }
+
+  getServerNow(): number {
+    return Date.now() + (this.serverTimeOffsetMs || 0);
+  }
+
+  private startServerTimeOffsetListener(): void {
+    if (this.serverTimeOffsetUnsubscribe) return;
+    const offsetRef = ref(db, ".info/serverTimeOffset");
+    this.serverTimeOffsetUnsubscribe = onValue(
+      offsetRef,
+      (snapshot) => {
+        const offset = snapshot.val();
+        this.serverTimeOffsetMs = typeof offset === "number" ? offset : 0;
+      },
+      (error) => {
+        console.warn("[RealtimeDB] Failed to read server time offset:", error);
+      }
+    );
+  }
 
   // Generate a 4-digit join code
   private generateJoinCode(): string {
@@ -350,7 +370,7 @@ class RealtimeDatabaseService {
       return gameData;
     }
 
-    const now = Date.now();
+    const now = this.getServerNow();
     const moverColor = moveData.playerColor as ClockColor;
     if (!CLOCK_COLORS.includes(moverColor)) {
       return gameData;
@@ -359,40 +379,18 @@ class RealtimeDatabaseService {
       gameState.turnStartedAt = now;
     }
     const elapsedMs = Math.max(0, now - (gameState.turnStartedAt ?? now));
-    if (gameState.teamMode) {
-      const teamId = getTeamForColor(gameState.teamAssignments as TeamAssignments, moverColor);
-      const teamColors = getTeamColors(gameState.teamAssignments as TeamAssignments, teamId);
-      const baseRemaining = Math.min(
-        ...teamColors.map((color) => gameState.clocks[color])
+    // ✅ UPDATED: Each player has their own individual clock (even in team mode)
+    // Team mode only affects elimination - if one player times out, the whole team is eliminated
+    const remainingMs = Math.max(0, gameState.clocks[moverColor] - elapsedMs);
+    gameState.clocks[moverColor] = remainingMs;
+    if (remainingMs <= 0) {
+      return this.applyTimeoutToGameData(
+        gameData,
+        moverColor,
+        now,
+        pieces,
+        eliminatedPieceBitboards
       );
-      const remainingMs = Math.max(0, baseRemaining - elapsedMs);
-      syncTeamClocks(
-        gameState.clocks as { r: number; b: number; y: number; g: number },
-        gameState.teamAssignments as TeamAssignments,
-        teamId,
-        remainingMs
-      );
-      if (remainingMs <= 0) {
-        return this.applyTimeoutToGameData(
-          gameData,
-          moverColor,
-          now,
-          pieces,
-          eliminatedPieceBitboards
-        );
-      }
-    } else {
-      const remainingMs = Math.max(0, gameState.clocks[moverColor] - elapsedMs);
-      gameState.clocks[moverColor] = remainingMs;
-      if (remainingMs <= 0) {
-        return this.applyTimeoutToGameData(
-          gameData,
-          moverColor,
-          now,
-          pieces,
-          eliminatedPieceBitboards
-        );
-      }
     }
 
     const validMoves = getValidMovesBB(pieceCode, from, workingState);
@@ -586,10 +584,27 @@ class RealtimeDatabaseService {
       );
 
       for (const opponent of otherPlayers) {
+        // Safety check: verify opponent has pieces before checking legal moves
+        // This prevents false eliminations due to corrupted/empty bitboard state
+        const opponentHasPieces = this.playerHasPiecesOnBoard(rebuiltState.pieces, opponent);
+        if (!opponentHasPieces) {
+          console.warn(
+            `[RealtimeDB] Skipping legal move check for ${opponent} - no pieces found in bitboard. ` +
+            `This may indicate corrupted state. Move: ${moveData.playerColor} ${pieceCode} to (${to.row},${to.col})`
+          );
+          continue; // Skip this opponent - don't eliminate based on corrupted data
+        }
+
         const opponentHasMoves = hasAnyLegalMoves(opponent, hydratedState);
         if (!opponentHasMoves) {
           const inCheck = isKingInCheck(opponent, hydratedState);
           const status = inCheck ? "checkmate" : "stalemate";
+
+          console.log(
+            `[RealtimeDB] Player ${opponent} has no legal moves. ` +
+            `inCheck=${inCheck}, status=${status}, teamMode=${hydratedState.teamMode}`
+          );
+
           if (hydratedState.teamMode) {
             return this.applyTeamEliminationToGameData(
               gameData,
@@ -664,28 +679,11 @@ class RealtimeDatabaseService {
     }
 
     if (hydratedState.timeControl.incrementMs > 0) {
-      if (hydratedState.teamMode) {
-        const teamId = getTeamForColor(
-          hydratedState.teamAssignments as TeamAssignments,
-          moverColor
-        );
-        const baseRemaining = Math.min(
-          ...getTeamColors(hydratedState.teamAssignments as TeamAssignments, teamId).map(
-            (color) => hydratedState.clocks[color]
-          )
-        );
-        syncTeamClocks(
-          hydratedState.clocks as { r: number; b: number; y: number; g: number },
-          hydratedState.teamAssignments as TeamAssignments,
-          teamId,
-          Math.max(0, baseRemaining + hydratedState.timeControl.incrementMs)
-        );
-      } else {
-        hydratedState.clocks[moverColor] = Math.max(
-          0,
-          hydratedState.clocks[moverColor] + hydratedState.timeControl.incrementMs
-        );
-      }
+      // ✅ UPDATED: Only add increment to the mover's individual clock
+      hydratedState.clocks[moverColor] = Math.max(
+        0,
+        hydratedState.clocks[moverColor] + hydratedState.timeControl.incrementMs
+      );
     }
     if (
       hydratedState.gameStatus === "finished" ||
@@ -736,6 +734,50 @@ class RealtimeDatabaseService {
     eliminatedPieceBitboards?: Record<string, bigint>
   ) {
     const gameState = gameData.gameState as GameState;
+
+    // ✅ Guard: Normalize clock state to avoid false timeouts from corrupted data
+    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
+      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    }
+    CLOCK_COLORS.forEach((color) => {
+      if (!Number.isFinite(gameState.clocks?.[color])) {
+        gameState.clocks[color] = baseMs;
+      }
+    });
+    if (gameState.turnStartedAt !== null && typeof gameState.turnStartedAt !== "number") {
+      gameState.turnStartedAt = null;
+    }
+
+    // ✅ CRITICAL FIX: Server-side validation of timeout
+    // Calculate actual remaining time before accepting client's timeout request
+    const turnStartedAt = gameState.turnStartedAt ?? now;
+    const elapsedMs = Math.max(0, now - turnStartedAt);
+
+    let actualRemainingMs: number;
+    // ✅ UPDATED: Each player has their own individual clock
+    // Only check the current player's clock for timeout validation
+    actualRemainingMs = Math.max(0, (gameState.clocks?.[playerColor] ?? 0) - elapsedMs);
+
+    console.log(
+      `[RealtimeDB] Timeout request for player ${playerColor}. ` +
+      `teamMode=${gameState.teamMode}, storedClock=${gameState.clocks?.[playerColor]}ms, ` +
+      `elapsed=${elapsedMs}ms, actualRemaining=${actualRemainingMs}ms`
+    );
+
+    // Reject timeout if player still has time (with 500ms grace period for network latency)
+    if (actualRemainingMs > 500) {
+      console.log(
+        `[RealtimeDB] Rejecting premature timeout - ${playerColor} has ${actualRemainingMs}ms remaining`
+      );
+      return gameData;
+    }
+
+    console.log(
+      `[RealtimeDB] Applying timeout for player ${playerColor}. ` +
+      `teamMode=${gameState.teamMode}, clock=${gameState.clocks?.[playerColor]}ms`
+    );
+
     if (gameState.teamMode) {
       const resolvedPieces =
         pieces ?? deserializeBitboardPieces(gameState.bitboardState?.pieces);
@@ -744,6 +786,11 @@ class RealtimeDatabaseService {
         (gameState.eliminatedPieceBitboards
           ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
           : createEmptyPieceBitboards());
+
+      console.log(
+        `[RealtimeDB] Team timeout elimination triggered for ${playerColor} (team mode)`
+      );
+
       return this.applyTeamEliminationToGameData(
         gameData,
         playerColor,
@@ -768,19 +815,6 @@ class RealtimeDatabaseService {
       eliminatedPlayer: null,
     };
     gameState.promotionState = { isAwaiting: false, position: null, color: null };
-
-    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
-    const incrementMs =
-      gameState.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementMs;
-    gameState.timeControl = { baseMs, incrementMs };
-    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
-      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
-    }
-    CLOCK_COLORS.forEach((color) => {
-      if (typeof gameState.clocks[color] !== "number") {
-        gameState.clocks[color] = baseMs;
-      }
-    });
 
     let resolvedPieces =
       pieces ?? deserializeBitboardPieces(gameState.bitboardState?.pieces);
@@ -1071,6 +1105,13 @@ class RealtimeDatabaseService {
         gameState.clocks[color] = baseMs;
       }
     });
+    // Initialize required arrays if they don't exist
+    if (!Array.isArray(gameState.eliminatedPlayers)) {
+      gameState.eliminatedPlayers = [];
+    }
+    if (!Array.isArray(gameState.enPassantTargets)) {
+      gameState.enPassantTargets = [];
+    }
     gameState.teamMode = !!gameState.teamMode;
     gameState.teamAssignments = normalizeTeamAssignments(
       gameState.teamAssignments as TeamAssignments
@@ -1080,12 +1121,17 @@ class RealtimeDatabaseService {
     const losingColors = getTeamColors(gameState.teamAssignments, losingTeam);
     const winningColors = getTeamColors(gameState.teamAssignments, winningTeam);
 
-    syncTeamClocks(
-      gameState.clocks as { r: number; b: number; y: number; g: number },
-      gameState.teamAssignments as TeamAssignments,
-      losingTeam,
-      0
+    console.log(
+      `[RealtimeDB] TEAM ELIMINATION: Player ${losingColor} triggered ${status}. ` +
+      `Losing team ${losingTeam} (${losingColors.join(",")}), ` +
+      `Winning team ${winningTeam} (${winningColors.join(",")})` +
+      (lastMove ? `, after move: ${lastMove.pieceCode} to (${lastMove.to.row},${lastMove.to.col})` : "")
     );
+
+    // ✅ UPDATED: Set each eliminated player's clock to 0 individually
+    losingColors.forEach((color) => {
+      gameState.clocks[color] = 0;
+    });
 
     losingColors.forEach((color) => {
       if (!gameState.eliminatedPlayers.includes(color)) {
@@ -1097,10 +1143,11 @@ class RealtimeDatabaseService {
     gameState.justEliminated = losingColor;
     gameState.winningTeam = winningTeam;
     gameState.winner = winningColors[0] ?? null;
-    gameState.gameStatus = status;
+    // In team mode, game ends when a team is eliminated, so always set "finished"
+    gameState.gameStatus = "finished";
     gameState.gameOverState = {
       isGameOver: true,
-      status,
+      status: "finished",
       eliminatedPlayer: losingColor,
     };
     gameState.currentPlayerTurn = winningColors[0] ?? gameState.currentPlayerTurn;
@@ -1149,7 +1196,7 @@ class RealtimeDatabaseService {
 
     return gameData;
   }
-  
+
   // OPTIMIZATION: Connection keep-alive
   private keepAliveInterval: ReturnType<typeof setInterval> | null = null;
   private readonly KEEP_ALIVE_INTERVAL = 30000; // 30 seconds
@@ -1175,15 +1222,16 @@ class RealtimeDatabaseService {
     };
 
     try {
-      
+
       const currentUser = authInstance.currentUser;
       if (currentUser) {
         this.currentUser = currentUser;
         this.setupLightweightAuthListener();
+        this.startServerTimeOffsetListener();
         this.startKeepAlive();
         return currentUser.uid;
       }
-      
+
       // Sign in anonymously
       const userCredential = await withTimeout(
         signInAnonymously(authInstance),
@@ -1191,13 +1239,14 @@ class RealtimeDatabaseService {
         "Authentication"
       );
       this.currentUser = userCredential.user;
-      
+
       // Set up lightweight auth state listener (minimal overhead)
       this.setupLightweightAuthListener();
-      
+      this.startServerTimeOffsetListener();
+
       // OPTIMIZATION: Start keep-alive to maintain connection
       this.startKeepAlive();
-      
+
       return userCredential.user.uid;
     } catch (error) {
       console.error("Error signing in anonymously:", error);
@@ -1219,7 +1268,7 @@ class RealtimeDatabaseService {
         this.currentUser = user;
       } else {
         this.currentUser = null;
-        
+
         // Non-blocking reconnection attempt
         this.attemptLightweightReconnection();
       }
@@ -1258,13 +1307,13 @@ class RealtimeDatabaseService {
       if (!user) {
         return false;
       }
-      
-      
+
+
       // Test a simple read operation with better error handling
       try {
         const testRef = ref(db, "games");
         const snapshot = await get(query(testRef, limitToFirst(1)));
-        
+
         if (snapshot.exists()) {
           return true;
         } else {
@@ -1287,7 +1336,7 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      
+
       // Use direct database creation method
       return await this.createGameDirectly(hostName, botColors);
     } catch (error) {
@@ -1420,7 +1469,7 @@ class RealtimeDatabaseService {
       await this.addBotsToGame(gameId, botColors);
     }
 
-    
+
     // Verify the game was created correctly
     const verifySnapshot = await get(gameRef);
     if (verifySnapshot.exists()) {
@@ -1428,7 +1477,7 @@ class RealtimeDatabaseService {
     } else {
       console.error(`❌ Game verification failed: ${gameId} not found after creation`);
     }
-    
+
     return gameId;
   }
 
@@ -1437,11 +1486,16 @@ class RealtimeDatabaseService {
     if (!user) throw new Error("User not authenticated");
 
     const gameRef = ref(db, `games/${gameId}`);
-    
+
     // Use transaction to atomically check and join game
     const result = await runTransaction(gameRef, (gameData) => {
       if (gameData === null) {
         // Game doesn't exist - abort transaction
+        return undefined;
+      }
+
+      const gameState = this.ensureGameState(gameData, "joinGame");
+      if (!gameState) {
         return undefined;
       }
 
@@ -1466,7 +1520,7 @@ class RealtimeDatabaseService {
       const colors = ["r", "b", "y", "g"];
       const usedColors = Object.values(gameData.players || {}).map((p: any) => p.color);
       const availableColor = colors.find((color) => !usedColors.includes(color));
-      
+
       if (!availableColor) {
         // No available colors - game is effectively full
         return undefined;
@@ -1485,10 +1539,10 @@ class RealtimeDatabaseService {
       if (!gameData.players) {
         gameData.players = {};
       }
-      
+
       gameData.players[user.uid] = newPlayer;
       gameData.lastActivity = Date.now();
-      gameData.gameState.version = (gameData.gameState.version || 0) + 1;
+      gameState.version = (gameState.version || 0) + 1;
 
       return gameData;
     });
@@ -1500,17 +1554,17 @@ class RealtimeDatabaseService {
       if (!snapshot.exists()) {
         throw new Error("Game not found");
       }
-      
+
       const gameData = snapshot.val();
       const playerCount = Object.keys(gameData.players || {}).length;
-      
+
       if (playerCount >= (gameData.maxPlayers || 4)) {
         throw new Error("Game is full");
       }
       if (gameData.status !== "waiting") {
         throw new Error("Game is not available for joining");
       }
-      
+
       throw new Error("Failed to join game. Please try again.");
     }
   }
@@ -1525,18 +1579,18 @@ class RealtimeDatabaseService {
         if (!user) throw new Error("Failed to authenticate user");
       }
 
-      
+
       // Use direct database leave method
       await this.leaveGameDirectly(gameId, onCriticalError);
     } catch (error: any) {
       console.error("Error calling leave game:", error);
-      
+
       // Don't treat max-retries as critical - just log and continue
       if (error.message?.includes('max-retries') || error.message?.includes('too many retries')) {
         console.warn("Max retries exceeded for leaveGame, but continuing:", error.message);
         return; // Don't throw - let the caller handle gracefully
       }
-      
+
       throw error;
     }
   }
@@ -1564,12 +1618,12 @@ class RealtimeDatabaseService {
     }
 
     const gameRef = ref(db, `games/${gameId}`);
-    
+
     // Add retry logic with exponential backoff and max retries
     let retryCount = 0;
     const maxRetries = 2; // Reduced from 3 to 2 for faster failure
     const baseDelay = 1000; // 1 second base delay
-    
+
     while (retryCount < maxRetries) {
       try {
         const result = await runTransaction(gameRef, (gameData) => {
@@ -1608,7 +1662,11 @@ class RealtimeDatabaseService {
             gameData.players[newHostId].isHost = true;
           }
 
-          gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
+          if (gameData.gameState) {
+            gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
+          } else {
+            console.warn("[RealtimeDB] Missing gameState in leaveGame");
+          }
           gameData.lastActivity = Date.now();
 
           return gameData;
@@ -1622,25 +1680,25 @@ class RealtimeDatabaseService {
       } catch (error: any) {
         retryCount++;
         console.warn(`Leave game attempt ${retryCount} failed:`, error.message);
-        
+
         // Check for specific Firebase errors that should not be retried
-        if (error.code === 'database/max-retries' || 
-            error.message?.includes('max-retries') ||
-            error.message?.includes('too many retries')) {
+        if (error.code === 'database/max-retries' ||
+          error.message?.includes('max-retries') ||
+          error.message?.includes('too many retries')) {
           console.warn(`Max retries exceeded for leaving game ${gameId} - treating as success to avoid game restart`);
           return; // Treat this as success - game probably doesn't exist
         }
-        
+
         // Check if player is already not in the game (success case)
         if (error.message?.includes('Player') && error.message?.includes('not found')) {
           return; // This is actually success - player is already out
         }
-        
+
         if (retryCount >= maxRetries) {
           console.error(`Failed to leave game ${gameId} after ${maxRetries} attempts`);
           throw new Error(`Failed to leave game after ${maxRetries} attempts: ${error.message}`);
         }
-        
+
         // Wait before retrying with exponential backoff
         const delay = baseDelay * Math.pow(2, retryCount - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -1700,7 +1758,7 @@ class RealtimeDatabaseService {
           y: baseMs,
           g: baseMs,
         },
-        "gameState/turnStartedAt": Date.now(),
+        "gameState/turnStartedAt": this.getServerNow(),
       });
 
     } catch (error) {
@@ -1772,10 +1830,10 @@ class RealtimeDatabaseService {
             if (gameData && typeof gameData === 'object') {
               // Only include games with valid players
               const players = gameData.players || {};
-              const validPlayers = Object.values(players).filter((player: any) => 
+              const validPlayers = Object.values(players).filter((player: any) =>
                 player && player.id && player.name && player.color
               );
-              
+
               if (validPlayers.length > 0) {
                 games.push({
                   id: gameId,
@@ -1803,7 +1861,7 @@ class RealtimeDatabaseService {
   ): Promise<void> {
     const gameRef = ref(db, `games/${gameId}`);
     const user = this.getCurrentUser();
-    
+
     if (!user) {
       throw new Error("User not authenticated");
     }
@@ -1897,7 +1955,7 @@ class RealtimeDatabaseService {
         gameState.promotionState = { isAwaiting: false, position: null, color: null };
         gameState.gameStatus = "active";
 
-        const now = Date.now();
+        const now = this.getServerNow();
         // Update turn
         const currentTurn = gameState.currentPlayerTurn;
         const nextPlayer = this.getNextPlayer(currentTurn, gameState.eliminatedPlayers || []);
@@ -1910,7 +1968,7 @@ class RealtimeDatabaseService {
         const player = gameData.players[user.uid];
         const isBotMove = player && player.isBot;
         const playerId = isBotMove ? `bot_${promotionData.playerColor}` : user.uid;
-        
+
         // Update move history
         gameData.lastMove = {
           from: { row: -1, col: -1 }, // Special promotion move
@@ -2031,7 +2089,7 @@ class RealtimeDatabaseService {
         console.error("Move transaction failed:", result);
         throw new Error(`Move transaction failed: Transaction not committed`);
       }
-      
+
     } catch (error) {
       console.error("Error processing move:", error);
       throw error;
@@ -2071,7 +2129,7 @@ class RealtimeDatabaseService {
           return gameData;
         }
 
-        const now = Date.now();
+        const now = this.getServerNow();
         return this.applyNoMoveEliminationToGameData(
           gameData,
           playerColor as ClockColor,
@@ -2096,7 +2154,7 @@ class RealtimeDatabaseService {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
-      
+
       // Use direct database resignation method
       await this.resignGameDirectly(gameId);
     } catch (error) {
@@ -2130,7 +2188,7 @@ class RealtimeDatabaseService {
           return gameData;
         }
 
-        const now = Date.now();
+        const now = this.getServerNow();
         return this.applyTimeoutToGameData(
           gameData,
           playerColor as ClockColor,
@@ -2155,12 +2213,12 @@ class RealtimeDatabaseService {
 
 
     const gameRef = ref(db, `games/${gameId}`);
-    
+
     // Add retry logic with exponential backoff and max retries
     let retryCount = 0;
     const maxRetries = 3;
     const baseDelay = 1000; // 1 second base delay
-    
+
     while (retryCount < maxRetries) {
       try {
         const result = await runTransaction(gameRef, (gameData) => {
@@ -2303,11 +2361,15 @@ class RealtimeDatabaseService {
             gameData.gameState.currentPlayerTurn = nextActivePlayer;
           }
 
-          const now = Date.now();
+          const now = this.getServerNow();
           gameData.gameState.turnStartedAt =
             gameData.gameState.gameStatus === "finished" ? null : now;
           gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
-          gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
+          if (gameData.gameState) {
+            gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
+          } else {
+            console.warn("[RealtimeDB] Missing gameState in resignGame");
+          }
           gameData.lastActivity = now;
 
           return gameData;
@@ -2321,25 +2383,25 @@ class RealtimeDatabaseService {
       } catch (error: any) {
         retryCount++;
         console.warn(`Resign game attempt ${retryCount} failed:`, error.message);
-        
+
         // Check for specific Firebase errors that should not be retried
-        if (error.code === 'database/max-retries' || 
-            error.message?.includes('max-retries') ||
-            error.message?.includes('too many retries')) {
+        if (error.code === 'database/max-retries' ||
+          error.message?.includes('max-retries') ||
+          error.message?.includes('too many retries')) {
           console.warn(`Max retries exceeded for resigning game ${gameId} - treating as success to avoid game restart`);
           return; // Treat this as success to avoid game restart
         }
-        
+
         // Check if player is already not in the game (success case)
         if (error.message?.includes('Player') && error.message?.includes('not found')) {
           return; // This is actually success - player is already out
         }
-        
+
         if (retryCount >= maxRetries) {
           console.error(`Failed to resign game ${gameId} after ${maxRetries} attempts`);
           throw new Error(`Failed to resign game after ${maxRetries} attempts: ${error.message}`);
         }
-        
+
         // Wait before retrying with exponential backoff
         const delay = baseDelay * Math.pow(2, retryCount - 1);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -2355,12 +2417,12 @@ class RealtimeDatabaseService {
     gameId: string,
     onMove: (move: RealtimeMove) => void
   ): () => void {
-    
+
     const movesRef = query(
       ref(db, `moves/${gameId}`),
       orderByChild("timestamp")
     );
-    
+
     const unsubscribe = onChildAdded(movesRef, (snapshot) => {
       const moveData = snapshot.val();
       if (moveData && !moveData.isOptimistic) {
@@ -2403,7 +2465,7 @@ class RealtimeDatabaseService {
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval);
     }
-    
+
     this.keepAliveInterval = setInterval(async () => {
       try {
         // Perform a lightweight operation to keep connection alive
@@ -2435,6 +2497,22 @@ class RealtimeDatabaseService {
         row.map((cell: any) => cell === "" ? null : cell)
       );
     }
+  }
+
+  /**
+   * Check if a player has any pieces on the board.
+   * This is a safety check to prevent false eliminations due to corrupted bitboard state.
+   */
+  private playerHasPiecesOnBoard(pieces: Record<string, bigint>, playerColor: string): boolean {
+    const pieceTypes = ["P", "N", "B", "R", "Q", "K"];
+    for (const type of pieceTypes) {
+      const code = `${playerColor}${type}`;
+      const bb = pieces[code];
+      if (bb !== undefined && bb !== 0n) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private getNextPlayer(currentPlayer: string, eliminatedPlayers: string[] = []): string {
@@ -2474,25 +2552,25 @@ class RealtimeDatabaseService {
   // Create a rematch game with the same players and bots
   async createRematchGame(currentGameId: string): Promise<string> {
     const currentGameRef = ref(db, `games/${currentGameId}`);
-    
+
     try {
       const snapshot = await get(currentGameRef);
       if (!snapshot.exists()) {
         throw new Error("Current game not found");
       }
-      
+
       const currentGame = snapshot.val();
       const players = Object.values(currentGame.players || {});
-      
+
       // Create new game with same host
       const newGameRef = push(ref(db, "games"));
       const newGameId = newGameRef.key;
       if (!newGameId) throw new Error("Failed to generate game ID");
-      
+
       const { initialBoardState } = require("../state/boardState");
       const initialBitboards = syncBitboardsFromArray(initialBoardState);
       const serializedPieces = serializeBitboardPieces(initialBitboards.pieces);
-      
+
       // Prepare new game data
       const settings = settingsService.getSettings();
       const botDifficulty =
@@ -2569,7 +2647,7 @@ class RealtimeDatabaseService {
           tempName: "",
         }
       };
-      
+
       // Add all players from the previous game (including bots)
       const playersToAdd: any = {};
       for (const player of players) {
@@ -2584,14 +2662,14 @@ class RealtimeDatabaseService {
           lastSeen: Date.now(),
         };
       }
-      
+
       newGameData.players = playersToAdd;
-      
+
       // Create the new game
       await set(newGameRef, newGameData);
-      
+
       return newGameId;
-      
+
     } catch (error) {
       console.error('Error creating rematch game:', error);
       throw error;
@@ -2601,21 +2679,25 @@ class RealtimeDatabaseService {
   // Clear justEliminated flag from server
   async clearJustEliminated(gameId: string): Promise<void> {
     const gameRef = ref(db, `games/${gameId}`);
-    
+
     try {
       await runTransaction(gameRef, (gameData) => {
         if (gameData === null) {
           console.warn(`RealtimeDatabaseService: Game ${gameId} not found when clearing justEliminated`);
           return null;
         }
-        
+
         // Clear the justEliminated flag
+        if (!gameData.gameState) {
+          console.warn(`[RealtimeDB] Missing gameState in clearJustEliminated`);
+          return gameData;
+        }
         gameData.gameState.justEliminated = null;
         gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
-        
+
         return gameData;
       });
-      
+
     } catch (error) {
       console.error('Error clearing justEliminated flag:', error);
       throw error;
@@ -2627,17 +2709,17 @@ class RealtimeDatabaseService {
     try {
       const gameRef = ref(db, `games/${gameId}`);
       const snapshot = await get(gameRef);
-      
+
       if (!snapshot.exists()) {
         throw new Error("Game not found");
       }
 
       const gameData = snapshot.val();
       const usedColors = Object.values(gameData.players).map((p: any) => p.color);
-      
+
       // Filter out colors that are already taken
       const availableBotColors = botColors.filter(color => !usedColors.includes(color));
-      
+
       if (availableBotColors.length === 0) {
         return;
       }
@@ -2646,7 +2728,7 @@ class RealtimeDatabaseService {
 
       for (const botColor of availableBotColors) {
         const botId = `bot_${botColor}_${Date.now()}`;
-        
+
         botUpdates[`players/${botId}`] = {
           id: botId,
           name: `Bot ${botColor.toUpperCase()}`,
@@ -2669,10 +2751,10 @@ class RealtimeDatabaseService {
   async updateBotConfiguration(gameId: string, botColors: string[]): Promise<void> {
     try {
       console.log(`[BotConfig] updateBotConfiguration called with colors:`, botColors);
-      
+
       const gameRef = ref(db, `games/${gameId}`);
       const snapshot = await get(gameRef);
-      
+
       if (!snapshot.exists()) {
         throw new Error("Game not found");
       }
@@ -2680,17 +2762,17 @@ class RealtimeDatabaseService {
       const gameData = snapshot.val();
       const currentPlayers = gameData.players || {};
       const allColors = ["r", "b", "y", "g"];
-      
+
       console.log(`[BotConfig] Current players:`, Object.entries(currentPlayers).map(([id, p]: [string, any]) => ({
         id: id.slice(0, 10),
         color: p.color,
         isBot: p.isBot,
       })));
-      
+
       // Separate human players from bots
       const humanPlayers: { [id: string]: any } = {};
       const existingBots: { [id: string]: any } = {};
-      
+
       Object.entries(currentPlayers).forEach(([playerId, player]: [string, any]) => {
         if (player.isBot) {
           existingBots[playerId] = player;
@@ -2698,59 +2780,59 @@ class RealtimeDatabaseService {
           humanPlayers[playerId] = player;
         }
       });
-      
+
       const humanCount = Object.keys(humanPlayers).length;
       const requestedBotCount = botColors.length;
-      
+
       // Ensure we don't exceed 4 total players - silently return if would exceed
       if (humanCount + requestedBotCount > 4) {
         console.log(`[BotConfig] Cannot add ${requestedBotCount} bots with ${humanCount} human players. Maximum is 4 total. Ignoring request.`);
         return;
       }
-      
+
       // Get colors used by humans
       const humanColors = Object.values(humanPlayers).map((p: any) => p.color);
-      
+
       // Check if any requested bot color conflicts with a human player
       const conflictingColors = botColors.filter(color => humanColors.includes(color));
-      
+
       const updates: any = {};
-      
+
       if (conflictingColors.length > 0) {
         console.log(`[BotConfig] Conflict detected: humans on colors ${conflictingColors.join(', ')}`);
-        
+
         // Find available colors (not used by humans and not requested for bots)
         const availableColors = allColors.filter(
           color => !humanColors.includes(color) && !botColors.includes(color)
         );
-        
+
         // Reassign conflicting humans to available colors
         for (const conflictColor of conflictingColors) {
           if (availableColors.length === 0) {
             throw new Error(`Cannot add bot to color ${conflictColor}: no available colors for human player`);
           }
-          
+
           // Find the human player on this color
           const humanEntry = Object.entries(humanPlayers).find(
             ([_, p]: [string, any]) => p.color === conflictColor
           );
-          
+
           if (humanEntry) {
             const [humanId, humanPlayer] = humanEntry;
             const newColor = availableColors.shift()!;
-            
+
             console.log(`[BotConfig] Reassigning human ${humanId.slice(0, 10)} from ${conflictColor} to ${newColor}`);
-            
+
             // Update human player's color
             updates[`players/${humanId}/color`] = newColor;
-            
+
             // Update our tracking
             humanColors.splice(humanColors.indexOf(conflictColor), 1);
             humanColors.push(newColor);
           }
         }
       }
-      
+
       // Remove existing bots
       Object.keys(existingBots).forEach(playerId => {
         console.log(`[BotConfig] Removing bot: ${playerId} (color: ${existingBots[playerId].color})`);
@@ -2887,6 +2969,10 @@ class RealtimeDatabaseService {
       this.movesUnsubscribe();
       this.movesUnsubscribe = null;
     }
+    if (this.serverTimeOffsetUnsubscribe) {
+      this.serverTimeOffsetUnsubscribe();
+      this.serverTimeOffsetUnsubscribe = null;
+    }
     // OPTIMIZATION: Stop keep-alive
     this.stopKeepAlive();
   }
@@ -2894,11 +2980,11 @@ class RealtimeDatabaseService {
   // Test Firebase connection (optimized)
   async testConnection(): Promise<boolean> {
     try {
-      
+
       // Quick connection test - just check if we can access the database
       const gamesRef = ref(db, "games");
       const snapshot = await get(query(gamesRef, limitToFirst(1)));
-      
+
       return true;
     } catch (error) {
       console.error("❌ Firebase connection failed:", error);
@@ -2911,7 +2997,7 @@ class RealtimeDatabaseService {
     try {
       const gamesRef = ref(db, "games");
       const snapshot = await get(gamesRef);
-      
+
       if (!snapshot.exists()) {
         return 0;
       }
@@ -2941,10 +3027,10 @@ class RealtimeDatabaseService {
         }
         return now - timestamp >= minAgeMs;
       };
-      
+
       // Track games by host to detect duplicates
       const gamesByHost = new Map<string, string[]>();
-      
+
       // First pass: collect all games and group by host
       Object.entries(games).forEach(([gameId, gameData]: [string, any]) => {
         if (gameData.hostId) {
@@ -2954,7 +3040,7 @@ class RealtimeDatabaseService {
           gamesByHost.get(gameData.hostId)!.push(gameId);
         }
       });
-      
+
       // Second pass: analyze and identify corrupted games
       Object.entries(games).forEach(([gameId, gameData]: [string, any]) => {
         if (!isOldEnough(gameData)) {
@@ -2967,10 +3053,10 @@ class RealtimeDatabaseService {
         }
 
         // Clean up games with missing required fields
-        if (!gameData.status || 
-            !gameData.hostName || 
-            !gameData.createdAt ||
-            !gameData.gameState) {
+        if (!gameData.status ||
+          !gameData.hostName ||
+          !gameData.createdAt ||
+          !gameData.gameState) {
           corruptedGames.push(gameId);
           return;
         }
@@ -2983,10 +3069,10 @@ class RealtimeDatabaseService {
 
         // Check for games with invalid player data
         const players = gameData.players || {};
-        const validPlayers = Object.values(players).filter((player: any) => 
+        const validPlayers = Object.values(players).filter((player: any) =>
           player && player.id && player.name && player.color
         );
-        
+
         // If no valid players, mark as corrupted
         if (validPlayers.length === 0) {
           corruptedGames.push(gameId);
@@ -2995,9 +3081,9 @@ class RealtimeDatabaseService {
 
         // Clean up games with invalid game state structure
         if (!gameData.gameState.bitboardState ||
-            !gameData.gameState.bitboardState.pieces ||
-            !gameData.gameState.currentPlayerTurn ||
-            !gameData.gameState.gameStatus) {
+          !gameData.gameState.bitboardState.pieces ||
+          !gameData.gameState.currentPlayerTurn ||
+          !gameData.gameState.gameStatus) {
           corruptedGames.push(gameId);
           return;
         }
@@ -3018,7 +3104,7 @@ class RealtimeDatabaseService {
               const gameB = games[b];
               return (gameB.createdAt || 0) - (gameA.createdAt || 0);
             });
-            
+
             // Delete all but the most recent game
             const gamesToDelete = sortedGames.slice(1);
             if (gamesToDelete.includes(gameId)) {
@@ -3030,7 +3116,7 @@ class RealtimeDatabaseService {
 
         // Clean up games with invalid player colors (not r, b, y, g)
         const validColors = ['r', 'b', 'y', 'g'];
-        const invalidColorPlayers = validPlayers.filter((player: any) => 
+        const invalidColorPlayers = validPlayers.filter((player: any) =>
           !validColors.includes(player.color)
         );
         if (invalidColorPlayers.length > 0) {
@@ -3062,7 +3148,7 @@ class RealtimeDatabaseService {
         corruptedGames.forEach(gameId => {
           updates[gameId] = null;
         });
-        
+
         await update(gamesRef, updates);
         return corruptedGames.length;
       } else {

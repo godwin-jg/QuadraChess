@@ -1,4 +1,5 @@
 // Import the name generator
+import { getDefaultAnimationsEnabled } from "../app/utils/devicePerformance";
 import { generateRandomName } from "../app/utils/nameGenerator";
 import type { BotDifficulty } from "../config/gameConfig";
 
@@ -84,7 +85,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   },
   game: {
     soundEnabled: true,
-    animationsEnabled: true,
+    animationsEnabled: getDefaultAnimationsEnabled(),
     showMoveHints: true,
     hapticsEnabled: true,
     botDifficulty: "easy",

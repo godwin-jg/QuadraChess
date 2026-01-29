@@ -94,13 +94,12 @@ export default function Board({
   maxBoardSize,
 }: BoardProps) {
   const { width, height } = useWindowDimensions();
-  // Board dimensions - adapts to screen size with tablet support
+  // Board dimensions - use provided size to avoid extra gaps
   const boardSize = React.useMemo(() => {
-    const baseSize = getBoardSize(width, height);
     if (typeof maxBoardSize === "number" && Number.isFinite(maxBoardSize) && maxBoardSize > 0) {
-      return Math.min(baseSize, maxBoardSize);
+      return maxBoardSize;
     }
-    return baseSize;
+    return getBoardSize(width, height);
   }, [width, height, maxBoardSize]);
   const squareSize = React.useMemo(() => boardSize / 14, [boardSize]);
   const { mode } = useLocalSearchParams<{ mode?: string }>();

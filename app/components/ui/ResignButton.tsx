@@ -10,7 +10,7 @@ import soundService from "../../../services/soundService";
 import { sw, sh, sf, isCompact } from "../../utils/responsive";
 import { FontAwesome } from "@expo/vector-icons";
 
-const PLAYER_NAMES: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+const PLAYER_NAMES: Record<string, string> = { r: "Red", b: "Blue", y: "Purple", g: "Green" };
 
 interface ResignButtonProps {
   textScale?: number;
@@ -106,9 +106,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.55)',
-    paddingHorizontal: sw(c ? 12 : 14),
+    paddingHorizontal: sw(c ? 14 : 18),
     paddingVertical: sh(c ? 6 : 8),
-    borderRadius: sw(c ? 6 : 8),
+    borderRadius: sw(50),
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,

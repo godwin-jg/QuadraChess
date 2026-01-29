@@ -83,8 +83,8 @@ const buildRelevantKey = (state: GameState): string => {
     typeof flowSnapshot?.value === "string"
       ? flowSnapshot.value
       : flowSnapshot?.value
-      ? JSON.stringify(flowSnapshot.value)
-      : "unknown";
+        ? JSON.stringify(flowSnapshot.value)
+        : "unknown";
   const ready = isGameReady(state) ? "1" : "0";
   const promoAwaiting = state.promotionState.isAwaiting ? "1" : "0";
   const promoColor = state.promotionState.color ?? "";
@@ -108,6 +108,10 @@ const canBotAct = (state: GameState): boolean => {
   if (!isGameReady(state)) return false;
   if (!isGameFlowReady()) return false;
   if (state.gameMode === "online") return false;
+
+  // ✅ FIX: In P2P mode, only the host handles bot moves
+  if (state.gameMode === "p2p" && !state.isHost) return false;
+
   if (state.gameStatus !== "active" && state.gameStatus !== "promotion") return false;
   if (!state.botPlayers.includes(state.currentPlayerTurn)) return false;
   if (state.eliminatedPlayers.includes(state.currentPlayerTurn)) return false;
@@ -123,8 +127,8 @@ const getIdleReason = (state: GameState): string | null => {
       typeof flowSnapshot?.value === "string"
         ? flowSnapshot.value
         : flowSnapshot?.value
-        ? JSON.stringify(flowSnapshot.value)
-        : "unknown";
+          ? JSON.stringify(flowSnapshot.value)
+          : "unknown";
     return `flow:${flowValue}`;
   }
   if (state.gameStatus !== "active" && state.gameStatus !== "promotion") {

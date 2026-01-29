@@ -411,7 +411,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                         console.error("❌ Failed to auto-save bot difficulty:", error);
                       }
                     }}
-                    className={`flex-1 items-center py-2 rounded-lg border ${
+                    className={`flex-1 items-center px-1 py-2 rounded-lg border ${
                       settings.game.botDifficulty === level.key
                         ? "bg-blue-500/30 border-blue-400"
                         : "border-transparent"
@@ -423,6 +423,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
                           ? "text-white"
                           : "text-gray-300"
                       }`}
+                      numberOfLines={1}
                     >
                       {level.label}
                     </Text>

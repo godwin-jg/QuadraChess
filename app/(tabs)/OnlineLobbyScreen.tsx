@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
-import { FontAwesome } from "@expo/vector-icons";
+import { FontAwesome, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -25,6 +25,7 @@ import { useSettings } from "../../context/SettingsContext";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import GridBackground from "../components/ui/GridBackground";
 import AnimatedButton from "../components/ui/AnimatedButton";
+import TeamAssignmentDnD from "../components/ui/TeamAssignmentDnD";
 import { hapticsService } from "../../services/hapticsService";
 import { getTabBarSpacer } from "../utils/responsive";
 
@@ -35,7 +36,7 @@ const DEFAULT_TIME_CONTROL: TimeControlSettings = { baseMinutes: 5, incrementSec
 const COLOR_LABELS: Record<string, string> = {
   r: "Red",
   b: "Blue",
-  y: "Yellow",
+  y: "Purple",
   g: "Green",
 };
 const SECTION_TITLE_CLASS = "text-white text-lg font-semibold";
@@ -740,18 +741,16 @@ const OnlineLobbyScreen: React.FC = () => {
             {/* Bot Configuration Section (Host Only) */}
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
-                <Text className="text-white text-lg font-semibold mb-3 text-center">Add Bots To Your Game</Text>
-                <Text className="text-gray-400 text-sm mb-3 text-center">
-                  Tap which colors you want the bot to play
+                <Text className="text-white text-lg font-semibold mb-2 text-center">Add Bots</Text>
+                <Text className="text-gray-400 text-xs mb-3 text-center">
+                  Tap to toggle bot players
                 </Text>
-                <View className="flex-row justify-around">
-                  {['r', 'b', 'y', 'g'].map((color) => {
+                <View className="flex-row justify-center gap-3">
+                  {(['r', 'b', 'y', 'g'] as const).map((color) => {
                     const isBot = botPlayers.includes(color);
-                    const colorName = color === 'r' ? 'Red' : color === 'b' ? 'Blue' : color === 'y' ? 'Yellow' : 'Green';
-                    const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
+                    const bgColor = color === 'r' ? '#dc2626' : color === 'b' ? '#3b82f6' : color === 'y' ? '#a855f7' : '#22c55e';
                     
                     // Check if adding a bot would exceed 4 players
-                    // Count humans (players minus current bots) + would-be bots
                     const humanCount = players.filter(p => !p.isBot).length;
                     const wouldBeBotCount = isBot ? botPlayers.length - 1 : botPlayers.length + 1;
                     const wouldExceedMax = !isBot && (humanCount + wouldBeBotCount > 4);
@@ -759,27 +758,29 @@ const OnlineLobbyScreen: React.FC = () => {
                     return (
                       <TouchableOpacity
                         key={color}
-                        className={`mx-1 w-16 h-16 rounded-full items-center justify-center ${
-                          isBot ? 'bg-green-500/20' : 
-                          wouldExceedMax ? 'bg-gray-800/50 opacity-50' : 
-                          'bg-white/10'
-                        }`}
+                        style={{
+                          width: 56,
+                          height: 56,
+                          borderRadius: 28,
+                          backgroundColor: isBot ? bgColor : `${bgColor}1A`,
+                          borderWidth: 2,
+                          borderColor: isBot ? bgColor : `${bgColor}40`,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: wouldExceedMax ? 0.4 : 1,
+                        }}
                         onPress={() => {
-                          if (wouldExceedMax) return; // Don't allow if would exceed max
+                          if (wouldExceedMax) return;
                           hapticsService.selection();
                           toggleBotPlayer(color);
                         }}
                         disabled={wouldExceedMax}
                       >
-                        <View className="items-center">
-                          <View className={`w-3 h-3 rounded-full mb-1 ${colorClass}`} />
-                          <Text className={`text-xs font-semibold ${isBot ? 'text-green-400' : wouldExceedMax ? 'text-gray-500' : 'text-gray-300'}`}>
-                            {colorName}
-                          </Text>
-                          <Text className={`text-[10px] ${isBot ? 'text-green-300' : wouldExceedMax ? 'text-gray-500' : 'text-gray-400'}`}>
-                            {isBot ? 'Bot' : 'Human'}
-                          </Text>
-                        </View>
+                        <MaterialCommunityIcons
+                          name={isBot ? 'robot' : 'account-outline'}
+                          size={26}
+                          color="#ffffff"
+                        />
                       </TouchableOpacity>
                     );
                   })}
@@ -789,7 +790,7 @@ const OnlineLobbyScreen: React.FC = () => {
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
                 <View className="flex-row items-center justify-between mb-2">
-                  <Text className={SECTION_TITLE_CLASS}>Team Play</Text>
+                  <Text className={SECTION_TITLE_CLASS} numberOfLines={1}>Team Play</Text>
                   <Switch
                     value={teamMode}
                     onValueChange={(nextValue) => {
@@ -804,54 +805,21 @@ const OnlineLobbyScreen: React.FC = () => {
                   />
                 </View>
                 {teamMode && (
-                  <View className="flex-row flex-wrap -mx-2">
-                    {(['r', 'b', 'y', 'g'] as const).map((color) => {
-                      const colorClass = color === 'r' ? 'bg-red-500' : color === 'b' ? 'bg-blue-500' : color === 'y' ? 'bg-purple-500' : 'bg-green-500';
-                      const playerLabel = (() => {
-                        const player = players.find((p) => p.color === color);
-                        if (!player) return "Open";
-                        if (player.isBot) {
-                          return `Bot ${COLOR_LABELS[color] ?? "Player"}`;
-                        }
-                        return player.name;
-                      })();
-                      return (
-                        <View key={color} className="w-1/2 px-2 mb-2">
-                          <View className="flex-row items-center justify-between bg-white/5 rounded-lg px-2 py-2">
-                            <View className="flex-row items-center">
-                              <View className={`w-2.5 h-2.5 rounded-full mr-2 ${colorClass}`} />
-                              <Text
-                                className="text-white text-base"
-                                numberOfLines={1}
-                                ellipsizeMode="tail"
-                                style={{ flexShrink: 1, maxWidth: 90 }}
-                              >
-                                {playerLabel}
-                              </Text>
-                            </View>
-                            <View className="flex-row">
-                              {(['A', 'B'] as const).map((teamId) => {
-                                const active = teamAssignments[color] === teamId;
-                                return (
-                                  <TouchableOpacity
-                                    key={`${color}-${teamId}`}
-                                    className={`px-2 py-1 rounded-full border ml-1 ${
-                                      active ? "border-blue-400 bg-blue-500/20" : "border-white/20 bg-white/5"
-                                    }`}
-                                    onPress={() => updateTeamConfiguration(teamMode, { ...teamAssignments, [color]: teamId })}
-                                  >
-                                    <Text className={`text-sm ${active ? "text-blue-200 font-semibold" : "text-gray-400"}`}>
-                                      {teamId}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
+                  <TeamAssignmentDnD
+                    teamAssignments={teamAssignments}
+                    players={players.map((p) => ({
+                      color: p.color as "r" | "b" | "y" | "g",
+                      name: p.name,
+                      isBot: p.isBot,
+                    }))}
+                    onAssignmentChange={(newAssignments) => {
+                      if (settings.game.hapticsEnabled) {
+                        hapticsService.selection();
+                      }
+                      updateTeamConfiguration(teamMode, newAssignments);
+                    }}
+                    disabled={!isHost}
+                  />
                 )}
               </View>
             )}

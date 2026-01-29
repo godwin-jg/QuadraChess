@@ -29,7 +29,7 @@ export default function PromotionModal({
       case "b":
         return "Blue";
       case "y":
-        return "Yellow";
+        return "Purple";
       case "g":
         return "Green";
       default:

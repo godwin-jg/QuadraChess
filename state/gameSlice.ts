@@ -791,10 +791,10 @@ const gameSlice = createSlice({
       state.selectedPiece = null;
       state.validMoves = [];
     },
-    // Premove actions for online play
+    // Premove actions for online/p2p play
     setPremove: (state, action: PayloadAction<{ from: Position; to: Position; pieceCode: string }>) => {
-      // Only allow premove in online mode
-      if (state.gameMode !== "online") return;
+      // Only allow premove in online/p2p mode
+      if (state.gameMode !== "online" && state.gameMode !== "p2p") return;
       state.premove = action.payload;
       // Clear selection after setting premove
       state.selectedPiece = null;
@@ -835,9 +835,13 @@ const gameSlice = createSlice({
         return;
       }
 
-      // In online mode, allow selecting pieces for premove even when not your turn
+      // In online/p2p mode, allow selecting pieces even when not your turn
       // In other modes, only allow selecting current player's pieces
-      if (state.gameMode !== "online" && pieceColor !== state.currentPlayerTurn) {
+      if (
+        state.gameMode !== "online" &&
+        state.gameMode !== "p2p" &&
+        pieceColor !== state.currentPlayerTurn
+      ) {
         state.selectedPiece = null;
         state.validMoves = [];
         return;
@@ -853,7 +857,7 @@ const gameSlice = createSlice({
       state.selectedPiece = action.payload;
 
       // Clear any existing premove when selecting a new piece
-      if (state.gameMode === "online") {
+      if (state.gameMode === "online" || state.gameMode === "p2p") {
         state.premove = null;
       }
 

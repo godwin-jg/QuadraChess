@@ -2,7 +2,7 @@
 
 import { store } from '../state/store';
 import { makeMove, completePromotion, resignGame } from '../state/gameSlice';
-import { bitboardToMoveInfo, getValidMovesBB } from "../src/logic/moveGeneration";
+import { bitboardToMoveInfo, getValidMovesBB, isValidMove } from "../src/logic/moveGeneration";
 import { generateAttackMap, getPinnedPiecesMask } from "../src/logic/bitboardLogic";
 import { bitScanForward, squareBit, getPieceAtFromBitboard } from "../src/logic/bitboardUtils";
 import { EnPassantTarget, GameState, Position } from '../state/types';
@@ -2089,13 +2089,14 @@ const minimax = (
 const MAX_BOT_RETRIES = 3; // Increased from 2 to allow more recovery attempts
 
 const resolveBotConfigMode = (gameMode: GameState["gameMode"]) =>
-  gameMode === "online" ? "single" : gameMode;
+  gameMode === "online" || gameMode === "p2p" ? "single" : gameMode;
 
 const isBotLocalMode = (gameMode: GameState["gameMode"]) =>
   gameMode === "solo" ||
   gameMode === "single" ||
   gameMode === "local" ||
-  gameMode === "online";
+  gameMode === "online" ||
+  gameMode === "p2p";
 
 const canBotStartTurn = (gameState: GameState, botColor: string): boolean => {
   if (!gameState) return false;
@@ -2484,6 +2485,35 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     endTiming("turn-mismatch");
+    return;
+  }
+
+  // ✅ FIX: Re-validate the move is still legal before dispatching
+  // This catches cases where getValidMovesBB returns moves that don't actually resolve check
+  const moveStillValid = isValidMove(
+    pieceCode,
+    chosenMove.from,
+    { row: chosenMove.to.row, col: chosenMove.to.col },
+    currentGameState
+  );
+
+  if (!moveStillValid) {
+    clearTimeout(moveTimeout);
+    botMoveInProgress = false;
+    endTiming("move-no-longer-valid");
+
+    // Clear TT and retry - the position might have changed
+    transpositionTable.clear();
+    console.warn(`Bot ${botColor} move from (${chosenMove.from.row},${chosenMove.from.col}) to (${chosenMove.to.row},${chosenMove.to.col}) is no longer valid, retrying...`);
+
+    // Retry with fresh state if it's still our turn
+    if (currentGameState.currentPlayerTurn === botColor && retryCount < MAX_BOT_RETRIES) {
+      setTimeout(() => makeBotMove(botColor, retryCount + 1), 50);
+    } else if (currentGameState.currentPlayerTurn === botColor) {
+      // Retries exhausted - resign to advance the game
+      console.warn(`Bot ${botColor} failed to find valid move after all retries, forcing resignation`);
+      store.dispatch(resignGame(botColor));
+    }
     return;
   }
 

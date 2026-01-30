@@ -467,6 +467,30 @@ const getCheckerMask = (state: GameState, color: string): Bitboard => {
     }
   }
 
+  // King checkers (adjacent enemy king)
+  let enemyKings = 0n;
+  enemyColors.forEach((enemy) => {
+    enemyKings |= state.bitboardState.pieces[`${enemy}K`] ?? 0n;
+  });
+  if (enemyKings !== 0n) {
+    const north = shift(kingBB, -14);
+    const south = shift(kingBB, 14);
+    const east = shift(kingBB & NOT_FILE_N, 1);
+    const west = shift(kingBB & NOT_FILE_A, -1);
+    const ne = shift(kingBB & NOT_FILE_N, -13);
+    const nw = shift(kingBB & NOT_FILE_A, -15);
+    const se = shift(kingBB & NOT_FILE_N, 15);
+    const sw = shift(kingBB & NOT_FILE_A, 13);
+    let kingAttackers = (north | south | east | west | ne | nw | se | sw) & enemyKings;
+    while (kingAttackers > 0n) {
+      const sq = Number(bitScanForward(kingAttackers));
+      const bit = squareBit(sq);
+      addChecker(bit);
+      if (checkers > 1) return 0n;
+      kingAttackers &= kingAttackers - 1n;
+    }
+  }
+
   // Slider checkers
   let enemyRooksQueens = 0n;
   let enemyBishopsQueens = 0n;
@@ -542,7 +566,20 @@ export const getValidMovesBB = (
   // Other pieces must block or capture the checker
   if (state.checkStatus[pieceColor as "r" | "b" | "y" | "g"] && pieceCode[1] !== "K") {
     const checkerMask = getCheckerMask(state, pieceColor);
-    if (checkerMask !== -1n) {
+    if (checkerMask === 0n) {
+      // Double check - only King can move
+      return 0n;
+    } else if (checkerMask === -1n) {
+      // ✅ BUG FIX: checkStatus says in check but getCheckerMask found no checkers
+      // This can happen in simulated positions during bot search where checkStatus
+      // is stale. Be conservative and return no moves for safety.
+      // Only warn for actual game state (when it's this player's turn and not simulation)
+      const isSimulation = state.lastMove?.timestamp === 0;
+      if (!isSimulation && state.currentPlayerTurn === pieceColor) {
+        console.warn(`[moveGeneration] Inconsistency: ${pieceColor} checkStatus=true but no checkers found`);
+      }
+      return 0n;
+    } else {
       moves &= checkerMask;
     }
   }

@@ -33,12 +33,23 @@ export function useBoardSoundEffects({
 }: UseBoardSoundEffectsOptions): void {
   const prevCheckStatus = usePrevious(checkStatus);
   const prevGameStatus = usePrevious(gameStatus);
+  // Track the last move we played sound for to prevent duplicate sounds
+  const lastPlayedMoveRef = useRef<string | null>(null);
 
   // Handle move sounds
   useEffect(() => {
     if (!lastMove) {
       return;
     }
+
+    // Create a unique key for this move to detect duplicates
+    const moveKey = `${lastMove.from.row},${lastMove.from.col}-${lastMove.to.row},${lastMove.to.col}-${lastMove.timestamp}`;
+    
+    // Skip if we already played sound for this exact move
+    if (lastPlayedMoveRef.current === moveKey) {
+      return;
+    }
+    lastPlayedMoveRef.current = moveKey;
 
     try {
       const soundService = require("../../../services/soundService").default;

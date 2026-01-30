@@ -24,8 +24,8 @@ export const DRAG_ACCENT = {
 
 // Drag behavior constants
 export const DRAG_OFFSET_Y = -1.8; // Multiplier of squareSize for piece lift
-export const DRAG_START_DISTANCE = 31; // px movement before drag activates
-export const TAP_MOVE_TOLERANCE = 30; // px movement still treated as tap
+export const DRAG_START_DISTANCE = 18; // px movement before drag activates
+export const TAP_MOVE_TOLERANCE = 18; // px movement still treated as tap
 export const SNAP_RING_RADIUS_RATIO = 0.75; // Keep tap/drag snap areas aligned
 export const LEGAL_DOT_RATIO = 1 / 3; // Size ratio for legal move dots
 

@@ -19,12 +19,23 @@ export default function GameMenu() {
     (state: RootState) => state.game
   );
   
-  // Get the local player's color for online games
+  const isOnlineMode = mode === "online" && !!gameId;
+  const isP2PMode = mode === "p2p";
+  const isNetworkMode = isOnlineMode || isP2PMode;
+
+  // Get the local player's color for online/p2p games
   const getLocalPlayerColor = (): string | null => {
     if (isOnlineMode && onlineGameService.currentPlayer) {
       console.log("GameMenu: Online mode - currentPlayer:", onlineGameService.currentPlayer);
       console.log("GameMenu: Online mode - player color:", onlineGameService.currentPlayer.color);
       return onlineGameService.currentPlayer.color;
+    }
+    if (isP2PMode) {
+      const p2pGameService = require('../../../services/p2pGameService').default;
+      if (p2pGameService.currentPlayer) {
+        console.log("GameMenu: P2P mode - currentPlayer:", p2pGameService.currentPlayer);
+        return p2pGameService.currentPlayer.color;
+      }
     }
     // For local games, we don't have a specific local player concept
     // The resign button should only appear for the current player's turn
@@ -34,8 +45,6 @@ export default function GameMenu() {
   
   const localPlayerColor = getLocalPlayerColor();
   console.log("GameMenu: Final localPlayerColor:", localPlayerColor);
-
-  const isOnlineMode = mode === "online" && !!gameId;
   const isViewingHistory = viewingHistoryIndex !== null;
   const canResign =
     !isViewingHistory &&
@@ -71,6 +80,12 @@ export default function GameMenu() {
         console.log("GameMenu: Online mode - calling onlineGameService.resignGame() first");
         await onlineGameService.resignGame();
         console.log("GameMenu: Online mode - onlineGameService.resignGame() completed");
+      } else if (isP2PMode) {
+        // P2P mode - use p2pGameService
+        console.log("GameMenu: P2P mode - calling p2pGameService.resignGame() first");
+        const p2pGameService = require('../../../services/p2pGameService').default;
+        await p2pGameService.resignGame();
+        console.log("GameMenu: P2P mode - p2pGameService.resignGame() completed");
       } else {
         // Local multiplayer or single player - use Redux action
         // Pass the local player's color to resign the correct player

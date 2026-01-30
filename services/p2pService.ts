@@ -66,6 +66,28 @@ class P2PService {
   private gameFoundUnsubscribe: (() => void) | null = null;
   private gameLostUnsubscribe: (() => void) | null = null;
 
+  // ✅ PERFORMANCE OPTIMIZATION: Monotonic time tracking (similar to online play)
+  // Using performance.now() for internal timing - not affected by system clock changes
+  private perfTimeAtStartup: number = performance.now();
+  private dateTimeAtStartup: number = Date.now();
+  
+  // ✅ Host-Client time offset (for clients to sync with host time)
+  // Positive value means client clock is ahead of host
+  private hostTimeOffsetMs: number = 0;
+  private lastTimeSyncMs: number = 0;
+  private timeSyncSamples: number[] = [];
+  private readonly TIME_SYNC_SAMPLE_COUNT = 5;
+  
+  // ✅ RELIABILITY: Version tracking for state updates (same as online play)
+  private stateVersion: number = 0;
+  private lastReceivedVersion: number = 0;
+  
+  // ✅ RELIABILITY: Grace period for timeout validation (same as online play)
+  private readonly TIMEOUT_GRACE_PERIOD_MS = 500;
+  
+  // ✅ RELIABILITY: Clock colors for validation (same as online play)
+  private readonly CLOCK_COLORS = ['r', 'b', 'y', 'g'] as const;
+
   // STUN servers for NAT traversal
   private stunServers: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -94,6 +116,134 @@ class P2PService {
   private constructor() {
     this.peerId = generateUUID();
     this.setupSignalingListeners();
+    this.resetTimeSync();
+  }
+
+  // ✅ PERFORMANCE OPTIMIZATION: Get current time using monotonic clock
+  // This is more reliable than Date.now() as it's not affected by system clock changes
+  private getMonotonicNow(): number {
+    const perfElapsed = performance.now() - this.perfTimeAtStartup;
+    return this.dateTimeAtStartup + perfElapsed;
+  }
+
+  // ✅ Get synchronized host time (for host) or estimated host time (for clients)
+  public getHostNow(): number {
+    if (this.isHost) {
+      // Host uses its own monotonic time
+      return this.getMonotonicNow();
+    } else {
+      // Client adjusts for host time offset
+      return this.getMonotonicNow() - this.hostTimeOffsetMs;
+    }
+  }
+
+  // ✅ Reset time synchronization state
+  private resetTimeSync(): void {
+    this.perfTimeAtStartup = performance.now();
+    this.dateTimeAtStartup = Date.now();
+    this.hostTimeOffsetMs = 0;
+    this.lastTimeSyncMs = 0;
+    this.timeSyncSamples = [];
+    // ✅ RELIABILITY: Reset version tracking for new game
+    this.stateVersion = 0;
+    this.lastReceivedVersion = 0;
+  }
+
+  // ✅ RELIABILITY: Validate and normalize clock state (same as online play)
+  private validateClockState(clocks: any, baseMs: number): { r: number; b: number; y: number; g: number } {
+    const defaultClocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    
+    if (!clocks || typeof clocks !== 'object' || Array.isArray(clocks)) {
+      console.warn('[P2P] Invalid clocks object, using defaults');
+      return defaultClocks;
+    }
+    
+    const validatedClocks = { ...defaultClocks };
+    this.CLOCK_COLORS.forEach((color) => {
+      const value = clocks[color];
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        validatedClocks[color] = value;
+      } else {
+        console.warn(`[P2P] Invalid clock value for ${color}: ${value}, using ${baseMs}ms`);
+      }
+    });
+    
+    return validatedClocks;
+  }
+
+  // ✅ Process time sync from host (called by clients)
+  private processTimeSyncFromHost(hostTimestamp: number, clientSendTime: number): void {
+    if (this.isHost) return; // Host doesn't need to sync with itself
+
+    const clientReceiveTime = this.getMonotonicNow();
+    const roundTripTime = clientReceiveTime - clientSendTime;
+    const oneWayLatency = roundTripTime / 2;
+    
+    // Estimate when the host sent the message (accounting for latency)
+    const estimatedHostTimeNow = hostTimestamp + oneWayLatency;
+    const offset = clientReceiveTime - estimatedHostTimeNow;
+    
+    // Use rolling average for stability
+    this.timeSyncSamples.push(offset);
+    if (this.timeSyncSamples.length > this.TIME_SYNC_SAMPLE_COUNT) {
+      this.timeSyncSamples.shift();
+    }
+    
+    // Calculate median offset (more robust than mean)
+    const sortedSamples = [...this.timeSyncSamples].sort((a, b) => a - b);
+    const medianIndex = Math.floor(sortedSamples.length / 2);
+    this.hostTimeOffsetMs = sortedSamples[medianIndex];
+    this.lastTimeSyncMs = clientReceiveTime;
+    
+    console.log(`⏱️ P2PService: Time sync - offset=${this.hostTimeOffsetMs.toFixed(0)}ms, RTT=${roundTripTime.toFixed(0)}ms`);
+  }
+
+  // ✅ Send time sync ping to host (called by clients periodically)
+  private sendTimeSyncPing(): void {
+    if (this.isHost) return;
+    
+    const message = this.buildMessage("time-sync-ping", {
+      clientSendTime: this.getMonotonicNow(),
+    });
+    
+    // Send to host (first connection is typically the host)
+    this.connections.forEach((_, peerId) => {
+      this.sendMessage(peerId, message);
+    });
+  }
+
+  // ✅ Handle time sync ping from client (host responds with pong)
+  private handleTimeSyncPing(fromPeerId: string, clientSendTime: number): void {
+    if (!this.isHost) return;
+    
+    const message = this.buildMessage("time-sync-pong", {
+      hostTimestamp: this.getMonotonicNow(),
+      clientSendTime: clientSendTime,
+    });
+    
+    this.sendMessage(fromPeerId, message);
+  }
+
+  // ✅ Handle time sync pong from host (client calculates offset)
+  private handleTimeSyncPong(hostTimestamp: number, clientSendTime: number): void {
+    this.processTimeSyncFromHost(hostTimestamp, clientSendTime);
+  }
+
+  // ✅ Start periodic time sync (for clients)
+  private startPeriodicTimeSync(): void {
+    if (this.isHost) return;
+    
+    // Initial sync
+    this.sendTimeSyncPing();
+    
+    // Periodic sync every 10 seconds
+    const syncInterval = setInterval(() => {
+      if (!this.isHost && this.connections.size > 0) {
+        this.sendTimeSyncPing();
+      } else {
+        clearInterval(syncInterval);
+      }
+    }, 10000);
   }
 
   // Set up signaling service event listeners
@@ -177,6 +327,7 @@ class P2PService {
       isConnected: true,
       joinedAt: Date.now(),
     });
+    this.syncGameStatePlayers();
 
     console.log('P2PService: Game state initialized:', this.gameState);
     console.log('P2PService: Players map size:', this.players.size);
@@ -185,9 +336,15 @@ class P2PService {
     console.log("🎮 P2PService: Updating Redux state with created game");
     console.log("🎮 P2PService: Game state being sent to Redux:", this.gameState);
 
-    // Initialize the full game state for Redux
+    // ✅ CRITICAL FIX: Reset game state first, then set p2p-specific fields
+    // This ensures no stale data from previous games persists
+    const { resetGame } = require("../state/gameSlice");
+    store.dispatch(resetGame());
+
+    // Now update with p2p-specific lobby state on top of the fresh reset state
+    const freshState = store.getState().game;
     store.dispatch(setGameState({
-      ...store.getState().game, // Keep existing state
+      ...freshState,
       currentGame: this.gameState,
       players: Array.from(this.players.values()),
       isHost: true,
@@ -771,6 +928,9 @@ class P2PService {
           });
           console.log("📤 P2PService: Actually sending join request:", joinMessage);
           this.sendMessage(peerId, joinMessage);
+          
+          // ✅ PERFORMANCE OPTIMIZATION: Start time sync with host
+          this.startPeriodicTimeSync();
         }, 1000);
       }
 
@@ -929,6 +1089,17 @@ class P2PService {
         console.log("📥 P2PService: Client received lobby-state-sync message, calling handleLobbyStateSync");
         this.handleLobbyStateSync(payload);
         break;
+      // ✅ PERFORMANCE OPTIMIZATION: Time synchronization messages
+      case "time-sync-ping":
+        if (payload?.clientSendTime) {
+          this.handleTimeSyncPing(fromPeerId, payload.clientSendTime);
+        }
+        break;
+      case "time-sync-pong":
+        if (payload?.hostTimestamp && payload?.clientSendTime) {
+          this.handleTimeSyncPong(payload.hostTimestamp, payload.clientSendTime);
+        }
+        break;
       default:
         console.log("⚠️ P2PService: Unknown message type:", type);
         break;
@@ -939,7 +1110,8 @@ class P2PService {
     const message: any = {
       type,
       payload,
-      timestamp: Date.now(),
+      // ✅ PERFORMANCE OPTIMIZATION: Use monotonic host time instead of Date.now()
+      timestamp: this.getHostNow(),
     };
 
     if (type === "game-state") {
@@ -1075,7 +1247,8 @@ class P2PService {
   }
 
   public sendTimeout(playerColor: string): void {
-    const now = Date.now();
+    // ✅ PERFORMANCE OPTIMIZATION: Use synchronized host time
+    const now = this.getHostNow();
     const message = this.buildMessage("timeout", { playerColor, timestamp: now });
     this.connections.forEach((connection, peerId) => {
       this.sendMessage(peerId, message);
@@ -1109,7 +1282,49 @@ class P2PService {
     if (!this.isHost || !this.gameState) return;
 
     // Update the state (create new object to avoid mutation)
-    this.gameState = { ...this.gameState, status: 'playing' };
+
+    // ✅ CRITICAL FIX: Preserve p2p-specific state BEFORE resetting
+    const preResetState = store.getState().game;
+    const preservedPlayers = [...preResetState.players];
+    const preservedBotPlayers = [...preResetState.botPlayers];
+    const preservedIsHost = preResetState.isHost;
+    const preservedTeamMode = preResetState.teamMode;
+    const preservedTeamAssignments = { ...preResetState.teamAssignments };
+    const hostPlayer = preservedPlayers.find((player) => player.isHost);
+    const startingColor = hostPlayer?.color || "r";
+    const baseMs = this.gameState.timeControl?.baseMs ?? 300000;
+    this.gameState = { ...this.gameState, status: "playing", currentPlayerTurn: startingColor };
+
+    // ✅ Fully reset the game state using resetGame action
+    // This ensures ALL state (including bitboards, clocks, etc.) is properly reset
+    const { resetGame } = require("../state/gameSlice");
+    store.dispatch(resetGame());
+
+    // ✅ PERFORMANCE OPTIMIZATION: Reset time sync for new game
+    this.resetTimeSync();
+
+    // Now get the fresh reset state and update with p2p-specific settings
+    // ✅ PERFORMANCE OPTIMIZATION: Use monotonic host time
+    const now = this.getHostNow();
+    const freshState = store.getState().game;
+    
+    store.dispatch(setGameState({
+      ...freshState,
+      gameStatus: "active",
+      gameMode: "p2p",
+      turnStartedAt: now,
+      currentPlayerTurn: startingColor,
+      // Restore preserved p2p-specific state
+      players: preservedPlayers,
+      isHost: preservedIsHost,
+      currentGame: { ...this.gameState, currentPlayerTurn: startingColor },
+      botPlayers: preservedBotPlayers,
+      teamMode: preservedTeamMode,
+      teamAssignments: preservedTeamAssignments,
+      // Reset clocks to match time control
+      clocks: { r: baseMs, b: baseMs, y: baseMs, g: baseMs },
+      timeControl: this.gameState.timeControl ?? { baseMs: 300000, incrementMs: 0 },
+    }));
 
     // Sync the new "playing" state to all clients
     this.syncLobbyStateToClients();
@@ -1140,6 +1355,7 @@ class P2PService {
       eliminatedPieceBitboards: currentReduxState.eliminatedPieceBitboards,
       currentPlayerTurn: currentReduxState.currentPlayerTurn,
       gameStatus: currentReduxState.gameStatus,
+      lastMove: currentReduxState.lastMove,
       scores: currentReduxState.scores,
       capturedPieces: currentReduxState.capturedPieces,
       eliminatedPlayers: currentReduxState.eliminatedPlayers,
@@ -1218,19 +1434,30 @@ class P2PService {
   public syncGameStateToClients(): void {
     if (!this.isHost) return;
 
+    // ✅ RELIABILITY: Increment version for each state sync (same as online play)
+    this.stateVersion++;
+
     console.log("🎮 HOST: Syncing complete game state to all clients");
 
     // Get the current Redux game state
     const currentReduxState = store.getState().game;
+    
+    // ✅ PERFORMANCE OPTIMIZATION: Include host timestamp for client time sync
+    const hostNow = this.getHostNow();
 
     // Create complete game state message
     const gameStateMessage = this.buildMessage("game-state", {
+      // ✅ PERFORMANCE OPTIMIZATION: Include sync reference timestamp
+      hostSyncTimestamp: hostNow,
+      // ✅ RELIABILITY: Include version for stale update detection
+      stateVersion: this.stateVersion,
       // Core game state
       boardState: currentReduxState.boardState,
       bitboardState: currentReduxState.bitboardState,
       eliminatedPieceBitboards: currentReduxState.eliminatedPieceBitboards,
       currentPlayerTurn: currentReduxState.currentPlayerTurn,
       gameStatus: currentReduxState.gameStatus,
+      lastMove: currentReduxState.lastMove,
       scores: currentReduxState.scores,
       capturedPieces: currentReduxState.capturedPieces,
       eliminatedPlayers: currentReduxState.eliminatedPlayers,
@@ -1264,7 +1491,8 @@ class P2PService {
       currentPlayerTurn: currentReduxState.currentPlayerTurn,
       gameStatus: currentReduxState.gameStatus,
       botPlayers: currentReduxState.botPlayers,
-      players: currentReduxState.players.length
+      players: currentReduxState.players.length,
+      hostSyncTimestamp: hostNow
     });
 
     this.broadcastMessage(gameStateMessage);
@@ -1372,10 +1600,8 @@ class P2PService {
       this.players.set(botId, botPlayer);
     }
     
-    // Update game state player count
-    if (this.gameState) {
-      this.gameState = { ...this.gameState, playerCount: this.players.size };
-    }
+    // Update game state player list/count
+    this.syncGameStatePlayers();
     
     // Update Redux state
     store.dispatch(setBotPlayers(botColors));
@@ -1384,6 +1610,88 @@ class P2PService {
     this.syncLobbyStateToClients();
     
     console.log(`[BotConfig] P2P update complete. Total players: ${this.players.size}`);
+  }
+
+  private getNextAvailableColor(): string | null {
+    const turnOrder = ["r", "b", "y", "g"];
+    const usedColors = Array.from(this.players.values())
+      .map((player) => player.color)
+      .filter(Boolean);
+    return turnOrder.find((color) => !usedColors.includes(color)) ?? null;
+  }
+
+  private syncGameStatePlayers(): void {
+    if (!this.gameState) return;
+    this.gameState = {
+      ...this.gameState,
+      playerCount: this.players.size,
+      players: Array.from(this.players.values()),
+    };
+  }
+
+  private getBotColorsFromPlayers(players: P2PPlayer[]): string[] {
+    const botColors = players
+      .filter((player) => player?.isBot)
+      .map((player) => player.color)
+      .filter((color) => typeof color === "string" && color.length > 0);
+    return Array.from(new Set(botColors));
+  }
+
+  private resolveBotColors(players: P2PPlayer[], gameState?: any): string[] {
+    const derived = this.getBotColorsFromPlayers(players);
+    if (derived.length > 0) return derived;
+    if (Array.isArray(gameState?.botPlayers)) {
+      return Array.from(new Set(gameState.botPlayers.filter((c: any) => typeof c === "string")));
+    }
+    return [];
+  }
+
+  private resolveLobbyPlayers(gameState: any, localPlayerName = "Player"): P2PPlayer[] {
+    const playersFromState = Array.isArray(gameState?.players) ? gameState.players : [];
+    if (playersFromState.length > 0) {
+      return playersFromState;
+    }
+
+    const playerCount = typeof gameState?.playerCount === "number" ? gameState.playerCount : 0;
+    if (playerCount <= 0) {
+      return [];
+    }
+
+    const turnOrder = ["r", "b", "y", "g"];
+    const botColors = Array.isArray(gameState?.botPlayers) ? gameState.botPlayers : [];
+    const usedColors: string[] = [];
+    const getNextHumanColor = () =>
+      turnOrder.find((color) => !usedColors.includes(color) && !botColors.includes(color)) || "r";
+
+    const players: P2PPlayer[] = [];
+
+    if (playerCount >= 1) {
+      const hostColor = getNextHumanColor();
+      usedColors.push(hostColor);
+      players.push({
+        id: gameState?.hostId || "host",
+        name: gameState?.hostName || "Host",
+        color: hostColor,
+        isHost: true,
+        isConnected: true,
+        joinedAt: gameState?.createdAt ?? Date.now(),
+      });
+    }
+
+    if (playerCount >= 2) {
+      const localColor = getNextHumanColor();
+      usedColors.push(localColor);
+      players.push({
+        id: this.peerId,
+        name: localPlayerName,
+        color: localColor,
+        isHost: false,
+        isConnected: true,
+        joinedAt: Date.now(),
+      });
+    }
+
+    return players;
   }
 
   // ✅ Helper method for serverlessSignalingService to add a player
@@ -1397,9 +1705,11 @@ class P2PService {
     }
 
     // Assign colors in turn order: r, b, y, g
-    const turnOrder = ['r', 'b', 'y', 'g'];
-    const usedColors = Array.from(this.players.values()).map(p => p.color);
-    const availableColor = turnOrder.find(color => !usedColors.includes(color)) || 'r';
+    const availableColor = this.getNextAvailableColor();
+    if (!availableColor) {
+      console.log(`P2PService: No available colors for ${playerName}, skipping addPlayer`);
+      return;
+    }
 
     const newPlayer: P2PPlayer = {
       id: playerId,
@@ -1412,10 +1722,8 @@ class P2PService {
 
     this.players.set(playerId, newPlayer);
 
-    // Update game state with new player count (create new object to avoid mutation)
-    if (this.gameState) {
-      this.gameState = { ...this.gameState, playerCount: this.players.size };
-    }
+    // Update game state with new player count and list
+    this.syncGameStatePlayers();
 
     // Don't call updatePlayerCount() as it tries to mutate the immutable gameState
 
@@ -1476,9 +1784,11 @@ class P2PService {
     const { playerId, playerName } = payload;
 
     // Assign color based on order of joining (same logic as online multiplayer)
-    const colors = ["r", "b", "y", "g"];
-    const usedColors = Array.from(this.players.values()).map((p) => p.color).filter(Boolean);
-    const availableColor = colors.find((color) => !usedColors.includes(color)) || "g";
+    const availableColor = this.getNextAvailableColor();
+    if (!availableColor) {
+      console.log(`P2PService: No available colors for ${playerName}, rejecting join request`);
+      return;
+    }
 
     // Add player to game with assigned color
     this.players.set(playerId, {
@@ -1534,7 +1844,7 @@ class P2PService {
 
       // Update game state if host
       if (this.isHost && this.gameState) {
-        this.gameState = { ...this.gameState, playerCount: this.players.size };
+        this.syncGameStatePlayers();
         this.syncLobbyStateToClients();
       }
     }
@@ -1575,6 +1885,7 @@ class P2PService {
       this.gameState = {
         ...this.gameState,
         playerCount: players.length,
+        players,
         id: this.gameState?.id || this.gameId || 'unknown',
         name: this.gameState?.name || 'P2P Game',
         hostName: this.gameState?.hostName || 'Unknown Host',
@@ -1642,6 +1953,7 @@ class P2PService {
         }
       });
     }
+    this.syncGameStatePlayers();
 
     // ✅ Update only lobby-related Redux state
     console.log("🎮 P2PService: Updating Redux state with lobby info");
@@ -1670,6 +1982,7 @@ class P2PService {
       isHost: false,
       canStartGame: playersArray.length === 4 && lobbyState.status === 'waiting'
     }));
+    store.dispatch(setBotPlayers(this.resolveBotColors(playersArray, lobbyState)));
 
     if (lobbyState.timeControl) {
       store.dispatch(setTimeControl(lobbyState.timeControl));
@@ -1771,8 +2084,47 @@ class P2PService {
     if (!this.isHost) {
       return;
     }
-    const now = payload.timestamp ?? Date.now();
-    store.dispatch(timeoutPlayer({ playerColor: payload.playerColor, timestamp: now }));
+    
+    const playerColor = payload.playerColor;
+    const now = this.getHostNow();
+    
+    // ✅ RELIABILITY: Host-side validation of timeout (same as online play)
+    // Validate that the player is actually timed out before accepting the request
+    const currentState = store.getState().game;
+    
+    // Validate clock state
+    const clocks = currentState.clocks;
+    if (!clocks || typeof clocks !== 'object') {
+      console.warn(`[P2P] Invalid clocks state, rejecting timeout for ${playerColor}`);
+      return;
+    }
+    
+    const playerClock = clocks[playerColor as keyof typeof clocks];
+    if (typeof playerClock !== 'number' || !Number.isFinite(playerClock)) {
+      console.warn(`[P2P] Invalid clock value for ${playerColor}, rejecting timeout`);
+      return;
+    }
+    
+    // Calculate actual remaining time
+    const turnStartedAt = currentState.turnStartedAt ?? now;
+    const elapsedMs = Math.max(0, now - turnStartedAt);
+    const actualRemainingMs = Math.max(0, playerClock - elapsedMs);
+    
+    console.log(
+      `⏱️ [P2P] Timeout request for ${playerColor}: ` +
+      `storedClock=${playerClock}ms, elapsed=${elapsedMs}ms, actualRemaining=${actualRemainingMs}ms`
+    );
+    
+    // ✅ RELIABILITY: 500ms grace period for network latency (same as online)
+    if (actualRemainingMs > 500) {
+      console.log(
+        `⏱️ [P2P] Rejecting premature timeout - ${playerColor} has ${actualRemainingMs}ms remaining`
+      );
+      return;
+    }
+    
+    console.log(`⏱️ [P2P] Applying validated timeout for ${playerColor}`);
+    store.dispatch(timeoutPlayer({ playerColor, timestamp: now }));
     this.syncGameStateToClients();
   }
 
@@ -1782,6 +2134,17 @@ class P2PService {
       console.error("P2PService: Received empty game state payload");
       return;
     }
+    
+    // ✅ RELIABILITY: Check for stale updates (same as online play)
+    if (gameState.stateVersion !== undefined) {
+      if (gameState.stateVersion <= this.lastReceivedVersion) {
+        console.log(`📥 P2PService: Ignoring stale game state (v${gameState.stateVersion} <= v${this.lastReceivedVersion})`);
+        return;
+      }
+      this.lastReceivedVersion = gameState.stateVersion;
+      console.log(`📥 P2PService: Accepted game state v${gameState.stateVersion}`);
+    }
+    
     this.gameState = gameState;
 
     // ✅ CRITICAL: Update Redux state for client-side game state synchronization
@@ -1790,34 +2153,30 @@ class P2PService {
       const { store } = require("../state/store");
       const { syncP2PGameState, setPlayers, setGameState } = require("../state/gameSlice");
 
+      // ✅ PERFORMANCE OPTIMIZATION: Use host sync timestamp to refine time offset
+      if (gameState.hostSyncTimestamp) {
+        const clientReceiveTime = this.getMonotonicNow();
+        // Use a simple one-way estimate (assumes symmetric latency)
+        const estimatedOffset = clientReceiveTime - gameState.hostSyncTimestamp;
+        
+        // Use rolling average for stability
+        this.timeSyncSamples.push(estimatedOffset);
+        if (this.timeSyncSamples.length > this.TIME_SYNC_SAMPLE_COUNT) {
+          this.timeSyncSamples.shift();
+        }
+        
+        // Calculate median offset
+        const sortedSamples = [...this.timeSyncSamples].sort((a, b) => a - b);
+        const medianIndex = Math.floor(sortedSamples.length / 2);
+        this.hostTimeOffsetMs = sortedSamples[medianIndex];
+        
+        console.log(`⏱️ P2PService: Game state sync - offset=${this.hostTimeOffsetMs.toFixed(0)}ms`);
+      }
+
       // Update Redux state with the received game state
       // Use players from gameState if available, otherwise create from playerCount
-      let players = gameState.players || [];
-      if (players.length === 0 && gameState.playerCount > 0) {
-        // Create players array from game state info
-        players = [];
-        if (gameState.playerCount >= 1) {
-          players.push({
-            id: gameState.hostId,
-            name: gameState.hostName,
-            color: 'r',
-            isHost: true,
-            isConnected: true,
-            joinedAt: gameState.createdAt
-          });
-        }
-        if (gameState.playerCount >= 2) {
-          // Add this client as second player
-          players.push({
-            id: this.peerId,
-            name: 'Player', // We don't have the client's name in this context
-            color: 'b',
-            isHost: false,
-            isConnected: true,
-            joinedAt: Date.now()
-          });
-        }
-      }
+      const players = this.resolveLobbyPlayers(gameState);
+      const botColors = this.resolveBotColors(players, gameState);
 
       // ✅ CRITICAL FIX: If this is a complete game state (not just lobby state), 
       // update the entire game state including scores
@@ -1825,6 +2184,7 @@ class P2PService {
         console.log("📥 P2PService: Received complete game state with scores:", gameState.scores);
         console.log("📥 P2PService: Received botPlayers:", gameState.botPlayers);
         store.dispatch(setGameState(gameState));
+        store.dispatch(setBotPlayers(botColors));
       } else {
         // This is just lobby state, only update lobby-related state
         store.dispatch(setPlayers(players));
@@ -1836,6 +2196,7 @@ class P2PService {
           isConnected: true,
           connectionError: null
         }));
+        store.dispatch(setBotPlayers(botColors));
       }
       console.log("📥 P2PService: Redux state updated for client with", players.length, "players");
     }
@@ -1851,6 +2212,33 @@ class P2PService {
     if (!move || !move.from || !move.to || !move.pieceCode || !move.playerColor) {
       console.error("P2PService: Invalid move data received:", move);
       return;
+    }
+
+    // ✅ RELIABILITY: Host-side turn validation (same as online play)
+    if (this.isHost) {
+      const currentState = store.getState().game;
+      
+      // Validate it's the player's turn
+      if (currentState.currentPlayerTurn !== move.playerColor) {
+        console.warn(`🎮 [P2P] Rejecting move - not ${move.playerColor}'s turn (current: ${currentState.currentPlayerTurn})`);
+        return;
+      }
+      
+      // ✅ RELIABILITY: Validate clock state before accepting move
+      const clocks = currentState.clocks;
+      if (clocks && typeof clocks === 'object') {
+        const playerClock = clocks[move.playerColor as keyof typeof clocks];
+        if (typeof playerClock === 'number' && playerClock <= 0) {
+          console.warn(`🎮 [P2P] Rejecting move - ${move.playerColor}'s clock is at 0`);
+          return;
+        }
+      }
+      
+      // Validate player is not eliminated
+      if (currentState.eliminatedPlayers.includes(move.playerColor)) {
+        console.warn(`🎮 [P2P] Rejecting move - ${move.playerColor} is eliminated`);
+        return;
+      }
     }
 
     // ✅ Handle promotion moves specially
@@ -1956,10 +2344,7 @@ class P2PService {
 
   // Helper method to ensure player count is always synchronized
   private updatePlayerCount(): void {
-    if (this.gameState) {
-      // Create a new object to avoid mutating the immutable gameState
-      this.gameState = { ...this.gameState, playerCount: this.players.size };
-    }
+    this.syncGameStatePlayers();
   }
 
   // Check if host
@@ -2024,35 +2409,14 @@ class P2PService {
 
             // Update Redux state with the received game state
             const { store } = require("../state/store");
-            const { syncP2PGameState, setPlayers } = require("../state/gameSlice");
+            const { syncP2PGameState, setPlayers, setBotPlayers } = require("../state/gameSlice");
 
             // Create players array from the game state
-            // Since we don't have detailed player info from HTTP, create basic player objects
-            const players = [];
-            if (gameState.playerCount >= 1) {
-              // Add host player
-              players.push({
-                id: gameState.hostId,
-                name: gameState.hostName,
-                color: 'r',
-                isHost: true,
-                isConnected: true,
-                joinedAt: gameState.createdAt
-              });
-            }
-            if (gameState.playerCount >= 2) {
-              // Add client player (this device)
-              players.push({
-                id: this.peerId,
-                name: playerName,
-                color: 'b',
-                isHost: false,
-                isConnected: true,
-                joinedAt: Date.now()
-              });
-            }
+            const players = this.resolveLobbyPlayers(gameState, playerName);
+            const botColors = this.resolveBotColors(players, gameState);
 
             store.dispatch(setPlayers(players));
+            store.dispatch(setBotPlayers(botColors));
             store.dispatch(syncP2PGameState({
               currentGame: gameState,
               players: players,
@@ -2109,32 +2473,14 @@ class P2PService {
 
             // Update Redux state with new game state
             const { store } = require("../state/store");
-            const { syncP2PGameState, setPlayers } = require("../state/gameSlice");
+            const { syncP2PGameState, setPlayers, setBotPlayers } = require("../state/gameSlice");
 
             // Create players array from the game state
-            const players = [];
-            if (gameState.playerCount >= 1) {
-              players.push({
-                id: gameState.hostId,
-                name: gameState.hostName,
-                color: 'r',
-                isHost: true,
-                isConnected: true,
-                joinedAt: gameState.createdAt
-              });
-            }
-            if (gameState.playerCount >= 2) {
-              players.push({
-                id: this.peerId,
-                name: playerName,
-                color: 'b',
-                isHost: false,
-                isConnected: true,
-                joinedAt: Date.now()
-              });
-            }
+            const players = this.resolveLobbyPlayers(gameState, playerName);
+            const botColors = this.resolveBotColors(players, gameState);
 
             store.dispatch(setPlayers(players));
+            store.dispatch(setBotPlayers(botColors));
             store.dispatch(syncP2PGameState({
               currentGame: gameState,
               players: players,
@@ -2167,8 +2513,20 @@ class P2PService {
   private async waitForGameState(): Promise<void> {
     return new Promise((resolve, reject) => {
       console.log("P2PService: Waiting for game state from host...");
+      
+      let resolved = false;
+      let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+      const cleanup = () => {
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+      };
 
       const timeout = setTimeout(() => {
+        if (resolved) return;
+        cleanup();
         console.log("P2PService: Timeout waiting for game state from host");
         const currentState = store.getState().game;
         console.log("P2PService: Final Redux state at timeout:", {
@@ -2182,11 +2540,15 @@ class P2PService {
 
       // ✅ Listen for Redux state changes instead of P2P events
       const checkGameState = () => {
+        if (resolved) return; // Prevent multiple resolutions
+        
         const currentState = store.getState().game;
         // Check both currentGame and players array (Redux structure has players as separate field)
         if (currentState.currentGame && currentState.players && currentState.players.length > 0) {
-          console.log("✅ GAME STATE RECEIVED: Players connected, resolving...");
+          resolved = true;
+          cleanup();
           clearTimeout(timeout);
+          console.log("✅ GAME STATE RECEIVED: Players connected, resolving...");
           resolve();
         }
       };
@@ -2194,13 +2556,10 @@ class P2PService {
       // Check immediately in case the state was already updated
       checkGameState();
 
-      // Set up a polling mechanism to check Redux state
-      const pollInterval = setInterval(checkGameState, 100); // Check every 100ms
-
-      // Clean up on timeout
-      setTimeout(() => {
-        clearInterval(pollInterval);
-      }, 10000);
+      // Set up a polling mechanism to check Redux state (only if not already resolved)
+      if (!resolved) {
+        pollInterval = setInterval(checkGameState, 100); // Check every 100ms
+      }
     });
   }
 
@@ -2252,6 +2611,9 @@ class P2PService {
       console.log("P2PService: Keeping gameId because notifyUI is false");
     }
     this.isHost = false;
+    
+    // ✅ PERFORMANCE OPTIMIZATION: Reset time synchronization state
+    this.resetTimeSync();
 
     // 4. Update Redux state about disconnection only if requested
     if (notifyUI) {

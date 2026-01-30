@@ -22,6 +22,12 @@ interface PlayerResult {
   eliminationOrder?: number; // 1st eliminated, 2nd eliminated, etc.
 }
 
+interface TeamStanding {
+  teamId: "A" | "B";
+  players: PlayerResult[];
+  totalScore: number;
+}
+
 interface GameOverModalProps {
   status: "checkmate" | "stalemate" | "finished";
   winner?: string;
@@ -106,6 +112,18 @@ export default function GameOverModal({
   };
 
   const leaderboard = createLeaderboard();
+  const isTeamVictory = teamMode && !!winningTeam;
+  const orderedTeams: Array<"A" | "B"> = winningTeam === "B" ? ["B", "A"] : ["A", "B"];
+  const teamStandings: TeamStanding[] = isTeamVictory
+    ? orderedTeams.map((teamId) => {
+        const teamPlayers = leaderboard.filter(
+          (player) => teamAssignments[player.color as keyof typeof teamAssignments] === teamId
+        );
+        const totalScore = teamPlayers.reduce((sum, player) => sum + player.score, 0);
+        return { teamId, players: teamPlayers, totalScore };
+      })
+    : [];
+  const displayCount = isTeamVictory ? teamStandings.length : leaderboard.length;
   const captureCounts = {
     r: capturedPieces.r?.length ?? 0,
     b: capturedPieces.b?.length ?? 0,
@@ -132,6 +150,7 @@ export default function GameOverModal({
       // Share is optional; ignore failures
     }
   };
+  const colorEmojis = { r: "🔴", b: "🔵", y: "🟡", g: "🟢" };
 
   // Animation values
   const modalScale = useSharedValue(0.9);
@@ -171,7 +190,7 @@ export default function GameOverModal({
     { opacity: player2Opacity, translateY: player2TranslateY, scale: player2Scale },
     { opacity: player3Opacity, translateY: player3TranslateY, scale: player3Scale },
     { opacity: player4Opacity, translateY: player4TranslateY, scale: player4Scale }
-  ].slice(0, leaderboard.length), [leaderboard.length]);
+  ].slice(0, displayCount), [displayCount]);
 
   // Play game end sound when modal appears
   useEffect(() => {
@@ -190,16 +209,22 @@ export default function GameOverModal({
     titleOpacity.value = withDelay(160, withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) }));
     messageOpacity.value = withDelay(320, withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) }));
     
-    // Animate player rows from 4th to 1st place (reverse order for dramatic effect)
-    leaderboard.forEach((_, index) => {
-      const reverseIndex = leaderboard.length - 1 - index;
+    // Animate rows from last to first place (reverse order for dramatic effect)
+    const displayRows = isTeamVictory ? teamStandings : leaderboard;
+    const rowCount = displayRows.length;
+    displayRows.forEach((_, index) => {
+      const reverseIndex = rowCount - 1 - index;
       const delay = 520 + (reverseIndex * 140);
-      const entryPlayer = leaderboard[reverseIndex];
-      const isWinnerRow = !!entryPlayer && !entryPlayer.isEliminated && (
-        teamMode && winningTeam
-          ? teamAssignments[entryPlayer.color as keyof typeof teamAssignments] === winningTeam
-          : entryPlayer.color === winner
-      );
+      const isWinnerRow = isTeamVictory
+        ? teamStandings[reverseIndex]?.teamId === winningTeam
+        : (() => {
+            const entryPlayer = displayRows[reverseIndex] as PlayerResult;
+            return !!entryPlayer && !entryPlayer.isEliminated && (
+              teamMode && winningTeam
+                ? teamAssignments[entryPlayer.color as keyof typeof teamAssignments] === winningTeam
+                : entryPlayer.color === winner
+            );
+          })();
       playerAnimations[reverseIndex].opacity.value = withDelay(delay, withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }));
       playerAnimations[reverseIndex].translateY.value = withDelay(delay, withSpring(0, { damping: 16, stiffness: 240 }));
       if (isWinnerRow) {
@@ -215,7 +240,7 @@ export default function GameOverModal({
     buttonOpacity.value = withDelay(1280, withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) }));
     
     // Start winner animations after the winner appears
-    const winnerDelay = 540 + ((leaderboard.length - 1) * 140) + 300; // After winner appears
+    const winnerDelay = 540 + ((rowCount - 1) * 140) + 300; // After winner appears
     winnerGlowOpacity.value = withDelay(winnerDelay, withTiming(1, { duration: 420 }));
     winnerShimmerTranslate.value = withDelay(winnerDelay + 420, withRepeat(
       withSequence(
@@ -406,7 +431,61 @@ export default function GameOverModal({
     player2RowStyle,
     player3RowStyle,
     player4RowStyle,
-  ].slice(0, leaderboard.length), [leaderboard.length, player1RowStyle, player2RowStyle, player3RowStyle, player4RowStyle]);
+  ].slice(0, displayCount), [displayCount, player1RowStyle, player2RowStyle, player3RowStyle, player4RowStyle]);
+
+  const renderWinnerEffects = () => (
+    <>
+      {/* Winner gradient - higher opacity */}
+      <LinearGradient
+        colors={['rgba(255, 215, 0, 0.6)', 'rgba(255, 193, 7, 0.55)']}
+        style={StyleSheet.absoluteFill}
+      />
+
+      {/* Glow effect */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          winnerGlowStyle,
+          {
+            backgroundColor: 'rgba(255, 215, 0, 0.2)',
+            borderRadius: 12,
+          }
+        ]}
+      />
+
+      {/* Shimmer effect */}
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: 0,
+            left: -200,
+            width: 200,
+            bottom: 0,
+            backgroundColor: 'transparent',
+            borderRadius: 12,
+          },
+          winnerShimmerStyle
+        ]}
+      >
+        <LinearGradient
+          colors={['transparent', 'transparent', 'rgba(255, 255, 255, 0.4)', 'transparent', 'transparent']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: 12,
+          }}
+        />
+      </Animated.View>
+      <Animated.View style={[styles.sprinkleCluster, sparkleStyle]}>
+        <View style={[styles.sprinkleDot, styles.sprinkleDotLarge]} />
+        <View style={[styles.sprinkleDot, styles.sprinkleDotMedium]} />
+        <View style={[styles.sprinkleDot, styles.sprinkleDotSmall]} />
+      </Animated.View>
+    </>
+  );
 
   return (
     <Modal visible={true} transparent animationType="fade">
@@ -473,105 +552,106 @@ export default function GameOverModal({
                   Final Standings
                 </Animated.Text>
                 
-                {leaderboard.map((player, index) => {
-                  const colorEmojis = { r: "🔴", b: "🔵", y: "🟡", g: "🟢" };
-                  const isWinner =
-                    !player.isEliminated &&
-                    (teamMode && winningTeam
-                      ? teamAssignments[player.color as keyof typeof teamAssignments] === winningTeam
-                      : player.color === winner);
-                  const playerAnimatedStyle = playerRowStyles[index];
-                  
-                  return (
-                    <Animated.View
-                      key={player.color}
-                      style={[
-                        playerAnimatedStyle,
-                        isWinner ? styles.winnerRow : styles.playerRow
-                      ]}
-                      className="flex-row items-center justify-between px-3 py-2 mb-2 rounded-xl overflow-hidden"
-                    >
-                      {isWinner && (
-                        <>
-                          {/* Winner gradient - higher opacity */}
-                          <LinearGradient
-                            colors={['rgba(255, 215, 0, 0.6)', 'rgba(255, 193, 7, 0.55)']}
-                            style={StyleSheet.absoluteFill}
-                          />
-                          
-                          {/* Glow effect */}
-                          <Animated.View
-                            style={[
-                              StyleSheet.absoluteFill,
-                              winnerGlowStyle,
-                              {
-                                backgroundColor: 'rgba(255, 215, 0, 0.2)',
-                                borderRadius: 12,
-                              }
-                            ]}
-                          />
-                          
-                          {/* Shimmer effect */}
-                          <Animated.View
-                            style={[
-                              {
-                                position: 'absolute',
-                                top: 0,
-                                left: -200,
-                                width: 200,
-                                bottom: 0,
-                                backgroundColor: 'transparent',
-                                borderRadius: 12,
-                              },
-                              winnerShimmerStyle
-                            ]}
-                          >
-                            <LinearGradient
-                              colors={['transparent', 'transparent', 'rgba(255, 255, 255, 0.4)', 'transparent', 'transparent']}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 1, y: 0 }}
-                              style={{
-                                width: '100%',
-                                height: '100%',
-                                borderRadius: 12,
-                              }}
-                            />
-                          </Animated.View>
-                          <Animated.View style={[styles.sprinkleCluster, sparkleStyle]}>
-                            <View style={[styles.sprinkleDot, styles.sprinkleDotLarge]} />
-                            <View style={[styles.sprinkleDot, styles.sprinkleDotMedium]} />
-                            <View style={[styles.sprinkleDot, styles.sprinkleDotSmall]} />
-                          </Animated.View>
-                        </>
-                      )}
+                {isTeamVictory ? (
+                  teamStandings.map((team, index) => {
+                    const isWinner = team.teamId === winningTeam;
+                    const rankText = isWinner ? "🥇 1st Place" : "🥈 2nd Place";
+                    const rankColor = isWinner ? "text-yellow-300" : "text-gray-300";
+                    const playerAnimatedStyle = playerRowStyles[index];
+                    const teamPlayersLine = team.players
+                      .map((player) => `${colorEmojis[player.color as keyof typeof colorEmojis]} ${player.name} ${player.score}`)
+                      .join(" · ");
+                    const teamEmoji = team.teamId === "A" ? "🅰️" : "🅱️";
+                    
+                    return (
+                      <Animated.View
+                        key={team.teamId}
+                        style={[
+                          playerAnimatedStyle,
+                          isWinner ? styles.winnerRow : styles.playerRow
+                        ]}
+                        className="flex-row items-center justify-between px-3 py-2 mb-2 rounded-xl overflow-hidden"
+                      >
+                        {isWinner && renderWinnerEffects()}
 
-                      <View className="flex-row items-center flex-1">
-                        {isWinner && (
-                          <Text style={styles.crown}>👑</Text>
-                        )}
-                        <Text className="text-xl mr-3">
-                          {colorEmojis[player.color as keyof typeof colorEmojis]}
-                        </Text>
-                        <View className="flex-1">
-                          <Text className="text-white font-semibold text-base">
-                            {player.name}
+                        <View className="flex-row items-center flex-1">
+                          {isWinner && (
+                            <Text style={styles.crown}>👑</Text>
+                          )}
+                          <Text className="text-xl mr-3">
+                            {teamEmoji}
                           </Text>
-                          <Text className={`text-xs ${getRankColor(index, player)}`}>
-                            {getRankText(index, player)}
+                          <View className="flex-1">
+                            <Text className="text-white font-semibold text-base">
+                              Team {team.teamId}
+                            </Text>
+                            <Text className={`text-xs ${rankColor}`}>
+                              {rankText}
+                            </Text>
+                            <Text className="text-xs text-gray-300 mt-1" numberOfLines={1}>
+                              {teamPlayersLine}
+                            </Text>
+                          </View>
+                        </View>
+                        <View className="items-end">
+                          <Text className="text-base font-bold text-white">
+                            {team.totalScore}
+                          </Text>
+                          <Text className="text-[10px] text-gray-400">
+                            team pts
                           </Text>
                         </View>
-                      </View>
-                      <View className="items-end">
-                        <Text className="text-base font-bold text-white">
-                          {player.score}
-                        </Text>
-                        <Text className="text-[10px] text-gray-400">
-                          pts
-                        </Text>
-                      </View>
-                    </Animated.View>
-                  );
-                })}
+                      </Animated.View>
+                    );
+                  })
+                ) : (
+                  leaderboard.map((player, index) => {
+                    const isWinner =
+                      !player.isEliminated &&
+                      (teamMode && winningTeam
+                        ? teamAssignments[player.color as keyof typeof teamAssignments] === winningTeam
+                        : player.color === winner);
+                    const playerAnimatedStyle = playerRowStyles[index];
+                    
+                    return (
+                      <Animated.View
+                        key={player.color}
+                        style={[
+                          playerAnimatedStyle,
+                          isWinner ? styles.winnerRow : styles.playerRow
+                        ]}
+                        className="flex-row items-center justify-between px-3 py-2 mb-2 rounded-xl overflow-hidden"
+                      >
+                        {isWinner && renderWinnerEffects()}
+
+                        <View className="flex-row items-center flex-1">
+                          {isWinner && (
+                            <Text style={styles.crown}>👑</Text>
+                          )}
+                          <Text className="text-xl mr-3">
+                            {colorEmojis[player.color as keyof typeof colorEmojis]}
+                          </Text>
+                          <View className="flex-1">
+                            <Text className="text-white font-semibold text-base">
+                              {player.name}
+                            </Text>
+                            <Text className={`text-xs ${getRankColor(index, player)}`}>
+                              {getRankText(index, player)}
+                            </Text>
+                          </View>
+                        </View>
+                        <View className="items-end">
+                          <Text className="text-base font-bold text-white">
+                            {player.score}
+                          </Text>
+                          <Text className="text-[10px] text-gray-400">
+                            pts
+                          </Text>
+                        </View>
+                      </Animated.View>
+                    );
+                  })
+                )}
               </View>
 
               {/* Game Statistics */}

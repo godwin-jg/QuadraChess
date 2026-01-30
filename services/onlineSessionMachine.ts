@@ -306,6 +306,18 @@ class OnlineSessionMachine {
     await this.disconnect();
   }
 
+  // Eliminate self but stay connected to watch the game
+  async eliminateSelf(): Promise<void> {
+    if (!this.currentGameId || !this.isConnected) {
+      throw new Error("Not connected to a game");
+    }
+    if (!this.currentPlayer?.color) {
+      throw new Error("Player color not available for elimination");
+    }
+    await onlineDataClient.eliminateSelf(this.currentGameId);
+    // Don't disconnect - player stays to watch the game
+  }
+
   async timeoutPlayer(playerColor: string): Promise<void> {
     if (!this.currentGameId || !this.isConnected) {
       throw new Error("Not connected to a game");

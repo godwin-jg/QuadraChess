@@ -1,9 +1,11 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { useSelector } from "react-redux";
+import { useLocalSearchParams } from "expo-router";
 import { RootState } from "../../../state";
 import HistoryControls from "./HistoryControls";
 import ResignButton from "./ResignButton";
+import ExitGameButton from "./ExitGameButton";
 import EndgameButton from "./EndgameButton";
 import { sw, sh, sf, isCompact } from "../../utils/responsive";
 
@@ -13,7 +15,11 @@ interface GameUtilityPanelProps {
 
 export default function GameUtilityPanel({ textScale = 1 }: GameUtilityPanelProps) {
   const { gameMode } = useSelector((state: RootState) => state.game);
+  const { gameId, mode } = useLocalSearchParams<{ gameId?: string; mode?: string }>();
   const isSinglePlayerMode = gameMode === "solo" || gameMode === "single";
+  const isOnlineMode = mode === "online" && !!gameId;
+  const isP2PMode = mode === "p2p";
+  const isNetworkMode = isOnlineMode || isP2PMode;
   const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
   const labelFontSize = sf(isCompact ? 11 : 13) * clampedTextScale;
 
@@ -34,6 +40,7 @@ export default function GameUtilityPanel({ textScale = 1 }: GameUtilityPanelProp
           <Text style={[styles.utilityLabel, { fontSize: labelFontSize }]}>Actions</Text>
           <View style={styles.actionsContainer}>
             <ResignButton textScale={clampedTextScale} />
+            {isNetworkMode && <ExitGameButton textScale={clampedTextScale} />}
             {isSinglePlayerMode && <EndgameButton textScale={clampedTextScale} />}
           </View>
         </View>

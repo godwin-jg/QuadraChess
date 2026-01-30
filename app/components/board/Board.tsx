@@ -4,6 +4,7 @@ import { Text, View, useWindowDimensions } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import Animated, {
   withTiming,
+  withSpring,
   runOnUI
 } from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
@@ -108,6 +109,7 @@ export default function Board({
   const dragToMoveEnabled = settings.game.dragToMoveEnabled ?? true;
   const animationsEnabled = settings.game.animationsEnabled ?? true;
   const showMoveHints = settings.game.showMoveHints ?? true;
+  const tapGesturesEnabled = tapToMoveEnabled || dragToMoveEnabled;
   const boardTheme = useMemo(() => getBoardTheme(settings), [settings]);
   const { handleSquarePress: handleSquareSelection, getMovesForSquare, isValidMove } =
     useChessEngine();
@@ -204,6 +206,29 @@ export default function Board({
   const suppressTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentPlayerColorRef = useRef<string | null>(null);
   const premovePendingRef = useRef<PremoveState | null>(null);
+  const tapToMoveEnabledRef = useRef(tapToMoveEnabled);
+  const dragToMoveEnabledRef = useRef(dragToMoveEnabled);
+  const animationsEnabledRef = useRef(animationsEnabled);
+  const handleTapAtRef = useRef<((x: number, y: number) => void) | null>(null);
+
+  // Keep refs in sync with settings - use useLayoutEffect for synchronous update
+  React.useLayoutEffect(() => {
+    const prevTap = tapToMoveEnabledRef.current;
+    const prevDrag = dragToMoveEnabledRef.current;
+    const prevAnim = animationsEnabledRef.current;
+    
+    tapToMoveEnabledRef.current = tapToMoveEnabled;
+    dragToMoveEnabledRef.current = dragToMoveEnabled;
+    animationsEnabledRef.current = animationsEnabled;
+    
+    // Log when settings actually change
+    if (prevTap !== tapToMoveEnabled || prevDrag !== dragToMoveEnabled || prevAnim !== animationsEnabled) {
+      console.log(`[Settings] Board settings refs updated:`);
+      console.log(`  - Tap to Move: ${prevTap} → ${tapToMoveEnabled}`);
+      console.log(`  - Drag to Move: ${prevDrag} → ${dragToMoveEnabled}`);
+      console.log(`  - Animations: ${prevAnim} → ${animationsEnabled}`);
+    }
+  }, [tapToMoveEnabled, dragToMoveEnabled, animationsEnabled]);
 
   // Drag performance logging (dev mode only)
   const ENABLE_DRAG_PERF_LOG = __DEV__;
@@ -328,13 +353,14 @@ export default function Board({
         })();
       };
 
-      if (!dragToMoveEnabled) {
+      // Use ref to get current setting value (avoids stale closure issues)
+      if (!dragToMoveEnabledRef.current) {
         resetUiState();
         return;
       }
       const localPlayerColor = currentPlayerColorRef.current;
       const allowPremoveDuringAnimation =
-        effectiveMode === "online" &&
+        (effectiveMode === "online" || effectiveMode === "p2p") &&
         localPlayerColor &&
         currentPlayerTurn !== localPlayerColor;
       const canBypassFlowBlock =
@@ -348,10 +374,10 @@ export default function Board({
         resetUiState();
         return;
       }
-      if (dragState) {
-        resetUiState();
-        return;
-      }
+      // Note: We don't check dragState here because:
+      // 1. The gesture handler already guards with uiState check in onStart
+      // 2. dragState is React state that may be stale when cancelDrag is pending
+      // 3. If we got here, onStart already confirmed no active drag (uiState was 0)
       if (gameStatus !== "active") {
         resetUiState();
         return;
@@ -370,16 +396,16 @@ export default function Board({
         resetUiState();
         return;
       }
-      // In online mode, allow dragging your pieces for premove even when not your turn
-      // localPlayerColor is the local player's assigned color from onlineGameService
-      if (effectiveMode === "online" && localPlayerColor) {
+      // In online/p2p mode, allow dragging your pieces even when not your turn
+      // localPlayerColor is the local player's assigned color from the service
+      if ((effectiveMode === "online" || effectiveMode === "p2p") && localPlayerColor) {
         // Only allow dragging pieces that belong to the local player
         if (piece[0] !== localPlayerColor) {
           resetUiState();
           return;
         }
       } else if (piece[0] !== currentPlayerTurn) {
-        // In non-online modes, only allow dragging current turn's pieces
+        // In other modes, only allow dragging current turn's pieces
         resetUiState();
         return;
       }
@@ -426,10 +452,15 @@ export default function Board({
       setDragValidMoves(dragValidMovesRef.current);
       dragHoverRef.current = null;
       setDragHover(null);
-      dragScale.value = 1.45;
+      // Scale/offset animation is now handled in useBoardGestures applyDragVisuals
+      // We just ensure the values are set correctly if not already animating
+      // Use threshold check because cancelDrag animates scale back, might not be exactly 1
       const liftOffset = getDragLiftOffset(squareSize * DRAG_OFFSET_Y, boardRotation);
-      dragOffsetX.value = liftOffset.x;
-      dragOffsetY.value = liftOffset.y;
+      if (dragScale.value < 1.1) {
+        dragScale.value = withSpring(1.45, { damping: 18, stiffness: 280 });
+        dragOffsetX.value = withTiming(liftOffset.x, { duration: 80 });
+        dragOffsetY.value = withTiming(liftOffset.y, { duration: 80 });
+      }
       ghostOpacity.value = withTiming(0, { duration: 80 });
       suppressTapRef.current = true;
       if (suppressTapTimeoutRef.current) {
@@ -442,7 +473,6 @@ export default function Board({
     [
       clearActiveAnimationPlan,
       effectiveMode,
-      dragToMoveEnabled,
       currentPlayerTurn,
       displayBoardState,
       animationRunning,
@@ -487,6 +517,15 @@ export default function Board({
       dragEndedRef.current = false;
       return;
     }
+    // If a new drag has already started (uiState === 1), only clear dragState
+    // but skip the rest of the cleanup to avoid interfering with the new drag
+    if (uiState.value === 1) {
+      // Clear the old dragState so the new drag can proceed
+      if (dragState) {
+        setDragState(null);
+      }
+      return;
+    }
     if (ENABLE_DRAG_PERF_LOG) {
       perfRef.current.cancelCount += 1;
     }
@@ -498,9 +537,10 @@ export default function Board({
     uiState.value = 0;
     runOnUI(clearMask)();
     dragSnapActive.value = 0;
-    dragScale.value = 1;
-    dragOffsetX.value = 0;
-    dragOffsetY.value = 0;
+    // Animate scale/offset back smoothly when cancelling
+    dragScale.value = withTiming(1, { duration: 100 });
+    dragOffsetX.value = withTiming(0, { duration: 100 });
+    dragOffsetY.value = withTiming(0, { duration: 100 });
     ghostOpacity.value = 0;
     dragHoverRef.current = null;
     setDragHover(null);
@@ -627,7 +667,7 @@ export default function Board({
     }
 
     if (
-      effectiveMode !== "online" ||
+      (effectiveMode !== "online" && effectiveMode !== "p2p") ||
       !currentPlayerColor ||
       currentPlayerTurn !== currentPlayerColor ||
       gameStatus !== "active"
@@ -681,7 +721,7 @@ export default function Board({
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
     const allowPremoveDuringAnimation =
-      effectiveMode === "online" &&
+      (effectiveMode === "online" || effectiveMode === "p2p") &&
       currentPlayerColor &&
       currentPlayerTurn !== currentPlayerColor;
     const canBypassFlowBlock =
@@ -736,6 +776,10 @@ export default function Board({
 
     // If a piece is selected AND the pressed square is a valid move
     if (selectedPiece && isAValidMove) {
+      // Use ref to get current setting value (avoids stale closure issues)
+      if (!tapToMoveEnabledRef.current) {
+        return;
+      }
       // Find the specific move from the already calculated validMoves
       const moveInfo = displayValidMoves.find(
         (move) => move.row === row && move.col === col
@@ -762,7 +806,6 @@ export default function Board({
 
   const handleTapAt = React.useCallback(
     (x: number, y: number) => {
-      if (!tapToMoveEnabled) return;
       if (x < 0 || y < 0 || x > boardSize || y > boardSize) return;
 
       let targetRow = Math.floor(y / squareSize);
@@ -771,8 +814,8 @@ export default function Board({
         return;
       }
 
-      // Snap to nearest valid move if piece is selected
-      if (selectedPiece && displayValidMoves.length > 0) {
+      // Snap to nearest valid move only when tap-to-move is enabled (use ref for current value)
+      if (tapToMoveEnabledRef.current && selectedPiece && displayValidMoves.length > 0) {
         const snapThreshold = squareSize * SNAP_RING_RADIUS_RATIO;
         const bestMove = findBestMoveNearTap(x, y, displayValidMoves, squareSize, snapThreshold);
         if (bestMove) {
@@ -790,11 +833,19 @@ export default function Board({
       displayValidMoves,
       handleSquarePress,
       SNAP_RING_RADIUS_RATIO,
-      tapToMoveEnabled,
     ]
   );
 
+  // Keep handleTapAtRef in sync so gesture handlers always have the latest callback
+  // Use useLayoutEffect for synchronous update before any interactions
+  React.useLayoutEffect(() => {
+    handleTapAtRef.current = handleTapAt;
+  }, [handleTapAt]);
 
+  // Stable wrapper that always calls the latest handleTapAt via ref
+  const stableHandleTapAt = React.useCallback((x: number, y: number) => {
+    handleTapAtRef.current?.(x, y);
+  }, []);
 
   const commitMove = React.useCallback(
     (fromRow: number, fromCol: number, toRow: number, toCol: number) => {
@@ -833,7 +884,7 @@ export default function Board({
     squareSize,
     boardRotation,
     sharedValues: dragSharedValues,
-    enableTapToMove: tapToMoveEnabled,
+    enableTapGestures: tapGesturesEnabled,
     enableDragToMove: dragToMoveEnabled,
     onCursorChange,
     onSnapKeyChange,
@@ -841,7 +892,7 @@ export default function Board({
     clearMask,
     setPanStart,
     startDragFromPan,
-    handleTapAt,
+    handleTapAt: stableHandleTapAt,
     commitMove,
     cancelDrag,
   });
@@ -864,8 +915,11 @@ export default function Board({
     );
   }
 
+  // Key to force GestureDetector remount when gesture config changes
+  const gestureKey = `gesture-tap${tapToMoveEnabled}-drag${dragToMoveEnabled}-anim${animationsEnabled}`;
+
   return (
-    <GestureDetector gesture={boardGesture}>
+    <GestureDetector key={gestureKey} gesture={boardGesture}>
       <View
         style={{
           width: boardSize,

@@ -2,13 +2,27 @@ import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { settingsService } from './settingsService';
 
+// Debounce interval in milliseconds - prevents rapid consecutive haptics
+const HAPTIC_DEBOUNCE_MS = 80;
+
 class SoundService {
   private static instance: SoundService;
   private sounds: Map<string, AudioPlayer> = new Map();
   private isInitialized = false;
   private playingLocks: Map<string, boolean> = new Map();
+  private lastHapticTime: number = 0;
 
   private constructor() {}
+  
+  // Debounced haptic trigger to prevent double haptics
+  private async triggerDebouncedHaptic(style: Haptics.ImpactFeedbackStyle): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastHapticTime < HAPTIC_DEBOUNCE_MS) {
+      return;
+    }
+    this.lastHapticTime = now;
+    await Haptics.impactAsync(style);
+  }
 
   public static getInstance(): SoundService {
     if (!SoundService.instance) {
@@ -121,7 +135,7 @@ class SoundService {
           if (this.playingLocks.get(soundName)) {
             // Sound is already being played, skip this call
             if (this.isHapticsEnabled()) {
-              await Haptics.impactAsync(this.getHapticStyleForSound(soundName));
+              await this.triggerDebouncedHaptic(this.getHapticStyleForSound(soundName));
             }
             return;
           }
@@ -133,12 +147,10 @@ class SoundService {
             await player.seekTo(0);
             player.play();
             
-            const hapticPromise = this.isHapticsEnabled() 
-              ? Haptics.impactAsync(this.getHapticStyleForSound(soundName))
-              : Promise.resolve();
-            
-            // Wait for haptic to complete
-            await hapticPromise;
+            // Trigger haptic with debouncing to prevent double haptics
+            if (this.isHapticsEnabled()) {
+              await this.triggerDebouncedHaptic(this.getHapticStyleForSound(soundName));
+            }
           } finally {
             // Release lock after a short delay to prevent rapid re-triggering
             setTimeout(() => {
@@ -152,20 +164,16 @@ class SoundService {
       
       // If sound is disabled OR no sound file loaded, fall back to haptic feedback (only if haptics are enabled)
       if (this.isHapticsEnabled()) {
-        const hapticStyle = this.getHapticStyleForSound(soundName);
-        await Haptics.impactAsync(hapticStyle);
-      } else {
+        await this.triggerDebouncedHaptic(this.getHapticStyleForSound(soundName));
       }
       
     } catch (error) {
       // Final fallback to haptic (only if haptics are enabled)
       if (this.isHapticsEnabled()) {
         try {
-          const hapticStyle = this.getHapticStyleForSound(soundName);
-          await Haptics.impactAsync(hapticStyle);
+          await this.triggerDebouncedHaptic(this.getHapticStyleForSound(soundName));
         } catch (hapticError) {
         }
-      } else {
       }
     }
   }

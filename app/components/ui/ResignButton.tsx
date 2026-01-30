@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { Text, TouchableOpacity, StyleSheet, View } from "react-native";
 import { useSelector, useDispatch } from "react-redux";
-import { RootState, setPlayers, setIsHost, setCanStartGame } from "../../../state";
+import { RootState } from "../../../state";
 import { resignGame } from "../../../state/gameSlice";
 import onlineGameService from "../../../services/onlineGameService";
 import ResignConfirmationModal from "./ResignConfirmationModal";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import soundService from "../../../services/soundService";
 import { sw, sh, sf, isCompact } from "../../utils/responsive";
 import { FontAwesome } from "@expo/vector-icons";
@@ -18,9 +18,7 @@ interface ResignButtonProps {
 
 export default function ResignButton({ textScale = 1 }: ResignButtonProps) {
   const dispatch = useDispatch();
-  const router = useRouter();
   const [showModal, setShowModal] = useState(false);
-  const [isResigning, setIsResigning] = useState(false);
   const { gameId, mode } = useLocalSearchParams<{ gameId?: string; mode?: string }>();
   const { currentPlayerTurn, gameStatus, viewingHistoryIndex } = useSelector((state: RootState) => state.game);
   const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
@@ -28,54 +26,43 @@ export default function ResignButton({ textScale = 1 }: ResignButtonProps) {
   const labelSize = sf(c ? 12 : 14) * clampedTextScale;
 
   const isOnlineMode = mode === "online" && !!gameId;
-  const localPlayerColor = isOnlineMode ? onlineGameService.currentPlayer?.color : currentPlayerTurn;
+  const isP2PMode = mode === "p2p";
+  const isNetworkMode = isOnlineMode || isP2PMode;
+  const localPlayerColor = isNetworkMode 
+    ? (onlineGameService.currentPlayer?.color ?? require('../../../services/p2pGameService').default.currentPlayer?.color) 
+    : currentPlayerTurn;
   const canResign = viewingHistoryIndex === null && 
     (gameStatus === "active" || gameStatus === "waiting") &&
     !["finished", "checkmate", "stalemate"].includes(gameStatus);
 
   const handleConfirm = async () => {
-    setIsResigning(true);
-    try {
-      if (isOnlineMode) {
-        await Promise.race([
-          onlineGameService.resignGame(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
-        ]);
+    // Simple and elegant: eliminate the player (like checkmate)
+    if (isOnlineMode) {
+      // For online mode, sync elimination to Firebase
+      // The Firebase listener will sync the update back to Redux
+      try {
+        await onlineGameService.eliminateSelf();
         soundService.playGameEndSound();
-        setShowModal(false);
-        
-        // ✅ CRITICAL FIX: Clear Redux lobby state before navigating
-        // This ensures OnlineLobbyScreen doesn't show the waiting room
-        dispatch(setPlayers([]));
-        dispatch(setIsHost(false));
-        dispatch(setCanStartGame(false));
-        
-        // Navigate to lobby after successful online resignation
-        // Use query param to signal that user just resigned and should clear game context
-        router.replace("/(tabs)/OnlineLobbyScreen?resigned=true");
-      } else {
+      } catch (error) {
+        console.error("Failed to sync elimination:", error);
+      }
+    } else if (isP2PMode) {
+      // For P2P mode, sync resignation through the P2P service
+      try {
+        const p2pGameService = require('../../../services/p2pGameService').default;
+        await p2pGameService.resignGame();
+        soundService.playGameEndSound();
+      } catch (error) {
+        console.error("Failed to sync elimination:", error);
         dispatch(resignGame(localPlayerColor || undefined));
         soundService.playGameEndSound();
-        setShowModal(false);
-        // For local games, stay on GameScreen to see the game over modal
       }
-    } catch {
-      if (isOnlineMode) {
-        setShowModal(false);
-        
-        // ✅ CRITICAL FIX: Clear Redux lobby state even on error
-        dispatch(setPlayers([]));
-        dispatch(setIsHost(false));
-        dispatch(setCanStartGame(false));
-        
-        // Still navigate away even if there was an error - player has left the game
-        router.replace("/(tabs)/OnlineLobbyScreen?resigned=true");
-      } else {
-        alert("Failed to resign. Please try again.");
-      }
-    } finally {
-      setIsResigning(false);
+    } else {
+      // Local mode: just dispatch Redux action
+      dispatch(resignGame(localPlayerColor || undefined));
+      soundService.playGameEndSound();
     }
+    setShowModal(false);
   };
 
   if (!canResign) return null;
@@ -93,7 +80,6 @@ export default function ResignButton({ textScale = 1 }: ResignButtonProps) {
         onConfirm={handleConfirm}
         onCancel={() => setShowModal(false)}
         playerName={PLAYER_NAMES[localPlayerColor || ''] || "Player"}
-        isResigning={isResigning}
       />
     </>
   );

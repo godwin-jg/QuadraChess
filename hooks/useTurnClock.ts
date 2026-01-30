@@ -55,6 +55,29 @@ export const useTurnClock = ({
   const clientSyncAtRef = useRef<number>(performance.now());
   const syncedClocksRef = useRef<Clocks>(ZERO_CLOCKS);
   const syncedPlayerRef = useRef<string>("");
+  
+  // ✅ CRITICAL FIX: Track when we transition to running state
+  // This prevents stale sync points from lobby wait time causing immediate timeouts
+  const wasRunningRef = useRef<boolean>(false);
+  const justBecameActiveRef = useRef<boolean>(false);
+
+  const shouldRun =
+    !isPaused &&
+    (gameStatus === "active" || gameStatus === "promotion") &&
+    !!turnStartedAt;
+
+  // ✅ CRITICAL FIX: Detect transition to active state and reset sync point immediately
+  // This runs SYNCHRONOUSLY during render (before useMemo), not in useEffect
+  if (shouldRun && !wasRunningRef.current) {
+    // Game just became active - reset the sync point immediately
+    clientSyncAtRef.current = performance.now();
+    if (clocks) {
+      syncedClocksRef.current = { ...clocks };
+    }
+    syncedPlayerRef.current = currentPlayerTurn;
+    justBecameActiveRef.current = true;
+  }
+  wasRunningRef.current = shouldRun;
 
   // ✅ Reset sync point when server sends new clock data
   // This happens on: turn change, move made, game start, reconnect
@@ -64,12 +87,9 @@ export const useTurnClock = ({
       syncedClocksRef.current = { ...clocks };
       syncedPlayerRef.current = currentPlayerTurn;
     }
-  }, [clocks, turnStartedAt, currentPlayerTurn]);
-
-  const shouldRun =
-    !isPaused &&
-    (gameStatus === "active" || gameStatus === "promotion") &&
-    !!turnStartedAt;
+    // Clear the "just became active" flag after the effect runs
+    justBecameActiveRef.current = false;
+  }, [clocks, turnStartedAt, currentPlayerTurn, gameStatus]);
 
   useEffect(() => {
     if (!shouldRun) return;
@@ -114,6 +134,13 @@ export const useTurnClock = ({
     if (!onTimeout) return;
     if (!shouldRun) return;
     if (eliminatedPlayers.includes(currentPlayerTurn)) return;
+    
+    // ✅ CRITICAL FIX: Skip timeout check on the first tick after game becomes active
+    // This prevents race conditions where stale sync points could cause immediate timeouts
+    if (justBecameActiveRef.current) {
+      return;
+    }
+    
     const remaining = displayClocks[currentPlayerTurn as keyof Clocks];
     if (remaining > 0) return;
     if (timeoutSentRef.current === currentPlayerTurn) return;

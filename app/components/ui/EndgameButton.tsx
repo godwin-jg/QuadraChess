@@ -22,7 +22,8 @@ export default function EndgameButton({ textScale = 1 }: EndgameButtonProps) {
   const labelSize = sf(c ? 12 : 14) * clampedTextScale;
   
   const isActuallyOnline = gameMode === "online" && onlineGameService.isConnected && gameId;
-  const isLocalGame = gameMode === "solo" || gameMode === "single" || !isActuallyOnline;
+  const isP2PGame = gameMode === "p2p";
+  const isLocalGame = gameMode === "solo" || gameMode === "single" || (!isActuallyOnline && !isP2PGame);
   
   const canEndGame = viewingHistoryIndex === null &&
     (gameStatus === "active" || gameStatus === "waiting") &&

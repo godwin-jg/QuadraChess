@@ -150,6 +150,13 @@ export const gameFlowMachine = createMachine(
           PROMOTION_REQUIRED: {
             actions: setPromotionPending,
           },
+          // ✅ FIX: Handle PROMOTION_COMPLETE in animating state
+          // This can happen when bot auto-promotes before animation finishes
+          // Transition directly to ready since promotion is done
+          PROMOTION_COMPLETE: {
+            target: "ready",
+            actions: [clearPromotionPending, clearActiveMove, incrementSync],
+          },
           ANIMATION_DONE: [
             {
               guard: ({ context }) => context.promotionPending,

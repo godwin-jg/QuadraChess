@@ -279,12 +279,10 @@ export default function SkiaMoveAnimator({
     };
   }, [plan, planKey, progress, animationRunning, onCompleteUI]);
 
-  // Reset tracking when plan is cleared
-  useEffect(() => {
-    if (!plan) {
-      lastAnimatedPlanKeyRef.current = null;
-    }
-  }, [plan]);
+  // Note: We intentionally do NOT reset lastAnimatedPlanKeyRef when plan goes null.
+  // The counter-based planKey system handles new animations, and resetting here
+  // would cause cached plans to re-animate when the same plan object is returned
+  // from useMemo after a drag cancel or other re-render.
 
   // Opacity animation based on running state to prevent double-piece artifacts
   const containerStyle = useAnimatedStyle(() => {

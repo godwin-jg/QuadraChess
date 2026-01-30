@@ -48,7 +48,7 @@ export function useMoveExecution({
   const lastKnownOnlineColorRef = useRef<string | null>(null);
 
   const resolvedOnlineColor = useMemo(() => {
-    if (effectiveMode !== "online") return null;
+    if (effectiveMode !== "online" && effectiveMode !== "p2p") return null;
     const serviceColor = onlineGameService.currentPlayer?.color ?? null;
     if (serviceColor) {
       return serviceColor;
@@ -61,7 +61,7 @@ export function useMoveExecution({
   }, [currentUserId, effectiveMode, players, onlineGameService.currentPlayer?.color]);
 
   useEffect(() => {
-    if (effectiveMode === "online") {
+    if (effectiveMode === "online" || effectiveMode === "p2p") {
       if (resolvedOnlineColor) {
         lastKnownOnlineColorRef.current = resolvedOnlineColor;
       }
@@ -77,7 +77,7 @@ export function useMoveExecution({
       return resolvedOnlineColor ?? lastKnownOnlineColorRef.current;
     }
     if (effectiveMode === "p2p") {
-      return p2pGameService.currentPlayer?.color ?? null;
+      return p2pGameService.currentPlayer?.color ?? resolvedOnlineColor ?? lastKnownOnlineColorRef.current;
     }
     // Solo mode: human is whoever is NOT in botPlayers
     if (effectiveMode === "single" && botPlayers.length > 0) {
@@ -104,15 +104,15 @@ export function useMoveExecution({
 
       // Game status check
       if (gameStatus !== "active") {
-        if (effectiveMode === "online") {
+        if (effectiveMode === "online" || effectiveMode === "p2p") {
           notificationService.show("Game has not started", "warning", 1500);
         }
         abortPendingDrop();
         return;
       }
 
-      // Online mode - handle premove when not your turn
-      if (effectiveMode === "online" && currentPlayerColor) {
+      // Online/P2P mode - handle premove when not your turn
+      if ((effectiveMode === "online" || effectiveMode === "p2p") && currentPlayerColor) {
         // Only allow moves/premoves with your own pieces
         if (pieceColor !== currentPlayerColor) {
           abortPendingDrop();
@@ -126,8 +126,8 @@ export function useMoveExecution({
           abortPendingDrop();
           return;
         }
-      } else if (effectiveMode === "online" && pieceColor !== currentPlayerTurn) {
-        // Fallback for online without player color
+      } else if ((effectiveMode === "online" || effectiveMode === "p2p") && pieceColor !== currentPlayerTurn) {
+        // Fallback for online/p2p without player color
         abortPendingDrop();
         return;
       }

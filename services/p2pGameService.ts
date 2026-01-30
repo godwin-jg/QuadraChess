@@ -130,10 +130,6 @@ class P2PGameServiceImpl implements P2PGameService {
       throw new Error("Invalid move");
     }
 
-    // Store previous state to check for elimination
-    const previousState = store.getState().game;
-    const previousEliminatedPlayers = [...previousState.eliminatedPlayers];
-
     const now = Date.now();
     const moveWithTimestamp = { ...moveData, timestamp: now };
     
@@ -155,24 +151,11 @@ class P2PGameServiceImpl implements P2PGameService {
       });
     }
 
-    // ✅ CRITICAL FIX: Check if elimination occurred and sync game state
-    const newState = store.getState().game;
-    const newEliminatedPlayers = [...newState.eliminatedPlayers];
-    
-    // Check if any players were eliminated
-    const eliminationOccurred = newEliminatedPlayers.length > previousEliminatedPlayers.length;
-    
-    // ✅ CRITICAL FIX: Also check if game ended (3 players eliminated)
-    const gameEnded = newEliminatedPlayers.length >= 3 && previousEliminatedPlayers.length < 3;
-    
-    if (eliminationOccurred || gameEnded) {
-      
-      // Sync the complete game state to all clients
-      p2pService.syncGameStateToClients();
-    }
-
     // ✅ Send move through P2P service
     p2pService.sendChessMove(moveWithTimestamp);
+
+    // ✅ Keep clients in sync like online snapshots (host only)
+    p2pService.syncGameStateToClients();
   }
 
   async makePromotion(pieceType: string): Promise<void> {
@@ -202,6 +185,9 @@ class P2PGameServiceImpl implements P2PGameService {
       isPromotion: true,
       promotionPieceType: pieceType,
     });
+
+    // ✅ Sync full state so all clients reflect promotion result
+    p2pService.syncGameStateToClients();
   }
 
   async resignGame(): Promise<void> {

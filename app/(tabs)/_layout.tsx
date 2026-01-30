@@ -24,8 +24,10 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
       <View style={styles.glassOuter}>
         <BlurView intensity={100} tint="systemChromeMaterialDark" style={styles.blur}>
           <View style={styles.tabBar}>
-            {state.routes.map((route, index) => {
-              const isFocused = state.index === index;
+            {state.routes
+              .filter((route) => route.name !== "TutorialScreen")
+              .map((route) => {
+              const isFocused = state.index === state.routes.findIndex(r => r.key === route.key);
               const iconName = ICON_MAP[route.name] || "circle";
 
             return (
@@ -75,6 +77,7 @@ export default function TabLayout() {
       <Tabs.Screen name="P2PLobbyScreen" options={{ title: "Local" }} />
       <Tabs.Screen name="OnlineLobbyScreen" options={{ title: "Online" }} />
       <Tabs.Screen name="GameScreen" options={{ title: "Game" }} />
+      <Tabs.Screen name="TutorialScreen" options={{ href: null }} />
     </Tabs>
   );
 }

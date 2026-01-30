@@ -1,9 +1,13 @@
 import * as Haptics from 'expo-haptics';
 import { settingsService } from './settingsService';
 
+// Debounce interval in milliseconds - prevents rapid consecutive haptics
+const HAPTIC_DEBOUNCE_MS = 80;
+
 // Centralized haptics service that respects user settings
 export class HapticsService {
   private static instance: HapticsService;
+  private lastHapticTime: number = 0;
 
   static getInstance(): HapticsService {
     if (!HapticsService.instance) {
@@ -12,23 +16,26 @@ export class HapticsService {
     return HapticsService.instance;
   }
 
-  // Helper function to safely trigger haptic feedback
+  // Helper function to safely trigger haptic feedback with debouncing
   async triggerHaptic(style: Haptics.ImpactFeedbackStyle): Promise<void> {
     const settings = settingsService.getSettings();
     
     // Only trigger haptics if they're enabled in settings
     if (!settings?.game?.hapticsEnabled) {
-      console.log('❌ Haptics disabled in settings, skipping haptic feedback');
       return;
     }
     
-    console.log('✅ Haptics enabled, triggering:', style);
+    // Debounce: Skip if a haptic was triggered very recently
+    const now = Date.now();
+    if (now - this.lastHapticTime < HAPTIC_DEBOUNCE_MS) {
+      return;
+    }
+    this.lastHapticTime = now;
+    
     try {
       await Haptics.impactAsync(style);
-      console.log('✅ Haptic feedback triggered successfully');
     } catch (error) {
       // Silently fail if haptics are not available (e.g., on Android without proper linking)
-      console.log('❌ Haptic feedback not available:', error);
     }
   }
 

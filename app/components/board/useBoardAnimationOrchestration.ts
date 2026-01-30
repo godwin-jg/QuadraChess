@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from "react";
+import React, { useRef, useMemo, useLayoutEffect } from "react";
 import { runOnUI, type SharedValue, useSharedValue } from "react-native-reanimated";
 import { buildPiecesMap, computeAnimPlan, AnimPlan } from "./chessgroundAnimations";
 import { getRookCastlingCoords, isCastlingMove } from "../../../state/gameHelpers";
@@ -137,6 +137,12 @@ export function useBoardAnimationOrchestration({
   const planPiecesRef = useRef<Map<number, string> | null>(null);
   const activeMoveOverridesRef = useRef<Map<number, string> | null>(null);
   const activeMaskIndicesValue = useSharedValue<number[]>([]);
+  
+  // Use ref to always have access to current animationsEnabled value
+  const animationsEnabledRef = useRef(animationsEnabled);
+  useLayoutEffect(() => {
+    animationsEnabledRef.current = animationsEnabled;
+  }, [animationsEnabled]);
 
   // Build current pieces map
   const currentPiecesMap = useMemo(
@@ -164,8 +170,9 @@ export function useBoardAnimationOrchestration({
   // - isViewingHistory is true
   // Note: We don't skip for !!dragState - network moves should still animate
   // even if user is currently dragging a piece
+  // Use ref to get current value (avoids stale closure issues)
   const skipAnimation =
-    skipNextAnimationRef.current || isViewingHistory || !animationsEnabled;
+    skipNextAnimationRef.current || isViewingHistory || !animationsEnabledRef.current;
 
   // Compute pending animation plan
   const pendingPlan = useMemo(() => {

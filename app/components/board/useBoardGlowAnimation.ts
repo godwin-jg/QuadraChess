@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useLayoutEffect } from "react";
 import {
   useSharedValue,
   withTiming,
@@ -24,9 +24,18 @@ export function useBoardGlowAnimation(
 ): UseBoardGlowAnimationReturn {
   const glowOpacity = useSharedValue(0);
   const glowScale = useSharedValue(1);
+  
+  // Use ref to always have access to current animationsEnabled value
+  const animationsEnabledRef = useRef(animationsEnabled);
+  useLayoutEffect(() => {
+    animationsEnabledRef.current = animationsEnabled;
+  }, [animationsEnabled]);
 
   useEffect(() => {
-    if (!animationsEnabled) {
+    // Use ref to get current value (avoids stale closure issues)
+    const isAnimationsEnabled = animationsEnabledRef.current;
+    
+    if (!isAnimationsEnabled) {
       cancelAnimation(glowScale);
       cancelAnimation(glowOpacity);
       glowOpacity.value = 0;

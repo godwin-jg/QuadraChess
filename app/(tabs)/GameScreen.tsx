@@ -626,6 +626,13 @@ export default function GameScreen() {
             console.error('Error clearing justEliminated from server:', error);
           });
         }
+        // For P2P games, sync elimination state to clients
+        if (gameMode === 'p2p') {
+          const p2pService = require('../../services/p2pService').default;
+          if (p2pService.isGameHost()) {
+            p2pService.syncGameStateToClients();
+          }
+        }
       }, 3000); // Clear after notification duration
       
       return () => clearTimeout(timer);
@@ -901,6 +908,13 @@ export default function GameScreen() {
                 // Navigate to the new game
                 router.push(`/(tabs)/GameScreen?gameId=${newGameId}&mode=online`);
                 
+              } else if (gameMode === 'p2p') {
+                // For P2P games, reset the game and sync to all clients
+                dispatch(resetGame());
+                const p2pService = require('../../services/p2pService').default;
+                if (p2pService.isGameHost()) {
+                  p2pService.syncGameStateToClients();
+                }
               } else {
                 // For local games, just reset the game
                 dispatch(resetGame());

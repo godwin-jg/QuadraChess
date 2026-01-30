@@ -2,6 +2,10 @@ import { useCallback, useMemo } from "react";
 import { Gesture } from "react-native-gesture-handler";
 import { scheduleOnRN } from "react-native-worklets";
 import { withSpring, withTiming, type SharedValue } from "react-native-reanimated";
+
+// Spring config for smooth piece lift animation
+const LIFT_SPRING_CONFIG = { damping: 18, stiffness: 280 };
+const LIFT_TIMING_DURATION = 80;
 import {
   DRAG_OFFSET_Y,
   DRAG_START_DISTANCE,
@@ -16,7 +20,7 @@ interface UseBoardGesturesParams {
   squareSize: number;
   boardRotation: number;
   sharedValues: DragSharedValues;
-  enableTapToMove: boolean;
+  enableTapGestures: boolean;
   enableDragToMove: boolean;
   onCursorChange: (cursorKey: number, fromRow: number, fromCol: number) => void;
   onSnapKeyChange: (snapKey: number, snapX: number, snapY: number) => void;
@@ -69,7 +73,7 @@ export function useBoardGestures({
   squareSize,
   boardRotation,
   sharedValues,
-  enableTapToMove,
+  enableTapGestures,
   enableDragToMove,
   onCursorChange,
   onSnapKeyChange,
@@ -174,8 +178,15 @@ export function useBoardGestures({
 
       dragX.value = targetX;
       dragY.value = targetY;
-      dragOffsetX.value = liftOffset.x;
-      dragOffsetY.value = liftOffset.y;
+      
+      // Animate lift on first call (when scale is close to 1), direct assign on updates
+      // Use threshold check because cancelDrag animates scale back, might not be exactly 1
+      const isStarting = dragScale.value < 1.1;
+      if (isStarting) {
+        dragScale.value = withSpring(1.45, LIFT_SPRING_CONFIG);
+        dragOffsetX.value = withTiming(liftOffset.x, { duration: LIFT_TIMING_DURATION });
+        dragOffsetY.value = withTiming(liftOffset.y, { duration: LIFT_TIMING_DURATION });
+      }
     },
     [
       boardSize,
@@ -233,17 +244,37 @@ export function useBoardGestures({
           const hasSnap = dragSnapActive.value === 1 && snappedKey >= 0;
           // If we have a snap target, commit regardless of drag distance.
           if (hasSnap) {
-            uiState.value = 2;
-            dragX.value = dragSnapX.value;
-            dragY.value = dragSnapY.value;
-            dragScale.value = 1;
-            dragOffsetX.value = 0;
-            dragOffsetY.value = 0;
-
             const fromRow = dragStartPos.value?.row ?? 0;
             const fromCol = dragStartPos.value?.col ?? 0;
             const toRow = Math.floor(snappedKey / 14);
             const toCol = snappedKey % 14;
+            
+            // If dropping on the same square, cancel instead of committing
+            if (fromRow === toRow && fromCol === toCol) {
+              // Reset UI-thread values immediately to allow new drag to start
+              uiState.value = 0;
+              dragScale.value = 1;
+              dragOffsetX.value = 0;
+              dragOffsetY.value = 0;
+              dragSnapActive.value = 0;
+              lastSnappedKey.value = -1;
+              lastCursorKey.value = -1;
+              clearMask();
+              // Schedule full cleanup on JS thread
+              scheduleOnRN(cancelDrag);
+              return;
+            }
+            
+            uiState.value = 2;
+            dragX.value = dragSnapX.value;
+            dragY.value = dragSnapY.value;
+            // Snap immediately on release - no animation needed since the piece
+            // is about to be replaced by the move animation. Animating here causes
+            // the piece to visually "rise up" before landing which feels jarring.
+            dragScale.value = 1;
+            dragOffsetX.value = 0;
+            dragOffsetY.value = 0;
+
             if (dragStartPos.value) {
               const fromIdx = fromRow * 14 + fromCol;
               const next = visibilityMask.value.slice();
@@ -258,7 +289,7 @@ export function useBoardGestures({
 
           if (dragDistance <= TAP_MOVE_TOLERANCE) {
             clearMask();
-            if (enableTapToMove) {
+            if (enableTapGestures) {
               scheduleOnRN(handleTapAt, event.x, event.y);
             }
             scheduleOnRN(cancelDrag);
@@ -301,17 +332,35 @@ export function useBoardGestures({
           const shouldSnap = bestDist <= snapThreshold && isLegal;
 
           if (shouldSnap) {
-            uiState.value = 2;
-            dragX.value = bestX - squareSize / 2;
-            dragY.value = bestY - squareSize / 2;
-            dragScale.value = 1;
-            dragOffsetX.value = 0;
-            dragOffsetY.value = 0;
-
             const fromRow = dragStartPos.value?.row ?? 0;
             const fromCol = dragStartPos.value?.col ?? 0;
             const toRow = Math.floor(bestKey / 14);
             const toCol = bestKey % 14;
+            
+            // If dropping on the same square, cancel instead of committing
+            if (fromRow === toRow && fromCol === toCol) {
+              // Reset UI-thread values immediately to allow new drag to start
+              uiState.value = 0;
+              dragScale.value = 1;
+              dragOffsetX.value = 0;
+              dragOffsetY.value = 0;
+              dragSnapActive.value = 0;
+              lastSnappedKey.value = -1;
+              lastCursorKey.value = -1;
+              clearMask();
+              // Schedule full cleanup on JS thread
+              scheduleOnRN(cancelDrag);
+              return;
+            }
+            
+            uiState.value = 2;
+            dragX.value = bestX - squareSize / 2;
+            dragY.value = bestY - squareSize / 2;
+            // Snap immediately on release - same as above
+            dragScale.value = 1;
+            dragOffsetX.value = 0;
+            dragOffsetY.value = 0;
+
             if (dragStartPos.value) {
               const fromIdx = fromRow * 14 + fromCol;
               const next = visibilityMask.value.slice();
@@ -334,7 +383,7 @@ export function useBoardGestures({
         }),
     [
       enableDragToMove,
-      enableTapToMove,
+      enableTapGestures,
       applyDragVisuals,
       setPanStart,
       startDragFromPan,
@@ -364,24 +413,24 @@ export function useBoardGestures({
   const tapGesture = useMemo(
     () =>
       Gesture.Tap()
-        .enabled(enableTapToMove)
+        .enabled(enableTapGestures)
         .maxDistance(TAP_MOVE_TOLERANCE)
         .onEnd((event) => {
           scheduleOnRN(handleTapAt, event.x, event.y);
         }),
-    [enableTapToMove, handleTapAt]
+    [enableTapGestures, handleTapAt]
   );
 
   const boardGesture = useMemo(
     () => {
-      if (enableDragToMove && enableTapToMove) {
+      if (enableDragToMove && enableTapGestures) {
         return Gesture.Exclusive(panGesture, tapGesture);
       }
       if (enableDragToMove) return panGesture;
-      if (enableTapToMove) return tapGesture;
+      if (enableTapGestures) return tapGesture;
       return Gesture.Tap().enabled(false);
     },
-    [enableDragToMove, enableTapToMove, panGesture, tapGesture]
+    [enableDragToMove, enableTapGestures, panGesture, tapGesture]
   );
 
   return { panGesture, tapGesture, boardGesture };

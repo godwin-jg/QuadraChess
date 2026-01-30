@@ -107,6 +107,46 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
     );
   };
 
+  const resolveMoveInputSettings = (
+    nextTap: boolean,
+    nextDrag: boolean,
+    changed: "tap" | "drag"
+  ) => {
+    if (nextTap || nextDrag) {
+      return { tapToMoveEnabled: nextTap, dragToMoveEnabled: nextDrag, forcedLabel: null };
+    }
+    return changed === "tap"
+      ? { tapToMoveEnabled: false, dragToMoveEnabled: true, forcedLabel: "Drag to Move" }
+      : { tapToMoveEnabled: true, dragToMoveEnabled: false, forcedLabel: "Tap to Move" };
+  };
+
+  const applyMoveInputToggle = async (changed: "tap" | "drag", value: boolean) => {
+    await hapticsService.toggle();
+    const nextTap = changed === "tap" ? value : settings.game.tapToMoveEnabled;
+    const nextDrag = changed === "drag" ? value : settings.game.dragToMoveEnabled;
+    const resolved = resolveMoveInputSettings(nextTap, nextDrag, changed);
+
+    updateGame({
+      tapToMoveEnabled: resolved.tapToMoveEnabled,
+      dragToMoveEnabled: resolved.dragToMoveEnabled,
+    });
+
+    if (resolved.forcedLabel) {
+      Alert.alert(
+        "Keep One Input Enabled",
+        `${resolved.forcedLabel} has been turned on so you can still move pieces.`
+      );
+    }
+
+    const label = changed === "tap" ? "Tap to move" : "Drag to move";
+    try {
+      await saveSettings();
+      console.log(`✅ ${label} setting auto-saved successfully`);
+    } catch (error) {
+      console.error(`❌ Failed to auto-save ${label.toLowerCase()} setting:`, error);
+    }
+  };
+
   const handleDeveloperTitleTap = () => {
     const now = Date.now();
     const { count, lastTapAt } = developerTapStateRef.current;
@@ -520,14 +560,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Switch
                 value={settings.game.tapToMoveEnabled}
                 onValueChange={async (value) => {
-                  await hapticsService.toggle();
-                  updateGame({ tapToMoveEnabled: value });
-                  try {
-                    await saveSettings();
-                    console.log("✅ Tap to move setting auto-saved successfully");
-                  } catch (error) {
-                    console.error("❌ Failed to auto-save tap to move setting:", error);
-                  }
+                  await applyMoveInputToggle("tap", value);
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.tapToMoveEnabled ? "#FFFFFF" : "#9CA3AF"}
@@ -538,14 +571,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               <Switch
                 value={settings.game.dragToMoveEnabled}
                 onValueChange={async (value) => {
-                  await hapticsService.toggle();
-                  updateGame({ dragToMoveEnabled: value });
-                  try {
-                    await saveSettings();
-                    console.log("✅ Drag to move setting auto-saved successfully");
-                  } catch (error) {
-                    console.error("❌ Failed to auto-save drag to move setting:", error);
-                  }
+                  await applyMoveInputToggle("drag", value);
                 }}
                 trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
                 thumbColor={settings.game.dragToMoveEnabled ? "#FFFFFF" : "#9CA3AF"}
@@ -674,6 +700,16 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               Reset all settings to default
             </Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Made by Footer */}
+        <View className="py-6 mt-4">
+          <Text 
+            className="text-center text-sm"
+            style={{ color: 'rgba(255,255,255,0.3)' }}
+          >
+            Made with ❤️ by JG
+          </Text>
         </View>
 
         {/* Add padding to prevent content from hiding behind the footer */}

@@ -2148,7 +2148,7 @@ class RealtimeDatabaseService {
     }
   }
 
-  // Resign game - uses direct database method
+  // Resign game - uses direct database method (removes player from game)
   async resignGame(gameId: string): Promise<void> {
     try {
       const user = this.getCurrentUser();
@@ -2160,6 +2160,152 @@ class RealtimeDatabaseService {
     } catch (error) {
       console.error("Error calling resign:", error);
       throw error;
+    }
+  }
+
+  // Eliminate self - adds player to eliminated but keeps them in the game to watch
+  async eliminateSelf(gameId: string): Promise<void> {
+    try {
+      const user = this.getCurrentUser();
+      if (!user) throw new Error("User not authenticated");
+
+      await this.eliminateSelfDirectly(gameId);
+    } catch (error) {
+      console.error("Error calling eliminateSelf:", error);
+      throw error;
+    }
+  }
+
+  // Eliminate player without removing them from the game
+  private async eliminateSelfDirectly(gameId: string): Promise<void> {
+    const user = this.getCurrentUser();
+    if (!user) throw new Error("User not authenticated");
+
+    const gameRef = ref(db, `games/${gameId}`);
+
+    const result = await runTransaction(gameRef, (gameData) => {
+      if (gameData === null) {
+        console.warn(`Game ${gameId} not found`);
+        return null;
+      }
+
+      const player = gameData.players[user.uid];
+      if (!player) {
+        console.warn(`Player ${user.uid} not found in game ${gameId}`);
+        return gameData;
+      }
+
+      // Don't allow if game is already over
+      if (
+        gameData.gameState.gameStatus === "finished" ||
+        gameData.gameState.gameStatus === "checkmate" ||
+        gameData.gameState.gameStatus === "stalemate"
+      ) {
+        console.warn(`Player ${user.uid} cannot resign - game is already over`);
+        return gameData;
+      }
+
+      // Initialize eliminatedPlayers array if it doesn't exist
+      if (!gameData.gameState.eliminatedPlayers) {
+        gameData.gameState.eliminatedPlayers = [];
+      }
+
+      // Add player to eliminated players
+      if (!gameData.gameState.eliminatedPlayers.includes(player.color)) {
+        gameData.gameState.eliminatedPlayers.push(player.color);
+        gameData.gameState.justEliminated = player.color;
+      }
+
+      // Handle piece cleanup
+      let pieces = deserializeBitboardPieces(
+        gameData.gameState.bitboardState?.pieces
+      );
+      if (
+        (!gameData.gameState.bitboardState ||
+          !gameData.gameState.bitboardState.pieces) &&
+        Array.isArray(gameData.gameState.boardState)
+      ) {
+        const normalizedBoard = this.convertBoardState(
+          gameData.gameState.boardState,
+          false
+        );
+        const fallbackBitboards = syncBitboardsFromArray(
+          normalizedBoard,
+          gameData.gameState.eliminatedPlayers
+        );
+        pieces = fallbackBitboards.pieces;
+      }
+      const eliminatedPieceBitboards = gameData.gameState.eliminatedPieceBitboards
+        ? deserializeBitboardPieces(gameData.gameState.eliminatedPieceBitboards as any)
+        : createEmptyPieceBitboards();
+
+      if (CLOCK_COLORS.includes(player.color as ClockColor)) {
+        this.captureEliminatedPieces(
+          eliminatedPieceBitboards,
+          pieces,
+          player.color as ClockColor,
+          true
+        );
+      }
+      gameData.gameState.eliminatedPieceBitboards = serializeBitboardPieces(
+        eliminatedPieceBitboards
+      );
+      gameData.gameState.bitboardState = {
+        pieces: serializeBitboardPieces(pieces),
+      };
+
+      // Update check status
+      gameData.gameState.checkStatus = {
+        r: false,
+        b: false,
+        y: false,
+        g: false,
+      };
+
+      // Check if the entire game is over
+      if (gameData.gameState.eliminatedPlayers.length === 3) {
+        const turnOrder = ["r", "b", "y", "g"];
+        const winner = turnOrder.find(
+          (color) => !gameData.gameState.eliminatedPlayers.includes(color)
+        );
+
+        if (winner) {
+          gameData.gameState.winner = winner;
+          gameData.gameState.gameStatus = "finished";
+          gameData.gameState.gameOverState = {
+            isGameOver: true,
+            status: "finished",
+            eliminatedPlayer: null,
+          };
+        }
+      } else {
+        // Advance to next active player if it was this player's turn
+        if (gameData.gameState.currentPlayerTurn === player.color) {
+          const turnOrder = ["r", "b", "y", "g"];
+          const currentIndex = turnOrder.indexOf(player.color);
+          let nextActivePlayer = turnOrder[(currentIndex + 1) % 4];
+          
+          while (gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
+            const activeIndex = turnOrder.indexOf(nextActivePlayer);
+            nextActivePlayer = turnOrder[(activeIndex + 1) % 4];
+          }
+          
+          gameData.gameState.currentPlayerTurn = nextActivePlayer;
+        }
+      }
+
+      const now = this.getServerNow();
+      gameData.gameState.turnStartedAt =
+        gameData.gameState.gameStatus === "finished" ? null : now;
+      gameData.currentPlayerTurn = gameData.gameState.currentPlayerTurn;
+      gameData.gameState.version = (gameData.gameState.version ?? 0) + 1;
+      gameData.lastActivity = now;
+
+      return gameData;
+    });
+
+    if (!result.committed) {
+      throw new Error("EliminateSelf transaction failed to commit");
     }
   }
 
@@ -2317,6 +2463,21 @@ class RealtimeDatabaseService {
           const hasHumanPlayers = remainingPlayers.some((p: any) => !p.isBot);
           if (!hasHumanPlayers) {
             return null; // This will delete the game
+          }
+
+          // Transfer host if the exiting player was the host
+          if (gameData.hostId === user.uid) {
+            // Find first remaining human player to be the new host
+            const newHostEntry = Object.entries(gameData.players).find(
+              ([, p]: [string, any]) => !p.isBot
+            );
+            if (newHostEntry) {
+              const [newHostId, newHost] = newHostEntry as [string, any];
+              gameData.hostId = newHostId;
+              gameData.hostName = newHost.name;
+              gameData.players[newHostId].isHost = true;
+              console.log(`[RealtimeDB] Host transferred from ${user.uid} to ${newHostId}`);
+            }
           }
 
           // Update check status for all players

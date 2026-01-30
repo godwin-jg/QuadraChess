@@ -103,6 +103,10 @@ class OnlineDataClient {
     await realtimeDatabaseService.resignGame(gameId);
   }
 
+  async eliminateSelf(gameId: string): Promise<void> {
+    await realtimeDatabaseService.eliminateSelf(gameId);
+  }
+
   async timeoutPlayer(gameId: string, playerColor: string): Promise<void> {
     await realtimeDatabaseService.timeoutPlayer(gameId, playerColor);
   }

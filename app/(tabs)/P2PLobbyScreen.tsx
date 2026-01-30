@@ -382,6 +382,7 @@ const P2PLobbyScreen: React.FC = () => {
       });
       
       // ✅ Include botPlayers and timeControl in the initial game state
+      // Note: sendGameStarted() will handle resetting the game state properly
       p2pService.updateTimeControl(
         timeControl.baseMinutes * 60 * 1000,
         timeControl.incrementSeconds * 1000

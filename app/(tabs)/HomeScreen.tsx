@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "expo-router";
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { View, Text, TouchableOpacity, Alert, ScrollView } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDispatch } from 'react-redux';
 import Animated, { 
@@ -11,39 +10,104 @@ import Animated, {
   withDelay,
   withSpring
 } from "react-native-reanimated";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { hapticsService } from "@/services/hapticsService";
 import modeSwitchService from "../../services/modeSwitchService";
 import { resetGame, setBotPlayers, setBotDifficulty, setBotTeamMode, setGameMode } from '../../state/gameSlice';
 import { useSettings } from "../../context/SettingsContext";
 import type { BotDifficulty } from "../../config/gameConfig";
-// import Piece from "../../components/board/Piece";
 import Svg, { G, Path } from "react-native-svg";
+import RadialGlowBackground from "../components/ui/RadialGlowBackground";
 import GridBackground from "../components/ui/GridBackground";
 import FloatingPieces from "@/app/components/ui/FloatingPieces";
 import { getTabBarSpacer } from "../utils/responsive";
+
+const HOME_FONTS = {
+  title: "Rajdhani_700Bold",
+  heading: "Rajdhani_600SemiBold",
+  body: "Rajdhani_500Medium",
+};
+
+type QuoteEntry = {
+  text: string;
+  author?: string;
+};
+
+const rawQuotes = require("../../assets/chessQuotes.json");
+
+const normalizeQuotes = (data: any): QuoteEntry[] => {
+  const list = Array.isArray(data?.quotes)
+    ? data.quotes
+    : Array.isArray(data?.data)
+    ? data.data
+    : Array.isArray(data)
+    ? data
+    : [];
+
+  return list
+    .map((item: any) => {
+      if (typeof item === "string") {
+        const trimmed = item.trim();
+        return trimmed ? { text: trimmed } : null;
+      }
+
+      if (item && typeof item === "object") {
+        const text =
+          typeof item.text === "string"
+            ? item.text.trim()
+            : typeof item.quote === "string"
+            ? item.quote.trim()
+            : typeof item.message === "string"
+            ? item.message.trim()
+            : "";
+        const author =
+          typeof item.author === "string"
+            ? item.author.trim()
+            : typeof item.by === "string"
+            ? item.by.trim()
+            : typeof item.source === "string"
+            ? item.source.trim()
+            : undefined;
+
+        return text ? { text, author } : null;
+      }
+
+      return null;
+    })
+    .filter((entry: QuoteEntry | null): entry is QuoteEntry => Boolean(entry));
+};
+
+const QUOTES = normalizeQuotes(rawQuotes);
+
+const getDailyQuote = (quotes: QuoteEntry[]) => {
+  if (!quotes.length) return null;
+  const today = new Date();
+  const dayKey = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const seed = Math.floor(dayKey / 86400000);
+  const index = (seed * 9301 + 49297) % quotes.length;
+  return quotes[index];
+};
 
 // --- Reusable AnimatedButton Component ---
 interface AnimatedButtonProps {
   onPress: () => void;
   disabled: boolean;
-  gradientColors: string[];
-  icon: string;
+  iconName: string;
+  iconColor: string;
   title: string;
   subtitle: string;
-  textColor?: string;
-  subtitleColor?: string;
+  borderColor?: string;
   delay?: number;
 }
 
 const AnimatedButton: React.FC<AnimatedButtonProps> = ({
   onPress,
   disabled,
-  gradientColors,
-  icon,
+  iconName,
+  iconColor,
   title,
   subtitle,
-  textColor = "black",
-  subtitleColor = "gray-600",
+  borderColor = "rgba(255,255,255,0.15)",
   delay = 0,
 }) => {
   const scale = useSharedValue(1);
@@ -73,53 +137,48 @@ const AnimatedButton: React.FC<AnimatedButtonProps> = ({
     scale.value = withSpring(1, { damping: 15, stiffness: 400 });
   };
 
+  const iconFill =
+    iconColor.startsWith("#") && iconColor.length === 7
+      ? `${iconColor}26`
+      : "rgba(255,255,255,0.08)";
+
   return (
     <Animated.View style={animatedStyle}>
-            <TouchableOpacity
-              onPress={onPress}
-              onPressIn={handlePressIn}
-              onPressOut={handlePressOut}
-              disabled={disabled}
-              className="py-3 px-5 rounded-xl active:opacity-80 items-center overflow-hidden"
-              style={{
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 8 },
-                shadowOpacity: 0.3,
-                shadowRadius: 12,
-                elevation: 8,
-              }}
-            >
-        <LinearGradient 
-          colors={gradientColors as any} 
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: 12 }]} 
-        />
-        <Text className="text-2xl text-center mb-1">{icon}</Text>
-        <Text
-          className="text-lg font-extrabold text-center mb-1 tracking-wider"
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={disabled}
+        className="py-4 px-5 rounded-2xl active:opacity-80 flex-row items-center overflow-hidden"
+        style={{
+          backgroundColor: 'rgba(255,255,255,0.05)',
+          borderWidth: 1,
+          borderColor: borderColor,
+        }}
+      >
+        <View 
+          className="w-12 h-12 rounded-xl justify-center items-center mr-4"
           style={{ 
-            color: textColor === 'white' ? '#ffffff' : '#000000',
-            fontWeight: '900', 
-            letterSpacing: 1.2, 
-            textShadowColor: 'rgba(0,0,0,0.3)', 
-            textShadowOffset: {width: 1, height: 1}, 
-            textShadowRadius: 2 
+            backgroundColor: iconFill,
           }}
         >
-          {title}
-        </Text>
-        <Text 
-          className="text-xs text-center font-semibold tracking-widest uppercase"
-          style={{ 
-            color: subtitleColor === 'gray-300' ? '#d1d5db' : 
-                   subtitleColor === 'blue-100' ? '#dbeafe' : '#6b7280',
-            fontWeight: '600', 
-            letterSpacing: 0.8 
-          }}
-        >
-          {subtitle}
-        </Text>
+          <MaterialCommunityIcons name={iconName as any} size={26} color={iconColor} />
+        </View>
+        <View className="flex-1">
+          <Text
+            className="text-xl tracking-wide"
+            style={{ color: '#ffffff', fontFamily: HOME_FONTS.heading }}
+          >
+            {title}
+          </Text>
+          <Text 
+            className="text-base mt-0.5"
+            style={{ color: 'rgba(255,255,255,0.5)', fontFamily: HOME_FONTS.body }}
+          >
+            {subtitle}
+          </Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={24} color="rgba(255,255,255,0.3)" />
       </TouchableOpacity>
     </Animated.View>
   );
@@ -141,15 +200,30 @@ export default function HomeScreen() {
   const [isNavigating, setIsNavigating] = useState(false);
   const botDifficulty = (settings.game.botDifficulty || "easy") as BotDifficulty;
   const difficultyLabel = DIFFICULTY_LABELS[botDifficulty] ?? "Easy";
+  const dailyQuote = getDailyQuote(QUOTES);
 
   const handleStartSinglePlayer = () => {
     // Set default bot players and start single player game
     hapticsService.buttonPress();
+    
+    // Get fresh settings from service to ensure we have latest values
+    // (avoids stale closure issues with freezeOnBlur)
+    const settingsService = require('../../services/settingsService').settingsService;
+    const currentSettings = settingsService.getSettings();
+    const currentBotDifficulty = (currentSettings.game.botDifficulty || "easy") as BotDifficulty;
+    const currentBotTeamMode = currentSettings.game.botTeamMode || false;
+    
+    // Log for verification
+    console.log(`[Settings] Starting game with fresh settings:`);
+    console.log(`  - Bot Difficulty: ${currentBotDifficulty} (from service)`);
+    console.log(`  - Bot Team Mode: ${currentBotTeamMode}`);
+    console.log(`  - Render-time difficulty was: ${botDifficulty}`);
+    
     dispatch(resetGame()); // ✅ CRITICAL FIX: Reset game state first
     dispatch(setGameMode("single")); // Set game mode to single player
     dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Purple, Green)
-    dispatch(setBotDifficulty(botDifficulty));
-    dispatch(setBotTeamMode(settings.game.botTeamMode || false));
+    dispatch(setBotDifficulty(currentBotDifficulty));
+    dispatch(setBotTeamMode(currentBotTeamMode));
     router.push("/(tabs)/GameScreen");
   };
 
@@ -212,7 +286,10 @@ export default function HomeScreen() {
   // Animated styles
   return (
     <SafeAreaView style={{ flex: 1 }} className="bg-black">
-      {/* Subtle blueprint grid background */}
+      {/* Subtle radial glow background */}
+      <RadialGlowBackground />
+      
+      {/* Grid overlay for tactical texture */}
       <GridBackground />
       
       {/* Background Chess Pieces */}
@@ -221,134 +298,152 @@ export default function HomeScreen() {
       <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
       <View className="flex-1" style={{ zIndex: 1 }}>
       {/* Top Navigation Bar */}
-      <View className="flex-row justify-between items-center px-6 pt-8 pb-4">
-        <View className="w-10" />
-        {/* <Text className="text-3xl font-bold text-white">
-          ♔ QUAD CHESS ♔
-        </Text> */}
+      <View className="flex-row justify-end items-center px-6 pt-4 pb-2">
         <TouchableOpacity
-          className="w-10 h-10 rounded-full bg-white/10 justify-center items-center border border-white/20"
+          className="w-10 h-10 rounded-full justify-center items-center"
+          style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}
           onPress={async () => {
             try {
-              // ✅ CRITICAL FIX: Use sound service to respect haptics settings
               const soundService = require('../../services/soundService').default;
-              // Sound effect removed for menu clicks
             } catch (error) {
             }
             router.push("/settings");
           }}
         >
-          <Text className="text-xl">⚙️</Text>
+          <MaterialCommunityIcons name="cog-outline" size={22} color="rgba(255,255,255,0.6)" />
         </TouchableOpacity>
       </View>
 
-      <View className="flex-1 px-6 justify-between mt-8" style={{ paddingBottom: tabBarSpacer }}>
+      <View className="flex-1 px-6 justify-between" style={{ paddingBottom: tabBarSpacer }}>
         {/* Header Section */}
-        
-        <View className="items-center mb-8">
-          <Text className="text-xl text-gray-300 text-center mb-1 font-semibold" style={{
-            letterSpacing: 0.8,
-            textShadowColor: 'rgba(0,0,0,0.3)',
-            textShadowOffset: {width: 1, height: 1},
-            textShadowRadius: 2,
-          }}>
-            MASTER THE ULTIMATE STRATEGY
-          </Text>
-          {/* <Text className="text-lg text-gray-400 text-center mb-2 font-medium" style={{
-            letterSpacing: 0.5,
-          }}>
-            Where Four Minds Collide
-          </Text> */}
-          {/* Main column container for the new title layout */}
-          <View className="items-center mb-4">
-            {/* Top line of text */}
-            {/* <Text className="text-xl font-semibold text-gray-300 tracking-wider">
-              4 PLAYERS
-            </Text> */}
-
-            {/* Bottom line with flanking icons */}
-            <View className="flex-row items-center justify-center">
-              {/* <Svg width={32} height={32} viewBox="0 0 48 48" className="mr-2">
-                <G fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M 9,26 C 17.5,24.5 30,24.5 36,26 L 38.5,13.5 L 31,25 L 30.7,10.9 L 25.5,24.5 L 22.5,10 L 19.5,24.5 L 14.3,10.9 L 14,25 L 6.5,13.5 L 9,26 z M 9,26 C 9,28 10.5,28 11.5,30 C 12.5,31.5 12.5,31 12,33.5 C 10.5,34.5 11,36 11,36 C 9.5,37.5 11,38.5 11,38.5 C 17.5,39.5 27.5,39.5 34,38.5 C 34,38.5 35.5,37.5 34,36 C 34,36 34.5,34.5 33,33.5 C 32.5,31 32.5,31.5 33.5,30 C 34.5,28 36,28 36,26 C 27.5,24.5 17.5,24.5 9,26 z M 11.5,30 C 15,29 30,29 33.5,30 M 12,33.5 C 18,32.5 27,32.5 33,33.5 M 4,12 A 2,2 0 1,1 8,12 A 2,2 0 1,1 4,12 M 12,9 A 2,2 0 1,1 16,9 A 2,2 0 1,1 12,9 M 20.5,8 A 2,2 0 1,1 24.5,8 A 2,2 0 1,1 20.5,8 M 29,9 A 2,2 0 1,1 33,9 A 2,2 0 1,1 29,9 M 37,12 A 2,2 0 1,1 41,12 A 2,2 0 1,1 37,12" />
-                </G>
-              </Svg> */}
-              <Text className="text-4xl font-extrabold text-white tracking-widest">
-              QUADRA CHESS
-              </Text>
-              {/* <Svg width={32} height={32} viewBox="0 0 48 48" className="ml-2">
-                <G fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M 9,26 C 17.5,24.5 30,24.5 36,26 L 38.5,13.5 L 31,25 L 30.7,10.9 L 25.5,24.5 L 22.5,10 L 19.5,24.5 L 14.3,10.9 L 14,25 L 6.5,13.5 L 9,26 z M 9,26 C 9,28 10.5,28 11.5,30 C 12.5,31.5 12.5,31 12,33.5 C 10.5,34.5 11,36 11,36 C 9.5,37.5 11,38.5 11,38.5 C 17.5,39.5 27.5,39.5 34,38.5 C 34,38.5 35.5,37.5 34,36 C 34,36 34.5,34.5 33,33.5 C 32.5,31 32.5,31.5 33.5,30 C 34.5,28 36,28 36,26 C 27.5,24.5 17.5,24.5 9,26 z M 11.5,30 C 15,29 30,29 33.5,30 M 12,33.5 C 18,32.5 27,32.5 33,33.5 M 4,12 A 2,2 0 1,1 8,12 A 2,2 0 1,1 4,12 M 12,9 A 2,2 0 1,1 16,9 A 2,2 0 1,1 12,9 M 20.5,8 A 2,2 0 1,1 24.5,8 A 2,2 0 1,1 20.5,8 M 29,9 A 2,2 0 1,1 33,9 A 2,2 0 1,1 29,9 M 37,12 A 2,2 0 1,1 41,12 A 2,2 0 1,1 37,12" />
-                </G>
-              </Svg> */}
-            </View>
+        <View className="items-center mt-3">
+          {/* Logo Icon */}
+          <View 
+            className="w-24 h-24 rounded-3xl justify-center items-center mb-4"
+            style={{ 
+              backgroundColor: 'rgba(255,255,255,0.08)',
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.1)',
+            }}
+          >
+            <Svg width={52} height={52} viewBox="0 0 48 48">
+              <G fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M22.5 11.63V6M20 8h5 M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5 M12.5 37c5.5 3.5 14.5 3.5 20 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-2.5-7.5-12-10.5-16-4-3 6 6 10.5 6 10.5v7 M12.5 30c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0" />
+              </G>
+            </Svg>
           </View>
-            <View className="w-20 h-20 rounded-full bg-white/10 justify-center items-center border-2 border-white/20">
-              <Svg width={48} height={48} viewBox="0 0 48 48">
-                <G fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <Path d="M22.5 11.63V6M20 8h5 M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5 M12.5 37c5.5 3.5 14.5 3.5 20 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-2.5-7.5-12-10.5-16-4-3 6 6 10.5 6 10.5v7 M12.5 30c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0" />
-                </G>
-              </Svg>
+          
+          {/* Title */}
+          <Text 
+            className="text-3xl text-white tracking-widest mb-1"
+            style={{ letterSpacing: 3, fontFamily: HOME_FONTS.title }}
+          >
+            QUADRA CHESS
+          </Text>
+          <Text 
+            className="text-sm tracking-wider"
+            style={{ color: 'rgba(255,255,255,0.4)', fontFamily: HOME_FONTS.body }}
+          >
+            4-Player Strategic Chess
+          </Text>
+          {dailyQuote && (
+            <View className="mt-6 px-4">
+              <Text
+                className="text-sm text-center"
+                style={{
+                  color: "rgba(255,255,255,0.55)",
+                  fontFamily: HOME_FONTS.body,
+                  fontStyle: "italic",
+                }}
+              >
+                "{dailyQuote.text}"
+              </Text>
+              {dailyQuote.author ? (
+                <Text
+                  className="text-xs text-center mt-2"
+                  style={{
+                    color: "rgba(255,255,255,0.35)",
+                    fontFamily: HOME_FONTS.body,
+                  }}
+                >
+                  — {dailyQuote.author}
+                </Text>
+              ) : null}
             </View>
+          )}
         </View>
 
-          {/* Buttons Section - Now using the component */}
-          <View className="gap-4">
-            <AnimatedButton
-              delay={300} // Stagger delay
-              icon="🦁"
-              title="SINGLE PLAYER"
-              subtitle={`AI: ${difficultyLabel}`}
-              gradientColors={['rgb(255, 255, 255)', 'rgb(245, 200, 200)']}
-              onPress={handleStartSinglePlayer}
+        {/* Buttons Section */}
+        <View className="gap-3">
+          <AnimatedButton
+            delay={300}
+            iconName="robot"
+            iconColor="#ef4444"
+            title="Single Player"
+            subtitle={`Play vs AI · ${difficultyLabel}`}
+            borderColor="rgba(239, 68, 68, 0.3)"
+            onPress={handleStartSinglePlayer}
             disabled={isNavigating}
-            />
-            <AnimatedButton
-              delay={450} // Stagger delay
-              icon="🏠"
-              title="LOCAL MULTIPLAYER"
-              subtitle="Play with friends"
-              textColor="white"
-              subtitleColor="gray-300"
-              gradientColors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
-              onPress={() => handleModeSwitch("local", "/(tabs)/P2PLobbyScreen")}
+          />
+          <AnimatedButton
+            delay={450}
+            iconName="account-multiple"
+            iconColor="#a855f7"
+            title="Local Multiplayer"
+            subtitle="Play with friends nearby"
+            borderColor="rgba(168, 85, 247, 0.3)"
+            onPress={() => handleModeSwitch("local", "/(tabs)/P2PLobbyScreen")}
             disabled={isNavigating}
-            />
-            <AnimatedButton
-              delay={600} // Stagger delay
-              icon="🌍"
-              title="ONLINE MULTIPLAYER"
-              subtitle="Play online"
-              textColor="white"
-              subtitleColor="blue-100"
-              gradientColors={['rgba(0, 106, 255, 0.35)', 'rgba(155, 173, 234, 0.2)']}
-              onPress={() => handleModeSwitch("online", "/(tabs)/OnlineLobbyScreen")}
+          />
+          <AnimatedButton
+            delay={600}
+            iconName="cloud-outline"
+            iconColor="#3b82f6"
+            title="Online Multiplayer"
+            subtitle="Challenge players worldwide"
+            borderColor="rgba(59, 130, 246, 0.3)"
+            onPress={() => handleModeSwitch("online", "/(tabs)/OnlineLobbyScreen")}
             disabled={isNavigating}
-            />
+          />
+          <AnimatedButton
+            delay={750}
+            iconName="school"
+            iconColor="#22c55e"
+            title="How to Play"
+            subtitle="Learn the rules & strategies"
+            borderColor="rgba(34, 197, 94, 0.3)"
+            onPress={() => {
+              hapticsService.buttonPress();
+              router.push("/(tabs)/TutorialScreen" as any);
+            }}
+            disabled={isNavigating}
+          />
         </View>
 
         {/* Features Section */}
-        <View className="flex-row justify-around px-5 pb-4 mt-4">
-          <View className="items-center flex-1">
-            <Text className="text-2xl mb-2">👥</Text>
-            <Text className="text-gray-300 text-sm font-semibold text-center">
-              Up to 4 Players
-            </Text>
-          </View>
-          <View className="items-center flex-1">
-            <Text className="text-2xl mb-2">⚡</Text>
-            <Text className="text-gray-300 text-sm font-semibold text-center">
-              Real-time Play
-            </Text>
-          </View>
-          <View className="items-center flex-1">
-            <Text className="text-2xl mb-2">🏆</Text>
-            <Text className="text-gray-300 text-sm font-semibold text-center">
-              Strategic play
-            </Text>
+        <View className="flex-row justify-center items-center gap-6 pb-2">
+            <View className="flex-row items-center gap-2">
+              <MaterialCommunityIcons name="account-group-outline" size={18} color="rgba(255,255,255,0.35)" />
+              <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, fontFamily: HOME_FONTS.body }}>
+                4 Players
+              </Text>
+            </View>
+            <Text style={{ color: 'rgba(255,255,255,0.15)', fontFamily: HOME_FONTS.body }}>•</Text>
+            <View className="flex-row items-center gap-2">
+              <MaterialCommunityIcons name="timer-outline" size={18} color="rgba(255,255,255,0.35)" />
+              <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, fontFamily: HOME_FONTS.body }}>
+                Real-time
+              </Text>
+            </View>
+            <Text style={{ color: 'rgba(255,255,255,0.15)', fontFamily: HOME_FONTS.body }}>•</Text>
+            <View className="flex-row items-center gap-2">
+              <MaterialCommunityIcons name="chess-queen" size={18} color="rgba(255,255,255,0.35)" />
+              <Text style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, fontFamily: HOME_FONTS.body }}>
+                Strategic
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
       </View>
       </ScrollView>
 

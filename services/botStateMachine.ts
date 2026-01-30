@@ -10,6 +10,7 @@ import {
   getGameFlowSnapshot,
   isGameFlowReady,
   subscribeGameFlow,
+  sendGameFlowEvent,
 } from "./gameFlowService";
 
 export type BotMachineState = "idle" | "scheduled" | "thinking" | "promotion";
@@ -107,6 +108,7 @@ const buildRelevantKey = (state: GameState): string => {
 const canBotAct = (state: GameState): boolean => {
   if (!isGameReady(state)) return false;
   if (!isGameFlowReady()) return false;
+  // For online mode, bots are handled server-side
   if (state.gameMode === "online") return false;
 
   // ✅ FIX: In P2P mode, only the host handles bot moves
@@ -237,6 +239,24 @@ const handleStateChange = (force = false) => {
     scheduleBotPromotion(state);
     setIdleReason("promotionAwaiting");
     return;
+  }
+
+  // ✅ FIX: Detect when promotion completed but game flow is stuck
+  // This can happen when GameScreen's useEffect doesn't fire in time
+  if (!state.promotionState.isAwaiting) {
+    const flowSnapshot = getGameFlowSnapshot();
+    const flowState = flowSnapshot?.value;
+    const flowContext = flowSnapshot?.context;
+    
+    // If flow is in animating with promotionPending, or in awaitingPromotion,
+    // but game state says promotion is done, send the event to unstick
+    if ((flowState === "animating" && flowContext?.promotionPending) ||
+        flowState === "awaitingPromotion") {
+      if (__DEV__) {
+        console.log(`[BotStateMachine] Sending PROMOTION_COMPLETE to unstick flow (was ${flowState})`);
+      }
+      sendGameFlowEvent({ type: "PROMOTION_COMPLETE" });
+    }
   }
 
   if (machineState === "promotion") {

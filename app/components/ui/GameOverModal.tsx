@@ -1,8 +1,9 @@
 import React, { useEffect } from "react";
-import { View, Text, Pressable, Modal, StyleSheet, Share, ScrollView, useWindowDimensions } from "react-native";
+import { View, Text, Pressable, Modal, StyleSheet, Share, ScrollView, useWindowDimensions, Image } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
@@ -13,6 +14,7 @@ import Animated, {
   withSequence,
   Easing
 } from "react-native-reanimated";
+import ConfettiCelebration from "./ConfettiCelebration";
 
 interface PlayerResult {
   color: string;
@@ -44,6 +46,7 @@ interface GameOverModalProps {
   onReset: () => void;
   onWatchReplay?: () => void;
   onDismiss?: () => void; // ✅ NEW: Optional dismiss callback
+  showConfetti?: boolean; // Show confetti celebration above the modal
 }
 
 export default function GameOverModal({
@@ -62,6 +65,7 @@ export default function GameOverModal({
   onReset,
   onWatchReplay,
   onDismiss,
+  showConfetti = true,
 }: GameOverModalProps) {
   const router = useRouter();
   const { height } = useWindowDimensions();
@@ -151,6 +155,30 @@ export default function GameOverModal({
     }
   };
   const colorEmojis = { r: "🔴", b: "🔵", y: "🟡", g: "🟢" };
+  
+  // Player crest images for avatars
+  const getPlayerCrest = (color: string) => {
+    switch (color) {
+      case "r":
+        return require("../../../assets/player-crests/red-crest.png");
+      case "b":
+        return require("../../../assets/player-crests/blue-crest.png");
+      case "y":
+        return require("../../../assets/player-crests/yellow-crest.png");
+      case "g":
+        return require("../../../assets/player-crests/green-crest.png");
+      default:
+        return require("../../../assets/player-crests/red-crest.png");
+    }
+  };
+
+  // Player colors for avatar borders/glows
+  const PLAYER_COLORS: Record<string, string> = {
+    r: "#DC2626", // Red
+    b: "#2563EB", // Blue
+    y: "#7C3AED", // Purple
+    g: "#16A34A", // Green
+  };
 
   // Animation values
   const modalScale = useSharedValue(0.9);
@@ -558,10 +586,14 @@ export default function GameOverModal({
                     const rankText = isWinner ? "🥇 1st Place" : "🥈 2nd Place";
                     const rankColor = isWinner ? "text-yellow-300" : "text-gray-300";
                     const playerAnimatedStyle = playerRowStyles[index];
-                    const teamPlayersLine = team.players
-                      .map((player) => `${colorEmojis[player.color as keyof typeof colorEmojis]} ${player.name} ${player.score}`)
-                      .join(" · ");
-                    const teamEmoji = team.teamId === "A" ? "🅰️" : "🅱️";
+                    // Use filled circle for winner, outline for loser
+                    const teamIconName = isWinner 
+                      ? (team.teamId === "A" ? "alpha-a-circle" : "alpha-b-circle")
+                      : (team.teamId === "A" ? "alpha-a-circle-outline" : "alpha-b-circle-outline");
+                    // Consistent with TeamAssignmentDnD: Red for A, Blue for B
+                    const teamIconColor = isWinner 
+                      ? "#FCD34D" // Gold highlight for winner
+                      : team.teamId === "A" ? "#EF4444" : "#3B82F6";
                     
                     return (
                       <Animated.View
@@ -578,19 +610,35 @@ export default function GameOverModal({
                           {isWinner && (
                             <Text style={styles.crown}>👑</Text>
                           )}
-                          <Text className="text-xl mr-3">
-                            {teamEmoji}
-                          </Text>
-                          <View className="flex-1">
+                          <View style={[styles.teamIconContainer, isWinner && styles.teamIconGlow]}>
+                            <MaterialCommunityIcons 
+                              name={teamIconName as any} 
+                              size={28} 
+                              color={teamIconColor} 
+                            />
+                          </View>
+                          <View className="flex-1 ml-3">
                             <Text className="text-white font-semibold text-base">
                               Team {team.teamId}
                             </Text>
                             <Text className={`text-xs ${rankColor}`}>
                               {rankText}
                             </Text>
-                            <Text className="text-xs text-gray-300 mt-1" numberOfLines={1}>
-                              {teamPlayersLine}
-                            </Text>
+                            {/* Team player avatars */}
+                            <View className="flex-row items-center mt-1 gap-1">
+                              {team.players.map((player) => (
+                                <View key={player.color} className="flex-row items-center mr-2">
+                                  <Image 
+                                    source={getPlayerCrest(player.color)} 
+                                    style={styles.teamPlayerAvatar}
+                                    resizeMode="contain"
+                                  />
+                                  <Text className="text-xs text-gray-300 ml-1">
+                                    {player.score}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
                           </View>
                         </View>
                         <View className="items-end">
@@ -628,10 +676,17 @@ export default function GameOverModal({
                           {isWinner && (
                             <Text style={styles.crown}>👑</Text>
                           )}
-                          <Text className="text-xl mr-3">
-                            {colorEmojis[player.color as keyof typeof colorEmojis]}
-                          </Text>
-                          <View className="flex-1">
+                          <View style={[styles.avatarContainer, isWinner && styles.avatarGlow]}>
+                            <Image 
+                              source={getPlayerCrest(player.color)} 
+                              style={[
+                                styles.playerAvatar,
+                                isWinner && { tintColor: PLAYER_COLORS[player.color] }
+                              ]}
+                              resizeMode="contain"
+                            />
+                          </View>
+                          <View className="flex-1 ml-3">
                             <Text className="text-white font-semibold text-base">
                               {player.name}
                             </Text>
@@ -743,6 +798,15 @@ export default function GameOverModal({
               </Animated.View>
             </ScrollView>
         </Animated.View>
+        
+        {/* Confetti celebration - rendered AFTER modal content to appear on top */}
+        {showConfetti && status === "finished" && (
+          <ConfettiCelebration
+            visible={true}
+            winnerColor={winner}
+            duration={6000}
+          />
+        )}
       </SafeAreaView>
     </Modal>
   );
@@ -804,5 +868,40 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     marginRight: 8,
+  },
+  teamIconContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  teamIconGlow: {
+    shadowColor: "#FCD34D",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+  },
+  avatarContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  avatarGlow: {
+    borderColor: "rgba(255, 215, 0, 0.6)",
+    shadowColor: "#FCD34D",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+  },
+  playerAvatar: {
+    width: 24,
+    height: 24,
+  },
+  teamPlayerAvatar: {
+    width: 16,
+    height: 16,
   },
 });

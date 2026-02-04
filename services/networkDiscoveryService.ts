@@ -14,6 +14,8 @@ export interface DiscoveredGame {
   maxPlayers: number;
   status: string;
   timestamp: number;
+  baseMinutes?: number; // Time control: base time in minutes
+  incrementSeconds?: number; // Time control: increment in seconds
 }
 
 export interface GameService {
@@ -218,6 +220,8 @@ class NetworkDiscoveryService {
       const maxPlayers = parseInt(txt.maxPlayers || '4');
       const status = txt.status || 'waiting';
       const timestamp = parseInt(txt.timestamp || '0');
+      const baseMinutes = parseInt(txt.baseMinutes || '5');
+      const incrementSeconds = parseInt(txt.incrementSeconds || '0');
 
       // Filter out old games (older than 5 minutes)
       const now = Date.now();
@@ -251,6 +255,8 @@ class NetworkDiscoveryService {
         maxPlayers,
         status,
         timestamp,
+        baseMinutes,
+        incrementSeconds,
       };
     } catch (error) {
       console.error('NetworkDiscovery: Error parsing game info:', error);

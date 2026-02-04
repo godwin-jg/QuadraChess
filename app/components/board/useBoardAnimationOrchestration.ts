@@ -2,6 +2,7 @@ import React, { useRef, useMemo, useLayoutEffect } from "react";
 import { runOnUI, type SharedValue, useSharedValue } from "react-native-reanimated";
 import { buildPiecesMap, computeAnimPlan, AnimPlan } from "./chessgroundAnimations";
 import { getRookCastlingCoords, isCastlingMove } from "../../../state/gameHelpers";
+import { buildMoveKey } from "../../../services/gameFlowService";
 import type { LastMove } from "../../../state/types";
 
 interface AnimationOrchestrationParams {
@@ -137,7 +138,7 @@ export function useBoardAnimationOrchestration({
   const planPiecesRef = useRef<Map<number, string> | null>(null);
   const activeMoveOverridesRef = useRef<Map<number, string> | null>(null);
   const activeMaskIndicesValue = useSharedValue<number[]>([]);
-  
+
   // Use ref to always have access to current animationsEnabled value
   const animationsEnabledRef = useRef(animationsEnabled);
   useLayoutEffect(() => {
@@ -160,10 +161,8 @@ export function useBoardAnimationOrchestration({
     prevPiecesRef.current = currentPiecesMap;
   }
 
-  // Build a stable move key (timestamp is most stable across updates)
-  const moveKey = lastMove
-    ? `${lastMove.from.row}-${lastMove.from.col}-${lastMove.to.row}-${lastMove.to.col}-${lastMove.timestamp ?? "no-ts"}`
-    : null;
+  // Build a stable move key that ignores timestamp churn
+  const moveKey = buildMoveKey(lastMove);
 
   // Skip animation if:
   // - skipNextAnimationRef is true (set for user's own drag moves)
@@ -200,7 +199,9 @@ export function useBoardAnimationOrchestration({
     return plan;
   }, [moveKey, skipAnimation, lastMove]);
 
-  const effectivePlan = pendingPlan;
+  // Guard against stale useMemo cache: only return plan if refs are still set
+  // This prevents animation replay after cancelDrag clears the refs
+  const effectivePlan = activePlanRef.current ? pendingPlan : null;
 
   const handleAnimationCompleteUI = React.useCallback(() => {
     "worklet";

@@ -4,7 +4,6 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState, endGame } from "../../../state";
 import { useLocalSearchParams } from "expo-router";
 import soundService from "../../../services/soundService";
-import onlineGameService from "../../../services/onlineGameService";
 import { sw, sh, sf, isCompact } from "../../utils/responsive";
 import { FontAwesome } from "@expo/vector-icons";
 
@@ -15,15 +14,19 @@ interface EndgameButtonProps {
 export default function EndgameButton({ textScale = 1 }: EndgameButtonProps) {
   const dispatch = useDispatch();
   const [showModal, setShowModal] = useState(false);
-  const { gameId } = useLocalSearchParams<{ gameId?: string }>();
+  const { gameId, mode } = useLocalSearchParams<{ gameId?: string; mode?: string }>();
   const { gameStatus, viewingHistoryIndex, gameMode } = useSelector((state: RootState) => state.game);
   const clampedTextScale = Math.min(1.2, Math.max(1, textScale));
   const iconSize = sf(c ? 11 : 12) * clampedTextScale;
   const labelSize = sf(c ? 12 : 14) * clampedTextScale;
   
-  const isActuallyOnline = gameMode === "online" && onlineGameService.isConnected && gameId;
-  const isP2PGame = gameMode === "p2p";
-  const isLocalGame = gameMode === "solo" || gameMode === "single" || (!isActuallyOnline && !isP2PGame);
+  // Check both route mode param and Redux gameMode to reliably detect online/p2p
+  const isOnlineMode = mode === "online" || gameMode === "online";
+  const isP2PMode = mode === "p2p" || gameMode === "p2p";
+  const isNetworkMode = isOnlineMode || isP2PMode;
+  
+  // Only show for local/single-player games
+  const isLocalGame = !isNetworkMode && (gameMode === "solo" || gameMode === "single" || !gameId);
   
   const canEndGame = viewingHistoryIndex === null &&
     (gameStatus === "active" || gameStatus === "waiting") &&

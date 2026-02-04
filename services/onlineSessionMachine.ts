@@ -7,6 +7,7 @@ import {
   setConnectionError,
   setIsConnected,
 } from "../state/gameSlice";
+import { NETWORK_CONFIG } from "../config/gameConfig";
 import { onlineDataClient, OnlineGameSnapshot } from "./onlineDataClient";
 import {
   createEmptyPieceBitboards,
@@ -53,6 +54,9 @@ class OnlineSessionMachine {
   private lastVersion: number | null = null;
   private lastMoveKey: string | null = null;
   private botMoveInFlight = false;
+  private presenceHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private disconnectSweepInterval: ReturnType<typeof setInterval> | null = null;
+  private disconnectSweepInFlight = false;
 
   private transition(nextState: OnlineSessionState) {
     this.state = nextState;
@@ -85,6 +89,49 @@ class OnlineSessionMachine {
   private buildMoveKey(move: OnlineGameSnapshot["lastMove"]) {
     if (!move) return null;
     return `${move.playerColor}:${move.from.row},${move.from.col}->${move.to.row},${move.to.col}:${move.timestamp}`;
+  }
+
+  private startPresenceHeartbeat(gameId: string) {
+    if (this.presenceHeartbeatInterval) return;
+    this.presenceHeartbeatInterval = setInterval(() => {
+      if (!this.isConnected || this.currentGameId !== gameId) return;
+      onlineDataClient.updatePlayerPresence(gameId, true).catch((error) => {
+        console.warn("[OnlineSession] Presence heartbeat failed:", error);
+      });
+    }, NETWORK_CONFIG.HEARTBEAT_INTERVAL);
+  }
+
+  private stopPresenceHeartbeat() {
+    if (!this.presenceHeartbeatInterval) return;
+    clearInterval(this.presenceHeartbeatInterval);
+    this.presenceHeartbeatInterval = null;
+  }
+
+  private startDisconnectSweep(gameId: string) {
+    if (this.disconnectSweepInterval) return;
+    this.disconnectSweepInterval = setInterval(() => {
+      if (!this.isConnected || this.currentGameId !== gameId) return;
+      const state = store.getState().game;
+      if (state.gameMode !== "online") return;
+      if (state.gameStatus !== "active" && state.gameStatus !== "promotion") return;
+      if (this.disconnectSweepInFlight) return;
+      this.disconnectSweepInFlight = true;
+      onlineDataClient
+        .eliminateDisconnectedPlayers(gameId, NETWORK_CONFIG.DISCONNECT_ELIMINATION_MS)
+        .catch((error) => {
+          console.warn("[OnlineSession] Disconnect sweep failed:", error);
+        })
+        .finally(() => {
+          this.disconnectSweepInFlight = false;
+        });
+    }, NETWORK_CONFIG.HEARTBEAT_INTERVAL);
+  }
+
+  private stopDisconnectSweep() {
+    if (!this.disconnectSweepInterval) return;
+    clearInterval(this.disconnectSweepInterval);
+    this.disconnectSweepInterval = null;
+    this.disconnectSweepInFlight = false;
   }
 
   private handleSnapshot(game: OnlineGameSnapshot | null) {
@@ -245,6 +292,8 @@ class OnlineSessionMachine {
     );
 
     await onlineDataClient.updatePlayerPresence(gameId, true);
+    this.startPresenceHeartbeat(gameId);
+    this.startDisconnectSweep(gameId);
     this.transition("subscribed");
   }
 
@@ -262,6 +311,8 @@ class OnlineSessionMachine {
       }
     }
 
+    this.stopPresenceHeartbeat();
+    this.stopDisconnectSweep();
     this.currentGameId = null;
     this.currentPlayer = null;
     this.isConnected = false;

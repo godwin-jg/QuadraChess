@@ -17,6 +17,20 @@ import realtimeDatabaseService from './realtimeDatabaseService';
 ensureFirebaseApp();
 const db = getDatabase();
 
+// Team mode helpers
+const CLOCK_COLORS = ["r", "b", "y", "g"] as const;
+type ClockColor = (typeof CLOCK_COLORS)[number];
+type TeamId = "A" | "B";
+type TeamAssignments = { r: TeamId; b: TeamId; y: TeamId; g: TeamId };
+
+const getTeamForColor = (assignments: TeamAssignments, color: ClockColor): TeamId =>
+  assignments[color];
+
+const getColorName = (color: string): string => {
+  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+  return names[color] || color.toUpperCase();
+};
+
 // O(6) piece count using bitboard popcount - much faster than boardState.flat().filter()
 const countPiecesForColor = (pieces: Record<string, bigint>, color: string): number => {
   let count = 0;
@@ -48,7 +62,7 @@ class OnlineBotService {
 
 
   // Process bot move directly in database
-  private async processBotMove(gameId: string, botColor: string, gameState: GameState): Promise<void> {
+  private async processBotMove(gameId: string, botColor: string, gameState: GameState, expectedVersion: number = 0): Promise<void> {
     const startTime = Date.now();
 
     // Get the appropriate bot configuration based on game mode
@@ -212,6 +226,14 @@ class OnlineBotService {
           return gameData;
         }
 
+        // ✅ CRITICAL FIX: Verify state hasn't changed while calculating
+        // If versions don't match, it means something changed (move made, player joined/left, etc.)
+        // We should skip this move and let the system trigger a new calculation on the new state
+        if (expectedVersion > 0 && gameData.gameState.version !== expectedVersion) {
+          console.warn(`[BotDebug] Stale state detected! Expected v${expectedVersion}, found v${gameData.gameState.version}. Aborting move.`);
+          return gameData;
+        }
+
         const moveTimestamp = realtimeDatabaseService.getServerNow();
 
         // ✅ BITBOARD FIX: Use bitboardState instead of boardState (boardState is not stored in Firebase)
@@ -251,20 +273,42 @@ class OnlineBotService {
 
         // ✅ CRITICAL FIX: Check if this is a capture move and update scores
         if (capturedPiece && capturedPiece[0] !== botColor) {
-          const capturedPieceType = capturedPiece[1] as keyof typeof PIECE_VALUES;
-          const points = PIECE_VALUES[capturedPieceType] || 0;
+          // Check if this is a teammate capture in team mode
+          const capturedColor = capturedPiece[0] as ClockColor;
+          const teamMode = !!gameData.gameState.teamMode;
+          const teamAssignments = (gameData.gameState.teamAssignments || { r: "A", y: "A", b: "B", g: "B" }) as TeamAssignments;
+          const isTeammateCapture = teamMode && 
+            getTeamForColor(teamAssignments, botColor as ClockColor) === 
+            getTeamForColor(teamAssignments, capturedColor);
 
-          // Update scores in game state
-          if (!gameData.gameState.scores) {
-            gameData.gameState.scores = { r: 0, b: 0, y: 0, g: 0 };
+          // Only award points if NOT a teammate capture
+          if (!isTeammateCapture) {
+            const capturedPieceType = capturedPiece[1] as keyof typeof PIECE_VALUES;
+            const points = PIECE_VALUES[capturedPieceType] || 0;
+
+            // Update scores in game state
+            if (!gameData.gameState.scores) {
+              gameData.gameState.scores = { r: 0, b: 0, y: 0, g: 0 };
+            }
+            gameData.gameState.scores[botColor as keyof typeof gameData.gameState.scores] += points;
+          } else {
+            // Show betrayal notification for teammate capture
+            try {
+              const notificationService = require('./notificationService').default;
+              notificationService.show(
+                `${getColorName(botColor)} betrayed ${getColorName(capturedColor)}!`,
+                "betrayal",
+                2500
+              );
+            } catch (e) {
+              // Ignore notification errors
+            }
           }
-          gameData.gameState.scores[botColor as keyof typeof gameData.gameState.scores] += points;
 
-          // Update captured pieces
+          // Update captured pieces (always track captures regardless of team)
           if (!gameData.gameState.capturedPieces) {
             gameData.gameState.capturedPieces = { r: [], b: [], y: [], g: [] };
           }
-          const capturedColor = capturedPiece[0] as keyof typeof gameData.gameState.capturedPieces;
           if (!gameData.gameState.capturedPieces[capturedColor]) {
             gameData.gameState.capturedPieces[capturedColor] = [];
           }
@@ -390,6 +434,34 @@ class OnlineBotService {
     } finally {
       clearTimeout(moveTimeout);
       this.botProcessingFlags.set(botColor, false);
+
+      // ✅ FAIL-SAFE RETRY: If we aborted due to stale state (or any other recoverable reason),
+      // we must check if we should still be moving.
+      // E.g. If state updated from v1 -> v2 while we were thinking, we skipped the v2 trigger (because we were busy).
+      // Now that we're done, we check if the store has a NEWER version than what we just used.
+      // If store version > expectedVersion, we missed an update -> Retry immediately.
+      // If store version == expectedVersion, we are consistent (or waiting for update) -> Do nothing (wait for update).
+      try {
+        const currentGameState = require('../state/store').store.getState().game;
+
+        // Only retry if we're active, it's our turn, AND the state has actually changed locally
+        // This prevents "spin loops" where we keep retrying on a stale local state while waiting for the server
+        if (
+          currentGameState &&
+          currentGameState.gameStatus === 'active' &&
+          currentGameState.currentPlayerTurn === botColor &&
+          !currentGameState.eliminatedPlayers.includes(botColor) &&
+          (currentGameState.version ?? 0) !== expectedVersion
+        ) {
+          console.log(`[BotRetry] Local state advanced (v${currentGameState.version} vs v${expectedVersion}). Retrying.`);
+          // We use setTimeout to break the promise chain and allow the stack to clear
+          setTimeout(() => {
+            this.scheduleBotMove(gameId, botColor, currentGameState);
+          }, 50);
+        }
+      } catch (err) {
+        console.warn("[BotRetry] Failed to check for retry:", err);
+      }
     }
   }
 
@@ -438,7 +510,7 @@ class OnlineBotService {
     }
 
     // Execute bot move immediately
-    this.processBotMove(gameId, botColor, currentGameState);
+    this.processBotMove(gameId, botColor, currentGameState, currentGameState.version ?? 0);
   }
 
 

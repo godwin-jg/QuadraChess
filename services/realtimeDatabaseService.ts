@@ -16,6 +16,7 @@ import {
   set,
   update,
 } from "@react-native-firebase/database";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ensureFirebaseApp } from "./firebaseInit";
 import { GameState, SerializedGameState, turnOrder } from "../state/types";
 import { Player } from "../app/services/networkService";
@@ -50,6 +51,7 @@ const db = getDatabase();
 
 const DEFAULT_TIME_CONTROL = { baseMs: 5 * 60 * 1000, incrementMs: 0 };
 const CLOCK_COLORS = ["r", "b", "y", "g"] as const;
+const AUTH_USER_KEY = "firebase_auth_user_id";
 type ClockColor = (typeof CLOCK_COLORS)[number];
 const DEFAULT_TEAM_ASSIGNMENTS = { r: "A", y: "A", b: "B", g: "B" } as const;
 const TEAM_IDS = ["A", "B"] as const;
@@ -73,6 +75,11 @@ const getTeamColors = (assignments: TeamAssignments, teamId: TeamId): ClockColor
   CLOCK_COLORS.filter((color) => assignments[color] === teamId);
 
 const getOpposingTeam = (teamId: TeamId): TeamId => (teamId === "A" ? "B" : "A");
+
+const getColorName = (color: string): string => {
+  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+  return names[color] || color.toUpperCase();
+};
 
 // ✅ REMOVED: syncTeamClocks - each player now has individual clock
 // Team mode only affects elimination, not clock synchronization
@@ -512,9 +519,32 @@ class RealtimeDatabaseService {
       gameState.capturedPieces[moveData.playerColor as keyof typeof gameState.capturedPieces].push(
         capturedPiece
       );
-      const capturedValue =
-        PIECE_VALUES[capturedPiece[1] as keyof typeof PIECE_VALUES] || 0;
-      gameState.scores[moveData.playerColor as keyof typeof gameState.scores] += capturedValue;
+      
+      // Check if this is a teammate capture in team mode
+      const capturedColor = capturedPiece[0] as ClockColor;
+      const capturingColor = moveData.playerColor as ClockColor;
+      const isTeammateCapture = gameState.teamMode && 
+        getTeamForColor(gameState.teamAssignments, capturingColor) === 
+        getTeamForColor(gameState.teamAssignments, capturedColor);
+      
+      // Only award points if NOT a teammate capture
+      if (!isTeammateCapture) {
+        const capturedValue =
+          PIECE_VALUES[capturedPiece[1] as keyof typeof PIECE_VALUES] || 0;
+        gameState.scores[moveData.playerColor as keyof typeof gameState.scores] += capturedValue;
+      } else {
+        // Show betrayal notification for teammate capture
+        try {
+          const notificationService = require('./notificationService').default;
+          notificationService.show(
+            `${getColorName(capturingColor)} betrayed ${getColorName(capturedColor)}!`,
+            "betrayal",
+            2500
+          );
+        } catch (e) {
+          // Ignore notification errors
+        }
+      }
     }
 
     if (pieceType === "P") {
@@ -910,6 +940,153 @@ class RealtimeDatabaseService {
     return gameData;
   }
 
+  private applyDisconnectEliminationToGameData(
+    gameData: any,
+    playerColor: ClockColor,
+    now: number,
+    options?: { advanceTurn?: boolean }
+  ) {
+    const gameState = gameData.gameState as GameState;
+
+    const baseMs = gameState.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    if (!gameState.clocks || typeof gameState.clocks !== "object" || Array.isArray(gameState.clocks)) {
+      gameState.clocks = { r: baseMs, b: baseMs, y: baseMs, g: baseMs };
+    }
+    CLOCK_COLORS.forEach((color) => {
+      if (!Number.isFinite(gameState.clocks?.[color])) {
+        gameState.clocks[color] = baseMs;
+      }
+    });
+    if (gameState.turnStartedAt !== null && typeof gameState.turnStartedAt !== "number") {
+      gameState.turnStartedAt = null;
+    }
+
+    gameState.eliminatedPlayers = gameState.eliminatedPlayers || [];
+    gameState.enPassantTargets = gameState.enPassantTargets || [];
+    gameState.scores = gameState.scores || { r: 0, b: 0, y: 0, g: 0 };
+    gameState.hasMoved = gameState.hasMoved || {
+      rK: false, rR1: false, rR2: false,
+      bK: false, bR1: false, bR2: false,
+      yK: false, yR1: false, yR2: false,
+      gK: false, gR1: false, gR2: false,
+    };
+    gameState.gameOverState = gameState.gameOverState || {
+      isGameOver: false,
+      status: null,
+      eliminatedPlayer: null,
+    };
+
+    const shouldAdvanceTurn =
+      options?.advanceTurn ?? gameState.currentPlayerTurn === playerColor;
+
+    if (shouldAdvanceTurn) {
+      gameState.promotionState = { isAwaiting: false, position: null, color: null };
+    } else if (!gameState.promotionState) {
+      gameState.promotionState = { isAwaiting: false, position: null, color: null };
+    }
+
+    let resolvedPieces = deserializeBitboardPieces(gameState.bitboardState?.pieces);
+    if (
+      (!gameState.bitboardState || !gameState.bitboardState.pieces) &&
+      Array.isArray(gameState.boardState)
+    ) {
+      const normalizedBoard = this.convertBoardState(gameState.boardState, false);
+      const fallbackBitboards = syncBitboardsFromArray(
+        normalizedBoard,
+        gameState.eliminatedPlayers
+      );
+      resolvedPieces = fallbackBitboards.pieces;
+      gameState.bitboardState = {
+        pieces: serializeBitboardPieces(resolvedPieces),
+      } as any;
+    }
+
+    const resolvedEliminatedPieces =
+      gameState.eliminatedPieceBitboards
+        ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
+        : createEmptyPieceBitboards();
+
+    if (gameState.teamMode) {
+      return this.applyTeamEliminationToGameData(
+        gameData,
+        playerColor,
+        "finished",
+        now,
+        resolvedPieces,
+        resolvedEliminatedPieces
+      );
+    }
+
+    gameState.clocks[playerColor] = 0;
+
+    if (!gameState.eliminatedPlayers.includes(playerColor)) {
+      gameState.eliminatedPlayers.push(playerColor);
+      gameState.justEliminated = playerColor;
+      this.captureEliminatedPieces(
+        resolvedEliminatedPieces,
+        resolvedPieces,
+        playerColor,
+        true
+      );
+    }
+
+    gameState.enPassantTargets = gameState.enPassantTargets.filter(
+      (target) => target.createdBy?.charAt(0) !== playerColor
+    );
+
+    const finalBitboards = rebuildBitboardStateFromPieces(
+      resolvedPieces,
+      gameState.eliminatedPlayers,
+      gameState.enPassantTargets
+    );
+
+    const hydratedState: GameState = {
+      ...gameState,
+      boardState: bitboardToArray(finalBitboards.pieces, resolvedEliminatedPieces),
+      bitboardState: finalBitboards,
+      eliminatedPieceBitboards: resolvedEliminatedPieces,
+    };
+
+    hydratedState.checkStatus = updateAllCheckStatus(hydratedState);
+    hydratedState.bitboardState.pinnedMask = getPinnedPiecesMask(
+      hydratedState,
+      hydratedState.currentPlayerTurn
+    );
+
+    if (hydratedState.eliminatedPlayers.length >= 3) {
+      const winner = turnOrder.find(
+        (player) => !hydratedState.eliminatedPlayers.includes(player)
+      );
+      if (winner) {
+        hydratedState.winner = winner;
+        hydratedState.gameStatus = "finished";
+        hydratedState.gameOverState = {
+          isGameOver: true,
+          status: "finished",
+          eliminatedPlayer: null,
+        };
+        gameData.winner = winner;
+        gameData.status = "finished";
+      }
+      hydratedState.turnStartedAt = null;
+    } else if (shouldAdvanceTurn) {
+      const nextPlayer = this.getNextPlayer(playerColor, hydratedState.eliminatedPlayers);
+      hydratedState.currentPlayerTurn = nextPlayer;
+      gameData.currentPlayerTurn = nextPlayer;
+      hydratedState.gameStatus = "active";
+      hydratedState.turnStartedAt = now;
+    }
+
+    hydratedState.version = (hydratedState.version ?? 0) + 1;
+    gameData.gameState = this.toSerializedGameState(
+      hydratedState,
+      finalBitboards.pieces
+    );
+    gameData.lastActivity = now;
+
+    return gameData;
+  }
+
   private applyNoMoveEliminationToGameData(
     gameData: any,
     playerColor: ClockColor,
@@ -1222,23 +1399,47 @@ class RealtimeDatabaseService {
     };
 
     try {
-
+      // First check if Firebase already has a current user (persisted by Firebase SDK)
       const currentUser = authInstance.currentUser;
       if (currentUser) {
         this.currentUser = currentUser;
+        // Cache user ID in AsyncStorage for faster restoration
+        await AsyncStorage.setItem(AUTH_USER_KEY, currentUser.uid).catch(() => { });
         this.setupLightweightAuthListener();
         this.startServerTimeOffsetListener();
         this.startKeepAlive();
+        console.log("[Auth] Restored existing Firebase user:", currentUser.uid);
         return currentUser.uid;
       }
 
-      // Sign in anonymously
+      // Check if we have a cached user ID - Firebase might still be hydrating
+      const cachedUserId = await AsyncStorage.getItem(AUTH_USER_KEY).catch(() => null);
+      if (cachedUserId) {
+        // Wait a moment for Firebase to restore auth state
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const restoredUser = authInstance.currentUser;
+        if (restoredUser && restoredUser.uid === cachedUserId) {
+          this.currentUser = restoredUser;
+          this.setupLightweightAuthListener();
+          this.startServerTimeOffsetListener();
+          this.startKeepAlive();
+          console.log("[Auth] Restored cached Firebase user:", restoredUser.uid);
+          return restoredUser.uid;
+        }
+      }
+
+      // No existing user, sign in anonymously
+      console.log("[Auth] No cached user found, signing in anonymously...");
       const userCredential = await withTimeout(
         signInAnonymously(authInstance),
         10000,
         "Authentication"
       );
       this.currentUser = userCredential.user;
+
+      // Cache the user ID in AsyncStorage for future sessions
+      await AsyncStorage.setItem(AUTH_USER_KEY, userCredential.user.uid).catch(() => { });
+      console.log("[Auth] New anonymous user created and cached:", userCredential.user.uid);
 
       // Set up lightweight auth state listener (minimal overhead)
       this.setupLightweightAuthListener();
@@ -2284,12 +2485,12 @@ class RealtimeDatabaseService {
           const turnOrder = ["r", "b", "y", "g"];
           const currentIndex = turnOrder.indexOf(player.color);
           let nextActivePlayer = turnOrder[(currentIndex + 1) % 4];
-          
+
           while (gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
             const activeIndex = turnOrder.indexOf(nextActivePlayer);
             nextActivePlayer = turnOrder[(activeIndex + 1) % 4];
           }
-          
+
           gameData.gameState.currentPlayerTurn = nextActivePlayer;
         }
       }
@@ -2348,6 +2549,96 @@ class RealtimeDatabaseService {
       }
     } catch (error) {
       console.error("Error processing timeout:", error);
+      throw error;
+    }
+  }
+
+  async eliminateDisconnectedPlayers(gameId: string, thresholdMs: number): Promise<void> {
+    try {
+      const gameRef = ref(db, `games/${gameId}`);
+      const result = await runTransaction(gameRef, (gameData) => {
+        if (gameData === null) {
+          console.warn(`Game ${gameId} not found`);
+          return null;
+        }
+        if (!gameData.gameState) {
+          return gameData;
+        }
+        if (gameData.status !== "playing") {
+          return gameData;
+        }
+        if (
+          gameData.gameState.gameStatus === "finished" ||
+          gameData.gameState.gameStatus === "checkmate" ||
+          gameData.gameState.gameStatus === "stalemate"
+        ) {
+          return gameData;
+        }
+
+        const timeoutMs = Number.isFinite(thresholdMs) ? Math.max(0, thresholdMs) : 0;
+        if (!timeoutMs) {
+          return gameData;
+        }
+
+        const now = this.getServerNow();
+        const players = gameData.players || {};
+
+        for (const [playerId, player] of Object.entries(players)) {
+          if (!player || typeof player !== "object") continue;
+          const color = (player as Player).color;
+          if (!color || !CLOCK_COLORS.includes(color as ClockColor)) continue;
+          if ((player as Player).isBot) continue;
+          const eliminatedPlayers = Array.isArray(gameData.gameState.eliminatedPlayers)
+            ? gameData.gameState.eliminatedPlayers
+            : [];
+          if (eliminatedPlayers.includes(color)) continue;
+
+          const lastSeenValue = (player as Player).lastSeen;
+          const lastSeen = typeof lastSeenValue === "number" ? lastSeenValue : now;
+          const offlineForMs = Math.max(0, now - lastSeen);
+          if (offlineForMs < timeoutMs) continue;
+
+          const shouldAdvanceTurn = gameData.gameState.currentPlayerTurn === color;
+          gameData = this.applyDisconnectEliminationToGameData(
+            gameData,
+            color as ClockColor,
+            now,
+            { advanceTurn: shouldAdvanceTurn }
+          );
+
+          if (gameData.players?.[playerId]) {
+            gameData.players[playerId].isOnline = false;
+          }
+          if (
+            gameData.gameState.gameStatus === "finished" ||
+            gameData.gameState.gameStatus === "checkmate" ||
+            gameData.gameState.gameStatus === "stalemate"
+          ) {
+            break;
+          }
+        }
+
+        return gameData;
+      });
+
+      if (!result.committed) {
+        // Transaction was aborted - this is normal when concurrent writes occur
+        // The sweep will retry on the next interval
+        console.log("[DisconnectSweep] Transaction not committed, will retry on next interval");
+      }
+    } catch (error: any) {
+      // Handle transaction conflicts gracefully - these occur when bot moves
+      // or other game updates happen concurrently
+      if (
+        error?.code === "database/overridden-by-set" ||
+        error?.message?.includes("overridden-by-set") ||
+        error?.message?.includes("transaction was overridden")
+      ) {
+        // This is expected during concurrent game updates, silently ignore
+        // The sweep will retry on the next interval
+        return;
+      }
+      console.error("Error eliminating disconnected players:", error);
       throw error;
     }
   }
@@ -2612,7 +2903,7 @@ class RealtimeDatabaseService {
       const gameRef = ref(db, `games/${gameId}/players/${user.uid}`);
       await update(gameRef, {
         isOnline,
-        lastSeen: Date.now(),
+        lastSeen: this.getServerNow(),
       });
 
     } catch (error) {

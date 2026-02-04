@@ -578,6 +578,30 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
               />
             </View>
             <View className="flex-row justify-between items-center py-4 border-b border-white/10">
+              <View className="flex-1 pr-4">
+                <Text className="text-lg font-semibold text-gray-300">Premove</Text>
+                <Text className="text-sm text-gray-400 mt-1">
+                  Queue moves before your turn in online/P2P
+                </Text>
+              </View>
+              <Switch
+                value={settings.game.premoveEnabled}
+                onValueChange={async (value) => {
+                  await hapticsService.toggle();
+                  updateGame({ premoveEnabled: value });
+                  
+                  try {
+                    await saveSettings();
+                    console.log('✅ Premove setting auto-saved successfully');
+                  } catch (error) {
+                    console.error('❌ Failed to auto-save premove setting:', error);
+                  }
+                }}
+                trackColor={{ false: "#E5E7EB", true: "#3B82F6" }}
+                thumbColor={settings.game.premoveEnabled ? "#FFFFFF" : "#9CA3AF"}
+              />
+            </View>
+            <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">Move Hints</Text>
               <Switch
                 value={settings.game.showMoveHints}
@@ -614,7 +638,7 @@ export default function ProfileSettings({ onClose }: ProfileSettingsProps) {
 
         {/* Accessibility Section */}
         <View className="bg-white/5 border border-white/10 rounded-2xl p-4 mx-4 my-2">
-          <Text className="text-xl font-bold text-white mb-4 tracking-wide">♿ Accessibility</Text>
+          <Text className="text-xl font-bold text-white mb-4 tracking-wide">Accessibility</Text>
           <View>
             <View className="flex-row justify-between items-center py-4 border-b border-white/10">
               <Text className="text-lg font-semibold text-gray-300 flex-1">High Contrast</Text>

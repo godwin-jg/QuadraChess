@@ -12,7 +12,6 @@ import Animated, {
   makeMutable,
   type SharedValue,
 } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
 import Svg, { G, Path } from "react-native-svg";
 
 type FloatingPieceConfig = {
@@ -126,100 +125,60 @@ const FloatingPiece = React.memo(
 export default function FloatingPieces() {
   const { width, height } = useWindowDimensions();
   const isFocused = useIsFocused();
-  const pieceAnimationsRef = useRef<PieceAnimation[] | null>(null);
-  const dimensionsRef = useRef({ width, height });
-  const timeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const animationsRef = useRef<PieceAnimation[] | null>(null);
+  const activeRef = useRef(isFocused);
 
-  useEffect(() => {
-    dimensionsRef.current = { width, height };
-  }, [width, height]);
-
-  if (!pieceAnimationsRef.current) {
-    pieceAnimationsRef.current = createPieceAnimations(FLOATING_PIECES.length, height);
+  if (!animationsRef.current) {
+    animationsRef.current = createPieceAnimations(FLOATING_PIECES.length, height);
   }
-  const pieceAnimations = pieceAnimationsRef.current;
+  const animations = animationsRef.current;
 
-  const animatePiece = (index: number) => {
-    const piece = pieceAnimations[index];
-    const pieceSize = 100;
-    const { width: screenWidth, height: screenHeight } = dimensionsRef.current;
+  const float = (index: number) => {
+    if (!activeRef.current) return;
 
-    const startY = screenHeight + pieceSize + Math.random() * 200;
-    const endY = -pieceSize + Math.random() * 100;
-    piece.translateY.value = startY;
-    piece.translateX.value = Math.random() * screenWidth;
-    piece.scale.value = 0.4 + Math.random() * 0.6;
-    piece.opacity.value = 0.2 + Math.random() * 0.3;
+    const p = animations[index];
+    const startY = height + 100 + Math.random() * 200;
+    const duration = 20000 + Math.random() * 15000;
+    const sway = 5000 + Math.random() * 3000;
+    const wobble = (Math.random() - 0.5) * 80;
 
-    const randomDuration = 20000 + Math.random() * 15000;
-    piece.translateY.value = withTiming(
-      endY,
-      { duration: randomDuration, easing: Easing.linear },
-      (finished) => {
-        if (finished) {
-          setTimeout(() => {
-            scheduleOnRN(animatePiece, index);
-          }, 3000 + Math.random() * 2000);
-        }
-      }
-    );
-
-    const sideToSideDuration = 5000 + Math.random() * 3000;
-    const sideToSideDistance = (Math.random() - 0.5) * 80;
-    piece.translateX.value = withRepeat(
+    p.translateY.value = startY;
+    p.translateX.value = Math.random() * width;
+    p.scale.value = withTiming(0.4 + Math.random() * 0.6, { duration: 0 });
+    p.opacity.value = withTiming(0.2 + Math.random() * 0.3, { duration: 300 });
+    p.translateY.value = withTiming(-100 + Math.random() * 100, { duration, easing: Easing.linear });
+    p.translateX.value = withRepeat(
       withSequence(
-        withTiming(piece.translateX.value + sideToSideDistance, {
-          duration: sideToSideDuration,
-          easing: Easing.inOut(Easing.ease),
-        }),
-        withTiming(piece.translateX.value - sideToSideDistance, {
-          duration: sideToSideDuration,
-          easing: Easing.inOut(Easing.ease),
-        })
+        withTiming(p.translateX.value + wobble, { duration: sway, easing: Easing.inOut(Easing.ease) }),
+        withTiming(p.translateX.value - wobble, { duration: sway, easing: Easing.inOut(Easing.ease) })
       ),
       -1,
       true
     );
-
-    const rotationDuration = 15000 + Math.random() * 10000;
-    const rotationAmount = (Math.random() - 0.5) * 360;
-    piece.rotateZ.value = withRepeat(
-      withTiming(rotationAmount, { duration: rotationDuration, easing: Easing.linear }),
+    p.rotateZ.value = withRepeat(
+      withTiming((Math.random() - 0.5) * 360, { duration: 15000 + Math.random() * 10000, easing: Easing.linear }),
       -1,
       false
     );
+
+    setTimeout(() => float(index), duration + 3000 + Math.random() * 2000);
   };
 
   useEffect(() => {
+    activeRef.current = isFocused;
     if (!isFocused) {
+      animations.forEach((p) => {
+        [p.opacity, p.scale, p.translateX, p.translateY, p.rotateZ].forEach(cancelAnimation);
+        p.opacity.value = 0;
+        p.scale.value = 1;
+        p.translateX.value = 0;
+        p.translateY.value = height;
+        p.rotateZ.value = 0;
+      });
       return;
     }
-
-    timeoutsRef.current = [];
-    pieceAnimations.forEach((_, index) => {
-      const delay = index * 3000;
-      const timeout = setTimeout(() => animatePiece(index), delay);
-      timeoutsRef.current.push(timeout);
-    });
-
-    return () => {
-      timeoutsRef.current.forEach(clearTimeout);
-      timeoutsRef.current = [];
-      const resetY = dimensionsRef.current.height;
-      pieceAnimations.forEach((piece) => {
-        cancelAnimation(piece.opacity);
-        cancelAnimation(piece.scale);
-        cancelAnimation(piece.translateX);
-        cancelAnimation(piece.translateY);
-        cancelAnimation(piece.rotateZ);
-        piece.opacity.value = 0;
-        piece.scale.value = 1;
-        piece.translateX.value = 0;
-        piece.translateY.value = resetY;
-        piece.rotateZ.value = 0;
-      });
-    };
-  }, [isFocused, pieceAnimations]);
+    animations.forEach((_, i) => setTimeout(() => activeRef.current && float(i), i * 3000));
+  }, [isFocused]);
 
   return (
     <View pointerEvents="none" style={styles.container}>
@@ -227,7 +186,7 @@ export default function FloatingPieces() {
         <FloatingPiece
           key={`${piece.piece}-${index}`}
           config={piece}
-          animation={pieceAnimations[index]}
+          animation={animations[index]}
         />
       ))}
     </View>

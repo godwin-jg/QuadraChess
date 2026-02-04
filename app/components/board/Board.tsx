@@ -109,6 +109,7 @@ export default function Board({
   const dragToMoveEnabled = settings.game.dragToMoveEnabled ?? true;
   const animationsEnabled = settings.game.animationsEnabled ?? true;
   const showMoveHints = settings.game.showMoveHints ?? true;
+  const premoveEnabled = settings.game.premoveEnabled ?? true;
   const tapGesturesEnabled = tapToMoveEnabled || dragToMoveEnabled;
   const boardTheme = useMemo(() => getBoardTheme(settings), [settings]);
   const { handleSquarePress: handleSquareSelection, getMovesForSquare, isValidMove } =
@@ -624,6 +625,7 @@ export default function Board({
     enPassantTargets,
     abortPendingDrop,
     botPlayers,
+    premoveEnabled,
   });
   React.useEffect(() => {
     currentPlayerColorRef.current = currentPlayerColor;

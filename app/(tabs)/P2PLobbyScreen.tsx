@@ -483,6 +483,13 @@ const P2PLobbyScreen: React.FC = () => {
     const playerCount = item.playerCount || 0;
     const isFull = playerCount >= (item.maxPlayers || 4);
 
+    // Extract time control from discovered game
+    const baseMinutes = item.baseMinutes ?? 5;
+    const incrementSeconds = item.incrementSeconds ?? 0;
+    const timeControlLabel = incrementSeconds > 0 
+      ? `${baseMinutes}+${incrementSeconds}` 
+      : `${baseMinutes} min`;
+
     return (
       <TouchableOpacity
         key={item.id || `game-${index}`}
@@ -507,7 +514,7 @@ const P2PLobbyScreen: React.FC = () => {
         disabled={isLoading || isFull}
       >
         <View className="flex-row justify-between items-center">
-          <View>
+          <View className="flex-1">
             <Text className={`text-lg font-bold ${isFull ? "text-gray-400" : "text-white"}`}>
               {item.hostName}'s Game
             </Text>
@@ -521,6 +528,9 @@ const P2PLobbyScreen: React.FC = () => {
           <View className="items-end">
             <Text className={`text-sm ${isFull ? "text-red-400" : "text-green-400"}`}>
               {isFull ? "Full" : "Available"}
+            </Text>
+            <Text className="text-gray-400 text-xs mt-0.5">
+              {timeControlLabel}
             </Text>
           </View>
         </View>

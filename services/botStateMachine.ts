@@ -157,12 +157,25 @@ const scheduleBotMove = (state: GameState) => {
 
   const attemptMove = (delay: number) => {
     scheduledTimer = setTimeout(() => {
+      // ✅ CRITICAL: Always get FRESH state from store before attempting move
+      // This ensures we're working with the most up-to-date board position
       const latest = store.getState().game;
+      
+      // ✅ CRITICAL: Verify it's still this bot's turn
       if (latest.currentPlayerTurn !== botColor) {
+        if (__DEV__) {
+          console.log(`[BotStateMachine] ${botColor} scheduled but turn is now ${latest.currentPlayerTurn}, aborting`);
+        }
         clearScheduled();
         setMachineState("idle");
         setIdleReason(getIdleReason(latest));
         return;
+      }
+
+      // ✅ CRITICAL: Check if bot is in check - log for debugging
+      const botInCheck = latest.checkStatus[botColor as keyof typeof latest.checkStatus];
+      if (__DEV__ && botInCheck) {
+        console.log(`[BotStateMachine] ${botColor.toUpperCase()} is in CHECK, must escape`);
       }
 
       if (!canBotAct(latest)) {
@@ -179,6 +192,7 @@ const scheduleBotMove = (state: GameState) => {
 
       setMachineState("thinking");
 
+      // ✅ CRITICAL: Pass the current turn color, bot will get fresh state internally
       botService.makeBotMove(botColor);
 
       clearScheduled();

@@ -9,17 +9,20 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import Piece from "../board/Piece";
 import { sw, sh, sf, isCompact } from "../../utils/responsive";
 
 interface PlayerHUDPanelProps {
   players: Array<{
     name: string;
+    colorLabel?: string;
     color: string;
     score: number;
     capturedPieces: string[];
     isCurrentTurn: boolean;
     isEliminated: boolean;
+    isDisconnected?: boolean;
     timeMs?: number;
     teamLabel?: string;
   }>;
@@ -193,22 +196,51 @@ export default function PlayerHUDPanel({ players, panelType, textScale = 1 }: Pl
           return (
             <View key={player.color} style={styles.playerSection}>
               <View style={styles.playerInfo}>
-                <TurnColorText
-                  isActive={isActive}
-                  activeColor={nameActiveColor}
-                  inactiveColor={nameInactiveColor}
-                  style={[
-                    styles.playerName,
-                    { fontSize: playerNameSize },
-                    { textDecorationLine: player.isEliminated ? "line-through" : "none" },
-                  ]}
-                >
-                  {PLAYER_NAMES[player.color] || "Unknown"}
-                </TurnColorText>
-                {player.teamLabel && (
-                  <Text style={[styles.teamLabel, { fontSize: teamLabelSize }]}>
-                    {player.teamLabel}
-                  </Text>
+                {/* Color label with team icon */}
+                <View style={styles.colorLabelRow}>
+                  <TurnColorText
+                    isActive={isActive}
+                    activeColor={nameActiveColor}
+                    inactiveColor={nameInactiveColor}
+                    style={[
+                      styles.colorLabel,
+                      { fontSize: playerNameSize },
+                      { textDecorationLine: player.isEliminated ? "line-through" : "none" },
+                    ]}
+                  >
+                    {player.colorLabel || PLAYER_NAMES[player.color] || "Unknown"}
+                  </TurnColorText>
+                  {player.teamLabel && (() => {
+                    const teamLetter = player.teamLabel.replace("Team ", "").trim() as "A" | "B";
+                    const teamIconName = teamLetter === "A" ? "alpha-a-circle" : "alpha-b-circle";
+                    // Consistent with TeamAssignmentDnD: Red for A, Blue for B
+                    const teamIconColor = player.isEliminated 
+                      ? "#6B7280" 
+                      : teamLetter === "A" ? "#EF4444" : "#3B82F6";
+                    return (
+                      <MaterialCommunityIcons 
+                        name={teamIconName as any} 
+                        size={sf(isCompact ? 14 : 18)} 
+                        color={teamIconColor} 
+                        style={styles.teamIcon}
+                      />
+                    );
+                  })()}
+                </View>
+                {/* Player name - only show if different from color label */}
+                {player.name && player.name !== (player.colorLabel || PLAYER_NAMES[player.color]) && (
+                  <TurnColorText
+                    isActive={isActive}
+                    activeColor={smallActiveColor}
+                    inactiveColor={smallInactiveColor}
+                    style={[
+                      styles.playerName,
+                      { fontSize: teamLabelSize },
+                      { textDecorationLine: player.isEliminated ? "line-through" : "none" },
+                    ]}
+                  >
+                    {player.name}
+                  </TurnColorText>
                 )}
                 <JuicyScore
                   score={player.score}
@@ -220,6 +252,11 @@ export default function PlayerHUDPanel({ players, panelType, textScale = 1 }: Pl
                 {player.isEliminated && (
                   <Text style={[styles.eliminatedText, { fontSize: eliminatedTextSize }]}>
                     ELIMINATED
+                  </Text>
+                )}
+                {!player.isEliminated && player.isDisconnected && (
+                  <Text style={[styles.disconnectedText, { fontSize: eliminatedTextSize }]}>
+                    DISCONNECTED
                   </Text>
                 )}
               </View>
@@ -316,10 +353,30 @@ const styles = StyleSheet.create({
     marginBottom: sh(c ? 2 : 4),
     overflow: 'visible',
   },
+  colorLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: sh(1),
+  },
+  colorLabel: {
+    fontSize: TEAM_LABEL_SIZE,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  teamIcon: {
+    marginLeft: sw(4),
+    // Subtle shadow for depth - consistent with app theme
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
   playerName: {
     fontSize: PLAYER_NAME_SIZE,
-    fontWeight: '900',
-    letterSpacing: 1.2,
+    fontWeight: '600',
+    letterSpacing: 0.5,
     marginBottom: sh(4),
   },
   playerScore: {
@@ -342,16 +399,15 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FACC15',
   },
-  teamLabel: {
-    fontSize: TEAM_LABEL_SIZE,
-    color: '#9CA3AF',
-    fontWeight: '600',
-    letterSpacing: 0.8,
-    marginBottom: sh(2),
-  },
   eliminatedText: {
     fontSize: ELIMINATED_SIZE,
     color: '#F87171',
+    fontWeight: '600',
+    marginTop: sh(4),
+  },
+  disconnectedText: {
+    fontSize: ELIMINATED_SIZE,
+    color: '#FBBF24',
     fontWeight: '600',
     marginTop: sh(4),
   },

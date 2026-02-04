@@ -14,6 +14,8 @@ export interface GameAdvertisement {
   maxPlayers: number;
   status: string;
   timestamp: number; // Unix timestamp when the game was created
+  baseMinutes?: number; // Time control: base time in minutes
+  incrementSeconds?: number; // Time control: increment in seconds
 }
 
 class NetworkAdvertiserService {
@@ -273,6 +275,8 @@ class NetworkAdvertiserService {
         maxPlayers: gameInfo.maxPlayers.toString(),
         status: gameInfo.status || 'waiting',
         timestamp: gameInfo.timestamp.toString(),
+        baseMinutes: (gameInfo.baseMinutes ?? 5).toString(),
+        incrementSeconds: (gameInfo.incrementSeconds ?? 0).toString(),
         interfaceType: iface.type, // Add interface type for debugging
         interfaceName: iface.name,  // Add interface name for debugging
       };

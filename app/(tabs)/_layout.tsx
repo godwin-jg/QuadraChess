@@ -16,8 +16,98 @@ const ICON_MAP: Record<string, React.ComponentProps<typeof FontAwesome>["name"]>
   GameScreen: "gamepad",
 };
 
+import { store, resetGame } from "../../state";
+import { Alert } from "react-native";
+import { onlineSessionMachine as onlineGameService } from "../../services/onlineSessionMachine";
+import p2pGameService from "../../services/p2pGameService";
+import { botService } from "../../services/botService";
+
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { bottom } = useSafeAreaInsets();
+
+  const handleTabPress = async (routeName: string, isFocused: boolean) => {
+    if (isFocused) return;
+
+    hapticsService.selection();
+
+    // ✅ Check if game is actually in progress
+    // Default state is now "waiting", so "active" means a real game is running
+    const gameState = store.getState().game;
+    const isInActiveGame = gameState.gameStatus === "active";
+
+    // DEBUG: Log what we're checking
+    console.log("🔍 TAB PRESS DEBUG:", {
+      routeName,
+      gameMode: gameState.gameMode,
+      gameStatus: gameState.gameStatus,
+      isInActiveGame,
+    });
+
+    // Only warn for multiplayer games (online/P2P), not for single player
+    // Skip warning for GameScreen (that's where the game is - they're going TO it, not leaving it)
+    const isMultiplayerGame = gameState.gameMode === "online" || gameState.gameMode === "p2p";
+    const isNavigatingToGame = routeName === "GameScreen";
+    
+    if (isInActiveGame && isMultiplayerGame && !isNavigatingToGame) {
+      const modeLabel = gameState.gameMode === "online" ? "online" : "P2P";
+      Alert.alert(
+        "Leave Game?",
+        `You are in an ${modeLabel} game. Leaving will reset the game.`,
+        [
+          {
+            text: "Cancel",
+            style: "cancel",
+          },
+          {
+            text: "Leave Anyway",
+            style: "destructive",
+            onPress: async () => {
+              console.log("🔄 TAB SWITCH: User confirmed leaving game, disconnecting directly");
+              
+              // ✅ Directly disconnect without going through modeSwitchService
+              // This avoids any possibility of a second confirmation dialog
+              try {
+                // Resign/disconnect from online game
+                if (onlineGameService.currentGameId && onlineGameService.isConnected) {
+                  try {
+                    await onlineGameService.resignGame();
+                  } catch (e) {
+                    await onlineGameService.disconnect();
+                  }
+                } else if (onlineGameService.isConnected) {
+                  await onlineGameService.disconnect();
+                }
+                
+                // Disconnect from P2P game
+                if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+                  try {
+                    await p2pGameService.disconnect();
+                  } catch (e) {
+                    console.warn("P2P disconnect failed:", e);
+                  }
+                }
+                
+                // Cancel bot moves and reset game state
+                botService.cancelAllBotMoves();
+                store.dispatch(resetGame());
+                
+                // Small delay to ensure cleanup completes
+                await new Promise(resolve => setTimeout(resolve, 100));
+              } catch (error) {
+                console.error("Error during tab switch disconnect:", error);
+              }
+              
+              // Navigate to the target screen
+              navigation.navigate(routeName);
+            },
+          },
+        ]
+      );
+    } else {
+      // Not in a game, just navigate
+      navigation.navigate(routeName);
+    }
+  };
 
   return (
     <View style={[styles.container, { bottom: bottom + 12 }]}>
@@ -27,30 +117,25 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             {state.routes
               .filter((route) => route.name !== "TutorialScreen")
               .map((route) => {
-              const isFocused = state.index === state.routes.findIndex(r => r.key === route.key);
-              const iconName = ICON_MAP[route.name] || "circle";
+                const isFocused = state.index === state.routes.findIndex(r => r.key === route.key);
+                const iconName = ICON_MAP[route.name] || "circle";
 
-            return (
-              <View key={route.key} style={styles.tabItem}>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (!isFocused) {
-                      hapticsService.selection();
-                      navigation.navigate(route.name);
-                    }
-                  }}
-                  activeOpacity={0.7}
-                  style={[styles.iconWrap, isFocused && styles.iconWrapActive]}
-                >
-                  <FontAwesome
-                    name={iconName}
-                    size={20}
-                    color={isFocused ? "#FFFFFF" : "rgba(255,255,255,0.4)"}
-                  />
-                </TouchableOpacity>
-              </View>
-            );
-            })}
+                return (
+                  <View key={route.key} style={styles.tabItem}>
+                    <TouchableOpacity
+                      onPress={() => handleTabPress(route.name, isFocused)}
+                      activeOpacity={0.7}
+                      style={[styles.iconWrap, isFocused && styles.iconWrapActive]}
+                    >
+                      <FontAwesome
+                        name={iconName}
+                        size={20}
+                        color={isFocused ? "#FFFFFF" : "rgba(255,255,255,0.4)"}
+                      />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
           </View>
         </BlurView>
       </View>

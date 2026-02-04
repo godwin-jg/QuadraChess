@@ -111,6 +111,10 @@ class OnlineDataClient {
     await realtimeDatabaseService.timeoutPlayer(gameId, playerColor);
   }
 
+  async eliminateDisconnectedPlayers(gameId: string, thresholdMs: number): Promise<void> {
+    await realtimeDatabaseService.eliminateDisconnectedPlayers(gameId, thresholdMs);
+  }
+
   async resolveNoLegalMoves(
     gameId: string,
     playerColor: string,

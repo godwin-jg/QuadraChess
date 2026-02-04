@@ -49,10 +49,10 @@ class ModeSwitchService {
   async handleModeSwitch(
     targetMode: "online" | "local" | "solo" | "single" | "p2p",
     onConfirm: () => void,
-    onCancel: () => void
+    onCancel: () => void,
+    options?: { skipConfirmation?: boolean }
   ): Promise<void> {
     const currentMode = this.getCurrentMode();
-    
 
     // If already in the target mode, no need to switch
     if (currentMode === targetMode) {
@@ -63,6 +63,18 @@ class ModeSwitchService {
     // If not currently in a game, allow switch without warning
     if (!this.isCurrentlyInGame()) {
       onConfirm();
+      return;
+    }
+
+    // If confirmation was already shown (e.g., by tab bar), skip the alert
+    if (options?.skipConfirmation) {
+      console.log("🔄 MODE SWITCH: Skipping confirmation (already confirmed), starting disconnection");
+      await this.disconnectFromCurrentGame();
+      console.log("🔄 MODE SWITCH: Disconnection completed, confirming mode switch");
+      setTimeout(() => {
+        console.log("🔄 MODE SWITCH: Mode switch confirmed and completed");
+        onConfirm();
+      }, 100);
       return;
     }
 
@@ -128,8 +140,17 @@ class ModeSwitchService {
 
   private async disconnectFromCurrentGame(): Promise<void> {
     try {
-      // ✅ CRITICAL FIX: Always disconnect from online game if it exists
-      if (onlineGameService.currentGameId || onlineGameService.isConnected) {
+      // ✅ CRITICAL FIX: Resign from online game when switching modes
+      // This ensures other players know you left and the game can progress
+      if (onlineGameService.currentGameId && onlineGameService.isConnected) {
+        try {
+          await onlineGameService.resignGame();
+        } catch (resignError) {
+          console.warn("Failed to resign from online game during mode switch:", resignError);
+          // Fall back to disconnect if resign fails
+          await onlineGameService.disconnect();
+        }
+      } else if (onlineGameService.isConnected) {
         await onlineGameService.disconnect();
       }
 
@@ -150,10 +171,10 @@ class ModeSwitchService {
 
       // ✅ CRITICAL FIX: Cancel all bot moves before disconnecting
       botService.cancelAllBotMoves();
-      
+
       // ✅ CRITICAL FIX: Reset game state when switching modes
       store.dispatch(resetGame());
-      
+
       // ✅ CRITICAL FIX: Add a longer delay to ensure all disconnections and state cleanup are complete
       // This prevents race conditions when switching between modes
       await new Promise(resolve => setTimeout(resolve, 500));

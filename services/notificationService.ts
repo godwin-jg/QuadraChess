@@ -6,7 +6,7 @@
 interface Notification {
   id: string;
   message: string;
-  type: 'info' | 'warning' | 'error' | 'success';
+  type: 'info' | 'warning' | 'error' | 'success' | 'betrayal';
   duration: number;
 }
 
@@ -24,7 +24,7 @@ class NotificationService {
   /**
    * Show notification
    */
-  show(message: string, type: 'info' | 'warning' | 'error' | 'success' = 'info', duration = 2000) {
+  show(message: string, type: 'info' | 'warning' | 'error' | 'success' | 'betrayal' = 'info', duration = 2000) {
     const id = `notif-${Date.now()}-${Math.random()}`;
     const notification: Notification = { id, message, type, duration };
     

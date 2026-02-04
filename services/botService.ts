@@ -659,7 +659,11 @@ const buildEnPassantMask = (targets: EnPassantTarget[]): bigint => {
 
 // ✅ BITBOARD ONLY: Ensure occupancy, attack maps, and checks are consistent
 const syncStateForSearch = (state: GameState): GameState => {
-  const pieces = state.bitboardState.pieces;
+  // ✅ CRITICAL: Deep copy pieces to prevent any reference issues
+  const pieces: Record<string, bigint> = {};
+  Object.entries(state.bitboardState.pieces).forEach(([code, bb]) => {
+    pieces[code] = bb;
+  });
 
   // Rebuild occupancy + color bitboards from pieces
   let occupancy = 0n;
@@ -676,7 +680,8 @@ const syncStateForSearch = (state: GameState): GameState => {
   // Rebuild en passant mask from targets
   const enPassantMask = buildEnPassantMask(state.enPassantTargets || []);
 
-  // Rebuild attack maps from pieces/occupancy (critical for correct check detection)
+  // ✅ CRITICAL: Rebuild attack maps from FRESH pieces/occupancy
+  // This ensures attack maps reflect the current board position, not cached values
   const nextAttackMaps = {
     r: state.eliminatedPlayers.includes("r") ? 0n : generateAttackMap("r", pieces, occupancy),
     b: state.eliminatedPlayers.includes("b") ? 0n : generateAttackMap("b", pieces, occupancy),
@@ -688,6 +693,7 @@ const syncStateForSearch = (state: GameState): GameState => {
     ...state,
     bitboardState: {
       ...state.bitboardState,
+      pieces, // Use the copied pieces
       allPieces: occupancy,
       occupancy,
       enPassantTarget: enPassantMask,
@@ -698,8 +704,23 @@ const syncStateForSearch = (state: GameState): GameState => {
       attackMaps: nextAttackMaps,
     },
   };
+  
+  // ✅ CRITICAL: Recalculate check status from FRESH attack maps
   const nextCheckStatus = updateAllCheckStatus(nextState);
   const nextPinnedMask = getPinnedPiecesMask(nextState, nextState.currentPlayerTurn);
+
+  // ✅ DEBUG: Verify check status matches original if it was set
+  const originalCheckStatus = state.checkStatus;
+  TURN_ORDER.forEach((color) => {
+    if (!state.eliminatedPlayers.includes(color)) {
+      const originalCheck = originalCheckStatus[color as keyof typeof originalCheckStatus];
+      const newCheck = nextCheckStatus[color as keyof typeof nextCheckStatus];
+      if (originalCheck !== newCheck) {
+        // This is a warning, not an error - the recalculated value should be authoritative
+        console.warn(`[syncStateForSearch] Check status changed for ${color}: was ${originalCheck}, now ${newCheck}`);
+      }
+    }
+  });
 
   return {
     ...nextState,
@@ -1416,6 +1437,17 @@ const getAllLegalMoves = (
     // Return empty - this is a bug, don't generate wrong moves
     recordTime("getAllLegalMoves", fnStart);
     return [];
+  }
+
+  // ✅ CRITICAL: Check if player is in check - all moves MUST escape check
+  const isInCheck = gameState.checkStatus[playerColor as keyof typeof gameState.checkStatus];
+  if (isInCheck) {
+    // Verify check status matches reality by checking attack maps
+    const { isKingInCheck: verifyCheck } = require("../src/logic/bitboardLogic");
+    const actuallyInCheck = verifyCheck(playerColor, gameState);
+    if (!actuallyInCheck) {
+      console.error(`[BOT BUG] getAllLegalMoves: checkStatus=${isInCheck} but isKingInCheck=${actuallyInCheck} for ${playerColor}`);
+    }
   }
 
   for (const [pieceCode, bb] of Object.entries(pieces)) {
@@ -2233,8 +2265,26 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     return;
   }
 
+  // ✅ CRITICAL FIX: Get FRESH state from store IMMEDIATELY before processing
+  // This ensures we have the most up-to-date position after any opponent moves
   const baseState = store.getState().game;
+  
+  // ✅ CRITICAL: Verify it's actually this bot's turn BEFORE syncing
+  // This catches race conditions where the turn changed since scheduling
+  if (baseState.currentPlayerTurn !== botColor) {
+    console.warn(`[BOT] ${botColor} was scheduled but it's now ${baseState.currentPlayerTurn}'s turn, skipping`);
+    return;
+  }
+
   const gameState = syncStateForSearch(baseState);
+
+  // ✅ CRITICAL: Double-check currentPlayerTurn after sync
+  if (gameState.currentPlayerTurn !== botColor) {
+    console.error(`[BOT BUG] syncStateForSearch changed turn from ${botColor} to ${gameState.currentPlayerTurn}`);
+    return;
+  }
+
+  const gameStateHash = getZobristHash(gameState);
 
   if (!canBotStartTurn(gameState, botColor)) {
     return;
@@ -2253,11 +2303,32 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     delete killerMovesByDepth[Number(key)];
   });
 
-  // ✅ FIX: Clear TT when bot is in check to ensure fresh check escape calculations
-  // Stale TT entries can cause invalid moves to be returned
+  // ✅ CRITICAL FIX: Always clear TT and history table at start of each bot move
+  // This prevents stale entries from previous positions from affecting move selection
+  // The TT might contain moves that were valid in a previous position but are now illegal
+  // (e.g., a move that doesn't escape check when the bot is now in check)
+  transpositionTable.clear();
+  clearHistoryTable();
+
+  // ✅ Verify check status is correctly calculated
   const botInCheck = gameState.checkStatus[botColor as keyof typeof gameState.checkStatus];
+  
+  // ✅ CRITICAL: Double-verify check status by recalculating from attack maps
+  // This catches any potential inconsistency between checkStatus and actual position
+  const { isKingInCheck: verifyKingInCheck } = require("../src/logic/bitboardLogic");
+  const actuallyInCheck = verifyKingInCheck(botColor, gameState);
+  
+  if (botInCheck !== actuallyInCheck) {
+    console.error(`[BOT BUG] Check status mismatch for ${botColor}: checkStatus=${botInCheck}, actual=${actuallyInCheck}`);
+    // Force recalculation by creating fresh state
+    const freshState = syncStateForSearch(store.getState().game);
+    if (freshState.checkStatus[botColor as keyof typeof freshState.checkStatus] !== actuallyInCheck) {
+      console.error(`[BOT BUG] Still mismatched after re-sync!`);
+    }
+  }
+  
   if (botInCheck) {
-    transpositionTable.clear();
+    console.log(`[BOT] ${botColor.toUpperCase()} is in check - must find escape move`);
   }
 
   const timingLabel = `bot-move-${botColor}-${Date.now()}`;
@@ -2397,6 +2468,21 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     }
   }
 
+  const latestBaseState = store.getState().game;
+  const latestSearchState = syncStateForSearch(latestBaseState);
+  const latestHash = getZobristHash(latestSearchState);
+
+  if (latestHash !== gameStateHash) {
+    clearTimeout(moveTimeout);
+    botMoveInProgress = false;
+    endTiming("state-changed");
+
+    if (canBotStartTurn(latestSearchState, botColor) && retryCount < MAX_BOT_RETRIES) {
+      setTimeout(() => makeBotMove(botColor, retryCount + 1), 50);
+    }
+    return;
+  }
+
   // ✅ DEBUG: Log chosen move details to diagnose invalid-piece issues
   if (chosenMove) {
     // ✅ BITBOARD ONLY: Read from bitboards
@@ -2457,8 +2543,9 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
 
   // Re-validate move at execution time to ensure it's still legal
   const currentGameState = store.getState().game;
+  const currentSearchState = syncStateForSearch(currentGameState);
   // ✅ BITBOARD ONLY: Read from bitboards
-  const pieceCode = getPieceAtFromBitboard(currentGameState.bitboardState.pieces, chosenMove.from.row, chosenMove.from.col);
+  const pieceCode = getPieceAtFromBitboard(currentSearchState.bitboardState.pieces, chosenMove.from.row, chosenMove.from.col);
 
   if (!pieceCode || pieceCode[0] !== botColor) {
     clearTimeout(moveTimeout);
@@ -2481,7 +2568,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
   }
 
   // Check if it's still this bot's turn
-  if (currentGameState.currentPlayerTurn !== botColor) {
+  if (currentSearchState.currentPlayerTurn !== botColor) {
     clearTimeout(moveTimeout);
     botMoveInProgress = false;
     endTiming("turn-mismatch");
@@ -2494,7 +2581,7 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
     pieceCode,
     chosenMove.from,
     { row: chosenMove.to.row, col: chosenMove.to.col },
-    currentGameState
+    currentSearchState
   );
 
   if (!moveStillValid) {
@@ -2515,6 +2602,32 @@ const makeBotMove = (botColor: string, retryCount: number = 0) => {
       store.dispatch(resignGame(botColor));
     }
     return;
+  }
+
+  // ✅ CRITICAL FIX: If in check, verify this move actually escapes check
+  // Simulate the move and check if the king is still in check after
+  const currentlyInCheck = currentSearchState.checkStatus[botColor as keyof typeof currentSearchState.checkStatus];
+  if (currentlyInCheck) {
+    const simulatedState = simulateMoveBitboard(currentSearchState, chosenMove);
+    const stillInCheckAfter = simulatedState.checkStatus[botColor as keyof typeof simulatedState.checkStatus];
+    
+    if (stillInCheckAfter) {
+      clearTimeout(moveTimeout);
+      botMoveInProgress = false;
+      endTiming("move-doesnt-escape-check");
+      
+      console.error(`[BOT BUG] ${botColor} chose move that doesn't escape check: ${chosenMove.pieceCode} from (${chosenMove.from.row},${chosenMove.from.col}) to (${chosenMove.to.row},${chosenMove.to.col})`);
+      transpositionTable.clear();
+      
+      // Retry with fresh state
+      if (currentGameState.currentPlayerTurn === botColor && retryCount < MAX_BOT_RETRIES) {
+        setTimeout(() => makeBotMove(botColor, retryCount + 1), 50);
+      } else if (currentGameState.currentPlayerTurn === botColor) {
+        console.warn(`Bot ${botColor} cannot find move to escape check, forcing resignation`);
+        store.dispatch(resignGame(botColor));
+      }
+      return;
+    }
   }
 
   // Execute the chosen move - handle different game modes

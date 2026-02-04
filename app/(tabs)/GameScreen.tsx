@@ -48,15 +48,12 @@ import Animated, {
   Easing,
 } from "react-native-reanimated";
 
-const PLAYER_NAMES: Record<string, string> = {
+const PLAYER_COLOR_LABELS: Record<string, string> = {
   r: "Red",
   b: "Blue",
   y: "Purple",
   g: "Green",
 };
-
-const getPlayerName = (playerColor: string) =>
-  PLAYER_NAMES[playerColor] ?? "Unknown";
 
 export default function GameScreen() {
   // Get dispatch function
@@ -304,6 +301,8 @@ export default function GameScreen() {
     if (!lastMove && history.length === 0) {
       gameReadyRef.current = false;
       gameFlowSend({ type: "RESET" });
+      // Reset menu toggle to default (player info view) on new game
+      setIsUtilityMode(false);
     }
   }, [lastMove, history.length, gameFlowSend]);
 
@@ -471,6 +470,9 @@ export default function GameScreen() {
       introCountdownIntervalRef.current = null;
     }
     setIntroCountdown(null);
+    // ✅ Also clear localPlayerColor to prevent countdown from triggering on stale data
+    lastStablePlayerColorRef.current = null;
+    setLocalPlayerColor(null);
     // Hide board until the correct perspective is ready
     boardOpacity.value = 0;
     boardScale.value = 0.95;
@@ -506,7 +508,8 @@ export default function GameScreen() {
       return;
     }
 
-    if (!hasShownInitialPerspectiveRef.current && targetPlayerColor) {
+    // ✅ Only show countdown for online/P2P modes - not for solo/single player
+    if (!hasShownInitialPerspectiveRef.current && targetPlayerColor && (isOnlineMode || isP2PMode)) {
       hasShownInitialPerspectiveRef.current = true;
       pendingPerspectiveRef.current = targetPerspective;
       // Keep the previous board visible during the countdown
@@ -640,6 +643,21 @@ export default function GameScreen() {
   }, [justEliminated, dispatch, gameMode, gameId]);
 
 
+  // Get player name from gamePlayers, fallback to color label
+  const getPlayerName = useCallback((playerColor: string) => {
+    const player = gamePlayers.find(p => p.color === playerColor);
+    return player?.name || PLAYER_COLOR_LABELS[playerColor] || "Unknown";
+  }, [gamePlayers]);
+
+  // Check if a player is disconnected (online mode only)
+  const isPlayerDisconnected = useCallback((playerColor: string) => {
+    if (!isOnlineMode) return false;
+    const player = gamePlayers.find(p => p.color === playerColor);
+    if (!player) return false;
+    if (player.isBot) return false;
+    return player.isOnline === false;
+  }, [gamePlayers, isOnlineMode]);
+
   // Determine notification message
   const getNotificationMessage = () => {
     if (justEliminated) {
@@ -660,50 +678,60 @@ export default function GameScreen() {
     () => [
       {
         name: getPlayerName("r"),
+        colorLabel: PLAYER_COLOR_LABELS["r"],
         color: "r",
         score: scores?.r || 0,
         capturedPieces: capturedPieces?.r || [],
         isCurrentTurn: displayTurn === "r",
         isEliminated: eliminatedPlayers?.includes("r") || false,
+        isDisconnected: isPlayerDisconnected("r"),
         timeMs: displayClocks?.r ?? clocks?.r ?? 0,
         isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.r ?? "A"}` : undefined,
       },
       {
         name: getPlayerName("b"),
+        colorLabel: PLAYER_COLOR_LABELS["b"],
         color: "b",
         score: scores?.b || 0,
         capturedPieces: capturedPieces?.b || [],
         isCurrentTurn: displayTurn === "b",
         isEliminated: eliminatedPlayers?.includes("b") || false,
+        isDisconnected: isPlayerDisconnected("b"),
         timeMs: displayClocks?.b ?? clocks?.b ?? 0,
         isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.b ?? "B"}` : undefined,
       },
       {
         name: getPlayerName("y"),
+        colorLabel: PLAYER_COLOR_LABELS["y"],
         color: "y",
         score: scores?.y || 0,
         capturedPieces: capturedPieces?.y || [],
         isCurrentTurn: displayTurn === "y",
         isEliminated: eliminatedPlayers?.includes("y") || false,
+        isDisconnected: isPlayerDisconnected("y"),
         timeMs: displayClocks?.y ?? clocks?.y ?? 0,
         isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.y ?? "A"}` : undefined,
       },
       {
         name: getPlayerName("g"),
+        colorLabel: PLAYER_COLOR_LABELS["g"],
         color: "g",
         score: scores?.g || 0,
         capturedPieces: capturedPieces?.g || [],
         isCurrentTurn: displayTurn === "g",
         isEliminated: eliminatedPlayers?.includes("g") || false,
+        isDisconnected: isPlayerDisconnected("g"),
         timeMs: displayClocks?.g ?? clocks?.g ?? 0,
         isTimerDisabled: isSoloMode,
         teamLabel: teamMode ? `Team ${teamAssignments?.g ?? "B"}` : undefined,
       },
     ],
     [
+      getPlayerName,
+      isPlayerDisconnected,
       scores,
       capturedPieces,
       displayTurn,
@@ -878,7 +906,7 @@ export default function GameScreen() {
         duration={3000}
       />
 
-      {/* Game Over Modal (for final game end) */}
+      {/* Game Over Modal (for final game end) - includes confetti celebration */}
       {gameStatus === "finished" && (
         <GameOverModal
           status={gameStatus}

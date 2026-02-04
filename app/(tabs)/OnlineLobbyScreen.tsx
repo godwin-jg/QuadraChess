@@ -573,6 +573,15 @@ const OnlineLobbyScreen: React.FC = () => {
     const playerCount = validPlayers.length;
     const isFull = playerCount >= (item.maxPlayers || 4);
 
+    // Extract time control from game state
+    const baseMs = item.gameState?.timeControl?.baseMs ?? 5 * 60 * 1000;
+    const incrementMs = item.gameState?.timeControl?.incrementMs ?? 0;
+    const baseMinutes = Math.round(baseMs / (60 * 1000));
+    const incrementSeconds = Math.round(incrementMs / 1000);
+    const timeControlLabel = incrementSeconds > 0 
+      ? `${baseMinutes}+${incrementSeconds}` 
+      : `${baseMinutes} min`;
+
     return (
       <TouchableOpacity
         key={item.id || `game-${index}`}
@@ -597,7 +606,7 @@ const OnlineLobbyScreen: React.FC = () => {
         disabled={isLoading || isFull}
       >
         <View className="flex-row justify-between items-center">
-          <View>
+          <View className="flex-1">
             <Text className={`text-lg font-bold ${isFull ? "text-gray-400" : "text-white"}`}>
               {item.hostName}'s Game
             </Text>
@@ -608,6 +617,9 @@ const OnlineLobbyScreen: React.FC = () => {
           <View className="items-end">
             <Text className={`text-sm ${isFull ? "text-red-400" : "text-green-400"}`}>
               {isFull ? "Full" : "Available"}
+            </Text>
+            <Text className="text-gray-400 text-xs mt-0.5">
+              {timeControlLabel}
             </Text>
           </View>
         </View>

@@ -20,6 +20,7 @@ interface UseMoveExecutionOptions {
   enPassantTargets: any[];
   abortPendingDrop: () => void;
   botPlayers?: string[];
+  premoveEnabled?: boolean;
 }
 
 interface UseMoveExecutionReturn {
@@ -41,6 +42,7 @@ export function useMoveExecution({
   enPassantTargets,
   abortPendingDrop,
   botPlayers = [],
+  premoveEnabled = true,
 }: UseMoveExecutionOptions): UseMoveExecutionReturn {
   const dispatch = useDispatch();
   const players = useSelector((state: RootState) => state.game.players);
@@ -119,10 +121,13 @@ export function useMoveExecution({
           return;
         }
         
-        // If it's not your turn, set as premove instead of executing
+        // If it's not your turn, set as premove instead of executing (if enabled)
         if (currentPlayerColor !== currentPlayerTurn) {
-          dispatch(setPremove({ from, to, pieceCode: pieceToMove }));
-          notificationService.show("Premove set", "info", 1000);
+          console.log('[Premove] premoveEnabled:', premoveEnabled);
+          if (premoveEnabled) {
+            dispatch(setPremove({ from, to, pieceCode: pieceToMove }));
+            notificationService.show("Premove set", "info", 1000);
+          }
           abortPendingDrop();
           return;
         }
@@ -205,6 +210,7 @@ export function useMoveExecution({
       effectiveMode,
       enPassantTargets,
       gameStatus,
+      premoveEnabled,
     ]
   );
 

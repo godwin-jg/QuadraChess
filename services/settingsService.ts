@@ -54,6 +54,7 @@ export interface UserSettings {
     botTeamMode: boolean; // If true, all bots cooperate against human
     tapToMoveEnabled: boolean;
     dragToMoveEnabled: boolean;
+    premoveEnabled: boolean; // Allow queueing moves before your turn in online/p2p
   };
   accessibility: {
     highContrast: boolean;
@@ -92,6 +93,7 @@ const DEFAULT_SETTINGS: UserSettings = {
     botTeamMode: false, // Default: bots play independently
     tapToMoveEnabled: true,
     dragToMoveEnabled: true,
+    premoveEnabled: true, // Default: allow premoves in online/p2p
   },
   accessibility: {
     highContrast: false,
@@ -145,6 +147,7 @@ export class SettingsService {
           developer: {
             ...DEFAULT_SETTINGS.developer,
             ...(parsed.developer || {}),
+            soloMode: false, // Force reset: soloMode should always start disabled
           },
         };
       }

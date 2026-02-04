@@ -394,6 +394,11 @@ class P2PService {
 
       console.log("P2PService: Advertising game with gameId:", currentGameId);
 
+      // Get time control from Redux store
+      const timeControl = store.getState().game.timeControl;
+      const baseMinutes = Math.round(timeControl.baseMs / (60 * 1000));
+      const incrementSeconds = Math.round(timeControl.incrementMs / 1000);
+
       await networkAdvertiserService.startAdvertising({
         gameId: currentGameId,
         gameName: `${hostName}'s Game`,
@@ -406,6 +411,8 @@ class P2PService {
         maxPlayers: 4,
         status: "waiting",
         timestamp: Date.now(), // Add current timestamp
+        baseMinutes,
+        incrementSeconds,
       });
       console.log("P2PService: Game advertised on local network with zeroconf");
     } catch (error) {
@@ -1514,6 +1521,10 @@ class P2PService {
       };
     }
     store.dispatch(setTimeControl({ baseMs, incrementMs }));
+    // Update advertisement with new time control
+    const baseMinutes = Math.round(baseMs / (60 * 1000));
+    const incrementSeconds = Math.round(incrementMs / 1000);
+    networkAdvertiserService.updateAdvertisement({ baseMinutes, incrementSeconds });
     // Sync to clients
     this.syncLobbyStateToClients();
   }

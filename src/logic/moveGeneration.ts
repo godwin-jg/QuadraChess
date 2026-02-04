@@ -561,23 +561,54 @@ export const getValidMovesBB = (
     }
   }
 
+  // ✅ CRITICAL: Verify check status matches actual attack maps
+  // This catches cases where checkStatus is stale or inconsistent
+  const checkStatusSaysInCheck = state.checkStatus[pieceColor as "r" | "b" | "y" | "g"];
+  const kingBB = state.bitboardState.pieces[`${pieceColor}K`] ?? 0n;
+  let actuallyInCheck = false;
+  
+  if (kingBB !== 0n) {
+    // Quick check: is king square attacked by any enemy?
+    const enemyColors = turnOrder.filter(
+      (c) => c !== pieceColor && !state.eliminatedPlayers.includes(c)
+    );
+    for (const enemy of enemyColors) {
+      const enemyAttacks = state.bitboardState.attackMaps[enemy as "r" | "b" | "y" | "g"] ?? 0n;
+      if ((kingBB & enemyAttacks) !== 0n) {
+        actuallyInCheck = true;
+        break;
+      }
+    }
+  }
+
+  // Use the more conservative check (if either says in check, treat as in check)
+  const inCheck = checkStatusSaysInCheck || actuallyInCheck;
+  
+  // Warn about inconsistencies (but still proceed with correct behavior)
+  if (checkStatusSaysInCheck !== actuallyInCheck) {
+    const isSimulation = state.lastMove?.timestamp === 0;
+    if (!isSimulation) {
+      console.warn(`[moveGeneration] Check status mismatch for ${pieceColor}: checkStatus=${checkStatusSaysInCheck}, actual=${actuallyInCheck}`);
+    }
+  }
+
   // ✅ FIX: Only apply checker mask to non-King pieces
   // The King can move to any safe square (already filtered in pseudo-legal)
   // Other pieces must block or capture the checker
-  if (state.checkStatus[pieceColor as "r" | "b" | "y" | "g"] && pieceCode[1] !== "K") {
+  if (inCheck && pieceCode[1] !== "K") {
     const checkerMask = getCheckerMask(state, pieceColor);
     if (checkerMask === 0n) {
       // Double check - only King can move
       return 0n;
     } else if (checkerMask === -1n) {
       // ✅ BUG FIX: checkStatus says in check but getCheckerMask found no checkers
-      // This can happen in simulated positions during bot search where checkStatus
-      // is stale. Be conservative and return no moves for safety.
-      // Only warn for actual game state (when it's this player's turn and not simulation)
+      // This indicates the attack maps might be stale - be conservative
       const isSimulation = state.lastMove?.timestamp === 0;
       if (!isSimulation && state.currentPlayerTurn === pieceColor) {
         console.warn(`[moveGeneration] Inconsistency: ${pieceColor} checkStatus=true but no checkers found`);
       }
+      // ✅ FIX: If actuallyInCheck is true but checkerMask is -1, there's a bug
+      // in getCheckerMask. For safety, allow no non-king moves.
       return 0n;
     } else {
       moves &= checkerMask;

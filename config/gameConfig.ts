@@ -90,6 +90,7 @@ export const NETWORK_CONFIG = {
   RECONNECT_DELAY: 1000,
   HEARTBEAT_INTERVAL: 30000,
   MOVE_TIMEOUT: 10000,
+  DISCONNECT_ELIMINATION_MS: 60000,
 } as const;
 
 // Bot configuration - different settings for single player vs other modes

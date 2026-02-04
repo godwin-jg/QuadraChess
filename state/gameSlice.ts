@@ -77,6 +77,11 @@ const getTeamColors = (assignments: GameState["teamAssignments"], teamId: TeamId
 
 const getOpposingTeam = (teamId: TeamId): TeamId => (teamId === "A" ? "B" : "A");
 
+const getColorName = (color: string): string => {
+  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+  return names[color] || color.toUpperCase();
+};
+
 // ✅ REMOVED: syncTeamClocks - each player now has individual clock
 // Team mode only affects elimination, not clock synchronization
 
@@ -481,6 +486,13 @@ const _applyMoveLogic = (
     // ✅ Read from bitboards, not array
     const capturedPawn = getPieceAtFromBitboard(state.bitboardState.pieces, capturedPos.row, capturedPos.col);
     if (capturedPawn) {
+      const capturedPawnColor = capturedPawn[0] as ClockColor;
+      
+      // Check if this is a teammate capture in team mode
+      const isTeammateCapture = state.teamMode && 
+        getTeamForColor(state.teamAssignments, playerColor as ClockColor) === 
+        getTeamForColor(state.teamAssignments, capturedPawnColor);
+      
       // ✅ BITBOARD ONLY: No array board update needed
       const victimIdx = capturedPos.row * 14 + capturedPos.col;
       const victimMask = squareBit(victimIdx);
@@ -494,13 +506,29 @@ const _applyMoveLogic = (
         state.capturedPieces[playerColor as keyof typeof state.capturedPieces] = [];
       }
       state.capturedPieces[playerColor as keyof typeof state.capturedPieces].push(capturedPawn);
-      state.scores[playerColor as keyof typeof state.scores] += 1;
+      
+      // Only award points if NOT a teammate capture
+      if (isTeammateCapture) {
+        // Show betrayal notification
+        try {
+          const notificationService = require('../services/notificationService').default;
+          notificationService.show(
+            `${getColorName(playerColor)} betrayed ${getColorName(capturedPawnColor)}!`,
+            "betrayal",
+            2500
+          );
+        } catch (e) {
+          // Ignore notification errors
+        }
+      } else {
+        state.scores[playerColor as keyof typeof state.scores] += 1;
+      }
     }
   }
 
   // Handle regular capture (only for non-castling moves and non-en passant captures)
   if (capturedPiece && !isCastling && !isEnPassant) {
-    const capturedColor = capturedPiece[0];
+    const capturedColor = capturedPiece[0] as ClockColor;
 
     // Skip if the "captured" piece belongs to an eliminated player (just visual)
     if (!state.eliminatedPlayers.includes(capturedColor)) {
@@ -509,16 +537,36 @@ const _applyMoveLogic = (
         return; // Don't make the move if trying to capture a king
       }
 
-      const capturingPlayer = playerColor;
+      const capturingPlayer = playerColor as ClockColor;
+      
+      // Check if this is a teammate capture in team mode
+      const isTeammateCapture = state.teamMode && 
+        getTeamForColor(state.teamAssignments, capturingPlayer) === 
+        getTeamForColor(state.teamAssignments, capturedColor);
+      
       if (!state.capturedPieces[capturingPlayer as keyof typeof state.capturedPieces]) {
         state.capturedPieces[capturingPlayer as keyof typeof state.capturedPieces] = [];
       }
       state.capturedPieces[capturingPlayer as keyof typeof state.capturedPieces].push(capturedPiece);
 
-      // Add points for captured piece
-      const capturedPieceType = capturedPiece[1];
-      const points = PIECE_VALUES[capturedPieceType as keyof typeof PIECE_VALUES] || 0;
-      state.scores[capturingPlayer as keyof typeof state.scores] += points;
+      // Add points for captured piece - BUT NOT if teammate capture in team mode
+      if (isTeammateCapture) {
+        // Show betrayal notification
+        try {
+          const notificationService = require('../services/notificationService').default;
+          notificationService.show(
+            `${getColorName(capturingPlayer)} betrayed ${getColorName(capturedColor)}!`,
+            "betrayal",
+            2500
+          );
+        } catch (e) {
+          // Ignore notification errors
+        }
+      } else {
+        const capturedPieceType = capturedPiece[1];
+        const points = PIECE_VALUES[capturedPieceType as keyof typeof PIECE_VALUES] || 0;
+        state.scores[capturingPlayer as keyof typeof state.scores] += points;
+      }
     }
     // Note: Moving onto eliminated piece's square - bitboard handles this automatically
   }
@@ -1057,9 +1105,12 @@ const gameSlice = createSlice({
         // For single player mode, always use the default bot configuration (Red is human, others are bots)
         // This ensures that "Play Again" always maintains the 1 vs 3 bots setup
         state.botPlayers = ['b', 'y', 'g'];
+        // ✅ Single player games start immediately - set to active
+        state.gameStatus = "active";
       } else if (currentGameMode === "p2p" || currentGameMode === "online") {
         // ✅ CRITICAL FIX: For P2P and Online modes, start with no bots - they will be set by the lobby/host
         // This prevents stale bot configurations from previous games
+        // Keep status as "waiting" until game starts from lobby
         state.botPlayers = [];
       } else {
         state.botPlayers = []; // Other modes have no bots
@@ -1148,40 +1199,27 @@ const gameSlice = createSlice({
       }
     },
     stepHistory: (state, action: PayloadAction<"back" | "previous" | "forward">) => {
-      console.log('stepHistory called:', {
-        action: action.payload,
-        currentViewingHistoryIndex: state.viewingHistoryIndex,
-        historyLength: state.history.length
-      });
-
       if (action.payload === "back") {
         // Start button: Always go to the first move (index 0) or back to live if already at first move
         if (state.viewingHistoryIndex === null) {
           // From live state: go to first move
           state.viewingHistoryIndex = 0;
-          console.log('Started viewing history at first move (index 0)');
         } else {
           // From any other move: go to first move
           state.viewingHistoryIndex = 0;
-          console.log('Went to first move from move:', state.viewingHistoryIndex);
         }
       } else if (action.payload === "previous" && state.viewingHistoryIndex === null) {
         // Go two steps back from live state (to the previous move)
         if (state.history.length > 0) {
           state.viewingHistoryIndex = state.history.length - 2;
-          console.log('Stepped previous from live state to move:', state.viewingHistoryIndex);
         }
       } else if (action.payload === "previous" && state.viewingHistoryIndex !== null && state.viewingHistoryIndex > 0) {
         // Go one step back in history
         state.viewingHistoryIndex--;
-        console.log('Stepped previous to index:', state.viewingHistoryIndex);
       } else if (action.payload === "forward" && state.viewingHistoryIndex !== null && state.viewingHistoryIndex < state.history.length - 1) {
         // Go one step forward in history
         state.viewingHistoryIndex++;
-        console.log('Stepped forward to index:', state.viewingHistoryIndex);
       }
-
-      console.log('Final viewingHistoryIndex:', state.viewingHistoryIndex);
     },
     returnToLive: (state) => {
       state.viewingHistoryIndex = null;
@@ -1573,12 +1611,12 @@ const gameSlice = createSlice({
 
       // ✅ CRITICAL: Also check if board state changed (elimination, timeout, etc.)
       // Compare eliminated players count - if changed, board needs recalculation
-      const eliminatedChanged = 
+      const eliminatedChanged =
         (state.eliminatedPlayers?.length ?? 0) !== (gameState.eliminatedPlayers?.length ?? 0);
-      
+
       // Check if turn changed without a move (can happen on timeout/resignation)
       const turnChangedWithoutMove = !isNewMove && state.currentPlayerTurn !== gameState.currentPlayerTurn;
-      
+
       // Need recalculation if move, elimination, or turn change
       const needsRecalculation = isNewMove || eliminatedChanged || turnChangedWithoutMove;
 

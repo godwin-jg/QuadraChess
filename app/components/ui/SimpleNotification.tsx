@@ -5,7 +5,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 
 interface SimpleNotificationProps {
   message: string;
-  type: 'info' | 'warning' | 'error' | 'success';
+  type: 'info' | 'warning' | 'error' | 'success' | 'betrayal';
   onComplete: () => void;
 }
 
@@ -46,6 +46,8 @@ const SimpleNotification: React.FC<SimpleNotificationProps> = ({
         return { backgroundColor: 'rgba(245, 158, 11, 0.9)', color: '#FFFFFF' };
       case 'error':
         return { backgroundColor: 'rgba(239, 68, 68, 0.9)', color: '#FFFFFF' };
+      case 'betrayal':
+        return { backgroundColor: 'rgba(168, 85, 247, 0.95)', color: '#FFFFFF' }; // Purple for betrayal
       default:
         return { backgroundColor: 'rgba(59, 130, 246, 0.9)', color: '#FFFFFF' };
     }

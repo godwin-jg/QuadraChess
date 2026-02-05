@@ -1,5 +1,9 @@
 {
   "rules": {
+    "appConfig": {
+      ".read": true,
+      ".write": false
+    },
     "games": {
       ".read": "auth != null",
       ".write": "auth != null",

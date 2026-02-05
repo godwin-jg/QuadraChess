@@ -42,8 +42,8 @@ export function useBoardSoundEffects({
       return;
     }
 
-    // Create a unique key for this move to detect duplicates
-    const moveKey = `${lastMove.from.row},${lastMove.from.col}-${lastMove.to.row},${lastMove.to.col}-${lastMove.timestamp}`;
+    // Create a unique key for this move to detect duplicates (no timestamp - consistent with optimistic updates)
+    const moveKey = `${lastMove.from.row}-${lastMove.from.col}-${lastMove.to.row}-${lastMove.to.col}-${lastMove.pieceCode}-${lastMove.playerColor}`;
     
     // Skip if we already played sound for this exact move
     if (lastPlayedMoveRef.current === moveKey) {

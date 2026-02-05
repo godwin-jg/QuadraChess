@@ -5,6 +5,8 @@ import networkService from "../app/services/networkService";
 import { botService } from "./botService";
 import { resetGame } from "../state/gameSlice";
 import { store } from "../state/store";
+import { resetAnimatorState } from "../app/components/board/SkiaMoveAnimator";
+import { resetOrchestrationState } from "../app/components/board/useBoardAnimationOrchestration";
 
 export interface ModeSwitchOptions {
   currentMode: "online" | "local" | "solo" | "single" | "p2p";
@@ -171,6 +173,13 @@ class ModeSwitchService {
 
       // ✅ CRITICAL FIX: Cancel all bot moves before disconnecting
       botService.cancelAllBotMoves();
+      
+      // ✅ MEMORY OPTIMIZATION: Clear bot memory (transposition table, history, killer moves)
+      botService.cleanupBotMemory();
+
+      // ✅ ANIMATION FIX: Reset animation state to prevent stale animators
+      resetAnimatorState();
+      resetOrchestrationState();
 
       // ✅ CRITICAL FIX: Reset game state when switching modes
       store.dispatch(resetGame());

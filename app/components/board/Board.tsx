@@ -5,7 +5,7 @@ import { useDispatch, useSelector } from "react-redux";
 import Animated, {
   withTiming,
   withSpring,
-  runOnUI
+  runOnUI,
 } from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { useSettings } from "../../../context/SettingsContext";
@@ -38,7 +38,6 @@ import type { MoveInfo, Position } from "../../../types";
 import {
   DRAG_OFFSET_Y,
   SNAP_RING_RADIUS_RATIO,
-  DEBOUNCE_DELAY,
 } from "./boardConstants";
 import BoardGlowSVG from "./BoardGlowSVG";
 import BoardOverlayCanvas from "./BoardOverlayCanvas";
@@ -296,6 +295,7 @@ export default function Board({
     handleAnimationCompleteUI,
     clearActiveAnimationPlan,
     skipNextAnimationRef,
+    activeMaskIndicesValue,
   } = useBoardAnimationOrchestration({
     displayBoardState,
     lastMove,
@@ -306,6 +306,7 @@ export default function Board({
     gameFlowSend,
     visibilityMask,
     animationRunning,
+    uiState,
   });
 
   const dragValidMoveMap = useMemo(() => {
@@ -360,14 +361,17 @@ export default function Board({
         return;
       }
       const localPlayerColor = currentPlayerColorRef.current;
+      const isOnlineMode = effectiveMode === "online" || effectiveMode === "p2p";
       const allowPremoveDuringAnimation =
-        (effectiveMode === "online" || effectiveMode === "p2p") &&
+        isOnlineMode &&
         localPlayerColor &&
         currentPlayerTurn !== localPlayerColor;
       const canBypassFlowBlock =
         allowPremoveDuringAnimation && (isFlowAnimating || animationRunning.value === 1);
+      // In online mode, always allow drag start for instant piece selection
+      const canBypassForSelection = isOnlineMode && localPlayerColor;
 
-      if ((!isFlowReady || animationRunning.value === 1) && !canBypassFlowBlock) {
+      if ((!isFlowReady || animationRunning.value === 1) && !canBypassFlowBlock && !canBypassForSelection) {
         resetUiState();
         return;
       }
@@ -530,6 +534,7 @@ export default function Board({
     if (ENABLE_DRAG_PERF_LOG) {
       perfRef.current.cancelCount += 1;
     }
+    // Clear dragState first so the dragged piece disappears
     if (dragState) {
       setDragState(null);
     }
@@ -613,9 +618,6 @@ export default function Board({
 
   // Helper functions are imported from boardHelpers.ts
 
-  // Debouncing for piece selection to prevent rapid clicking
-  const lastClickTime = useRef<number>(0);
-
   // Move execution hook - handles online, P2P, and local moves
   const { executeMoveFrom, currentPlayerColor } = useMoveExecution({
     effectiveMode,
@@ -630,6 +632,16 @@ export default function Board({
   React.useEffect(() => {
     currentPlayerColorRef.current = currentPlayerColor;
   }, [currentPlayerColor]);
+
+  // ✅ MEMORY OPTIMIZATION: Cleanup timeout on unmount
+  React.useEffect(() => {
+    return () => {
+      if (suppressTapTimeoutRef.current) {
+        clearTimeout(suppressTapTimeoutRef.current);
+        suppressTapTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Premove execution - when it becomes your turn, execute pending premove
   React.useEffect(() => {
@@ -703,6 +715,10 @@ export default function Board({
       (m) => m.row === premove.to.row && m.col === premove.to.col
     );
     
+    // Skip animation for premoves (user already "saw" the move when setting the premove)
+    markSkipNextMoveAnimation();
+    skipNextAnimationRef.current = true;
+    
     premovePendingRef.current = premove;
     executeMoveFrom(premove.from, premove.to, moveInfo);
   }, [
@@ -722,14 +738,19 @@ export default function Board({
 
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
+    const isOnlineMode = effectiveMode === "online" || effectiveMode === "p2p";
     const allowPremoveDuringAnimation =
-      (effectiveMode === "online" || effectiveMode === "p2p") &&
+      isOnlineMode &&
       currentPlayerColor &&
       currentPlayerTurn !== currentPlayerColor;
     const canBypassFlowBlock =
       allowPremoveDuringAnimation && (isFlowAnimating || animationRunning.value === 1);
 
-    if ((!isFlowReady || animationRunning.value === 1) && !canBypassFlowBlock) {
+    // In online mode, always allow piece selection regardless of animation state
+    // This makes selection and valid move display instant
+    const canBypassForSelection = isOnlineMode && currentPlayerColor;
+
+    if ((!isFlowReady || animationRunning.value === 1) && !canBypassFlowBlock && !canBypassForSelection) {
       return;
     }
     if (dragState || suppressTapRef.current) {
@@ -746,12 +767,6 @@ export default function Board({
       return;
     }
 
-    // Debounce rapid clicks
-    const now = Date.now();
-    if (now - lastClickTime.current < DEBOUNCE_DELAY) {
-      return;
-    }
-    lastClickTime.current = now;
     // If we're viewing history, don't allow any moves
     if (isViewingHistory) {
       return;
@@ -854,6 +869,10 @@ export default function Board({
       const from = { row: fromRow, col: fromCol };
       const to = { row: toRow, col: toCol };
 
+      // Clear the outer snap ring immediately on commit
+      dragHoverRef.current = null;
+      setDragHover(null);
+
       const pieceAtFrom = displayBoardState?.[fromRow]?.[fromCol];
       if (pieceAtFrom) {
         pendingDropRef.current = { from, to, piece: pieceAtFrom };
@@ -891,6 +910,7 @@ export default function Board({
     onCursorChange,
     onSnapKeyChange,
     visibilityMask,
+    activeMaskIndicesValue,
     clearMask,
     setPanStart,
     startDragFromPan,
@@ -1069,32 +1089,31 @@ export default function Board({
         {/* Optimistic UI: show piece at target immediately after drop */}
         {/* REMOVED LENS VIEW */}
 
-        {effectivePlan && !dragState && (
-          USE_SKIA_ANIMATIONS ? (
-            <SkiaMoveAnimator
-              key={animationKey ?? "skia-move-animator"}
-              plan={effectivePlan}
-              piecesMap={animationPiecesMap}
-              movePieceOverrides={movePieceOverrides}
-              squareSize={squareSize}
-              viewerColor={viewerColor}
-              onComplete={handleAnimationComplete}
-              onCompleteUI={handleAnimationCompleteUI}
-              animationRunning={animationRunning}
-            />
-          ) : (
-            <MoveAnimator
-              key={animationKey ?? "move-animator"}
-              plan={effectivePlan}
-              piecesMap={animationPiecesMap}
-              movePieceOverrides={movePieceOverrides}
-              squareSize={squareSize}
-              viewerColor={viewerColor}
-              onComplete={handleAnimationComplete}
-              onCompleteUI={handleAnimationCompleteUI}
-              animationRunning={animationRunning}
-            />
-          )
+        {/* Always render animator to preserve planKey counter and avoid remount issues */}
+        {USE_SKIA_ANIMATIONS ? (
+          <SkiaMoveAnimator
+            key="skia-move-animator"
+            plan={dragState ? null : effectivePlan}
+            piecesMap={animationPiecesMap}
+            movePieceOverrides={movePieceOverrides}
+            squareSize={squareSize}
+            viewerColor={viewerColor}
+            onComplete={handleAnimationComplete}
+            onCompleteUI={handleAnimationCompleteUI}
+            animationRunning={animationRunning}
+          />
+        ) : (
+          <MoveAnimator
+            key="move-animator"
+            plan={dragState ? null : effectivePlan}
+            piecesMap={animationPiecesMap}
+            movePieceOverrides={movePieceOverrides}
+            squareSize={squareSize}
+            viewerColor={viewerColor}
+            onComplete={handleAnimationComplete}
+            onCompleteUI={handleAnimationCompleteUI}
+            animationRunning={animationRunning}
+          />
         )}
 
         {/* 🎯 Capture Animation Layer - DISABLED */}

@@ -10,6 +10,7 @@ import { getRookCastlingCoords, getRookIdentifier, isCastlingMove, updateAllChec
 import p2pGameService from './p2pGameService';
 import { PIECE_VALUES, TURN_ORDER, getBotConfig } from '../config/gameConfig';
 import { hasAnyLegalMoves } from "../src/logic/gameLogic";
+import { getGameFlowSnapshot } from "./gameFlowService";
 
 // Global lock to prevent multiple bots from moving simultaneously
 let botMoveInProgress = false;
@@ -2136,6 +2137,13 @@ const canBotStartTurn = (gameState: GameState, botColor: string): boolean => {
   if (gameState.promotionState.isAwaiting) return false;
   if (gameState.currentPlayerTurn !== botColor) return false;
   if (gameState.eliminatedPlayers.includes(botColor)) return false;
+  
+  // ✅ FIX: Don't start bot turn while animation is in progress
+  const flowSnapshot = getGameFlowSnapshot();
+  const flowState = flowSnapshot?.value;
+  if (flowState === "animating") return false;
+  if (flowState === "awaitingPromotion") return false;
+  
   return true;
 };
 
@@ -2689,6 +2697,31 @@ const handleBotPromotion = (botColor: string) => {
   return false;
 };
 
+/**
+ * ✅ MEMORY OPTIMIZATION: Clear all accumulated data structures
+ * Call this when starting a new game or when game ends to prevent memory buildup
+ */
+const cleanupBotMemory = () => {
+  // Clear transposition table
+  transpositionTable.clear();
+  
+  // Clear killer moves
+  Object.keys(killerMovesByDepth).forEach((key) => {
+    delete killerMovesByDepth[Number(key)];
+  });
+  
+  // Clear history table
+  clearHistoryTable();
+  
+  // Reset debug timers
+  resetDebugTimers();
+  
+  // Release the bot move lock
+  botMoveInProgress = false;
+  
+  console.log("[BOT] Memory cleanup complete - cleared TT, killer moves, history table");
+};
+
 export const botService = {
   makeBotMove,
   handleBotPromotion,
@@ -2697,4 +2730,9 @@ export const botService = {
     // since local bots don't use persistent processing flags
     console.log("BotService: All bot moves cancelled");
   },
+  /**
+   * ✅ MEMORY OPTIMIZATION: Call when game ends or new game starts
+   * Clears transposition table, killer moves, history table
+   */
+  cleanupBotMemory,
 };

@@ -11,6 +11,8 @@ class SoundService {
   private isInitialized = false;
   private playingLocks: Map<string, boolean> = new Map();
   private lastHapticTime: number = 0;
+  // ✅ MEMORY OPTIMIZATION: Track pending timeouts to allow cleanup
+  private pendingTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
   private constructor() {}
   
@@ -153,9 +155,16 @@ class SoundService {
             }
           } finally {
             // Release lock after a short delay to prevent rapid re-triggering
-            setTimeout(() => {
+            // ✅ MEMORY OPTIMIZATION: Track timeout and clear previous if exists
+            const existingTimeout = this.pendingTimeouts.get(soundName);
+            if (existingTimeout) {
+              clearTimeout(existingTimeout);
+            }
+            const timeoutId = setTimeout(() => {
               this.playingLocks.set(soundName, false);
+              this.pendingTimeouts.delete(soundName);
             }, 50);
+            this.pendingTimeouts.set(soundName, timeoutId);
           }
           
           return;
@@ -282,6 +291,52 @@ class SoundService {
 
   public async playSuccessSound(): Promise<void> {
     await this.playSound('success');
+  }
+
+  /**
+   * ✅ MEMORY OPTIMIZATION: Clear all pending timeouts
+   * Call when cleaning up or when app is backgrounded
+   */
+  public clearPendingTimeouts(): void {
+    this.pendingTimeouts.forEach((timeout) => {
+      clearTimeout(timeout);
+    });
+    this.pendingTimeouts.clear();
+    this.playingLocks.clear();
+  }
+
+  /**
+   * ✅ MEMORY OPTIMIZATION: Unload all audio resources
+   * Call when the app is being destroyed or when memory is needed
+   */
+  public async unloadAllSounds(): Promise<void> {
+    // Clear pending timeouts first
+    this.clearPendingTimeouts();
+    
+    // Release all audio players
+    for (const [name, player] of this.sounds.entries()) {
+      try {
+        // Stop playback if playing
+        player.pause();
+        // Release the player (expo-audio doesn't have explicit release, but we remove reference)
+      } catch (error) {
+        console.warn(`Failed to unload sound ${name}:`, error);
+      }
+    }
+    
+    // Clear the sounds map to release references
+    this.sounds.clear();
+    this.isInitialized = false;
+    
+    console.log("[SOUND] All audio resources unloaded");
+  }
+
+  /**
+   * ✅ MEMORY OPTIMIZATION: Cleanup for game end/reset
+   * Clears timeouts and locks, but keeps sounds loaded for quick reuse
+   */
+  public cleanup(): void {
+    this.clearPendingTimeouts();
   }
 }
 

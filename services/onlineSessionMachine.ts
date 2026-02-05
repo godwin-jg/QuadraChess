@@ -86,10 +86,7 @@ class OnlineSessionMachine {
     }));
   }
 
-  private buildMoveKey(move: OnlineGameSnapshot["lastMove"]) {
-    if (!move) return null;
-    return `${move.playerColor}:${move.from.row},${move.from.col}->${move.to.row},${move.to.col}:${move.timestamp}`;
-  }
+  // Use buildMoveKey from gameFlowService instead (no timestamp, consistent across codebase)
 
   private startPresenceHeartbeat(gameId: string) {
     if (this.presenceHeartbeatInterval) return;
@@ -224,6 +221,12 @@ class OnlineSessionMachine {
     const resolvedVersion =
       typeof version === "number" ? version : store.getState().game.version ?? 0;
 
+    const incomingMoveKey = buildMoveKey(game.lastMove || null);
+    const isNewMoveForMachine = incomingMoveKey && incomingMoveKey !== this.lastMoveKey;
+    if (__DEV__ && isNewMoveForMachine) {
+      console.log('[OnlineSession] New move:', incomingMoveKey);
+    }
+
     store.dispatch(
       applyOnlineSnapshot({
         gameState: snapshotState,
@@ -232,24 +235,25 @@ class OnlineSessionMachine {
       })
     );
 
-    const moveKey = buildMoveKey(game.lastMove || null);
-    if (moveKey) {
+    // Send game flow event for genuinely new moves
+    if (isNewMoveForMachine) {
+      const shouldAnimate = !consumeSkipNextMoveAnimation();
+      if (__DEV__) console.log('[OnlineSession] sendGameFlowEvent MOVE_APPLIED shouldAnimate=', shouldAnimate);
       sendGameFlowEvent({
         type: "MOVE_APPLIED",
-        moveKey,
-        shouldAnimate: !consumeSkipNextMoveAnimation(),
+        moveKey: incomingMoveKey,
+        shouldAnimate,
       });
+      this.moveUpdateCallbacks.forEach((cb) => cb(game.lastMove));
+    }
+    // Update lastMoveKey to track what we've seen
+    if (incomingMoveKey) {
+      this.lastMoveKey = incomingMoveKey;
     }
 
     this.transition(
       snapshotState.promotionState?.isAwaiting ? "awaitingPromotion" : "active"
     );
-
-    const snapshotMoveKey = this.buildMoveKey(game.lastMove);
-    if (snapshotMoveKey && snapshotMoveKey !== this.lastMoveKey) {
-      this.lastMoveKey = snapshotMoveKey;
-      this.moveUpdateCallbacks.forEach((cb) => cb(game.lastMove));
-    }
 
     this.gameUpdateCallbacks.forEach((cb) => cb(game));
 

@@ -151,7 +151,11 @@ class OnlineBotService {
           console.warn("Failed to show bot elimination notification:", notificationError);
         }
 
-        await this.eliminateBot(gameId, botColor);
+        await realtimeDatabaseService.resolveNoLegalMoves(
+          gameId,
+          botColor,
+          isInCheck ? "checkmate" : "stalemate"
+        );
         return;
       }
 
@@ -431,6 +435,14 @@ class OnlineBotService {
         return; // Skip this bot move instead of throwing error
       }
 
+      if (error.code === 'database/disconnected' ||
+        error.message?.includes('disconnected')) {
+        // Firebase disconnected during transaction - this can happen due to network issues
+        // or app going to background. Just skip this move, bot will retry when reconnected.
+        console.log(`[BotDebug] disconnected - will retry when connection restored`);
+        return;
+      }
+
     } finally {
       clearTimeout(moveTimeout);
       this.botProcessingFlags.set(botColor, false);
@@ -513,99 +525,6 @@ class OnlineBotService {
     this.processBotMove(gameId, botColor, currentGameState, currentGameState.version ?? 0);
   }
 
-
-  // Auto-eliminate a checkmated bot
-  private async eliminateBot(gameId: string, botColor: string): Promise<void> {
-    const gameRef = ref(db, `games/${gameId}`);
-
-    let retryCount = 0;
-    const maxRetries = 3;
-    const baseDelay = 200; // 200ms base delay
-
-    while (retryCount < maxRetries) {
-      try {
-        const result = await runTransaction(gameRef, (gameData) => {
-          if (gameData === null) {
-            // Game not found during elimination
-            return null;
-          }
-
-          // ✅ CRITICAL FIX: Check if gameState exists
-          if (!gameData.gameState) {
-            // Game has no gameState during elimination
-            return gameData;
-          }
-
-          // Initialize eliminatedPlayers if it doesn't exist
-          if (!gameData.gameState.eliminatedPlayers) {
-            gameData.gameState.eliminatedPlayers = [];
-          }
-
-          // Check if bot is already eliminated
-          if (gameData.gameState.eliminatedPlayers.includes(botColor)) {
-            return gameData;
-          }
-
-          // Add bot to eliminated players
-          gameData.gameState.eliminatedPlayers.push(botColor);
-          gameData.gameState.justEliminated = botColor;
-
-          // Check if game is over (3 players eliminated)
-          if (gameData.gameState.eliminatedPlayers.length >= 3) {
-            const turnOrder = ["r", "b", "y", "g"];
-            const winner = turnOrder.find(
-              (color) => !gameData.gameState.eliminatedPlayers.includes(color)
-            );
-
-            if (winner) {
-              gameData.gameState.winner = winner;
-              gameData.gameState.gameStatus = "finished";
-              gameData.gameState.gameOverState = {
-                isGameOver: true,
-                status: "finished",
-                eliminatedPlayer: null,
-              };
-            }
-          } else {
-            // Advance to next active player
-            const turnOrder = ["r", "b", "y", "g"];
-            const currentIndex = turnOrder.indexOf(gameData.gameState.currentPlayerTurn);
-            const nextIndex = (currentIndex + 1) % turnOrder.length;
-            const nextPlayerInSequence = turnOrder[nextIndex];
-
-            let nextActivePlayer = nextPlayerInSequence;
-            while (gameData.gameState.eliminatedPlayers.includes(nextActivePlayer)) {
-              const activeIndex = turnOrder.indexOf(nextActivePlayer);
-              const nextActiveIndex = (activeIndex + 1) % turnOrder.length;
-              nextActivePlayer = turnOrder[nextActiveIndex];
-            }
-
-            gameData.gameState.currentPlayerTurn = nextActivePlayer;
-          }
-
-          return gameData;
-        });
-
-        if (result.committed) {
-          return; // Success - exit retry loop
-        } else {
-          throw new Error("Transaction failed to commit");
-        }
-      } catch (error: any) {
-        retryCount++;
-        // Elimination attempt failed
-
-        if (retryCount >= maxRetries) {
-          // Max retries exceeded for eliminating bot
-          return; // Give up after max retries
-        }
-
-        // Exponential backoff delay
-        const delay = baseDelay * Math.pow(2, retryCount - 1);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
 
   // Skip bot's turn when brain overheats (timeout)
   private async skipBotTurn(gameId: string, botColor: string): Promise<void> {

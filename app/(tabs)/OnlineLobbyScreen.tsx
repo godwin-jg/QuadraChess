@@ -1121,7 +1121,7 @@ const OnlineLobbyScreen: React.FC = () => {
 
         {displayAvailableGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8 pb-4">
-            No games available. Create one to get started!
+            No games available. Be the first to spill digital blood!
           </Text>
         ) : (
           <View style={{ position: 'relative', width: '100%' }}>

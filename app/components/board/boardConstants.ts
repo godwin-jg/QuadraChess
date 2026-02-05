@@ -30,7 +30,7 @@ export const SNAP_RING_RADIUS_RATIO = 0.75; // Keep tap/drag snap areas aligned
 export const LEGAL_DOT_RATIO = 1 / 3; // Size ratio for legal move dots
 
 // Debounce delay for piece selection
-export const DEBOUNCE_DELAY = 150; // ms
+export const DEBOUNCE_DELAY = 0; // ms
 
 // Board dimensions
 export const BOARD_SQUARES = 14;

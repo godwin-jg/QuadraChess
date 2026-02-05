@@ -4,9 +4,10 @@ import notificationService from "../../../services/notificationService";
 import onlineGameService from "../../../services/onlineGameService";
 import p2pGameService from "../../../services/p2pGameService";
 import networkService from "../../services/networkService";
-import { makeMove, sendMoveToServer, setPremove } from "../../../state/gameSlice";
+import { makeMove, sendMoveToServer, setPremove, applyOnlineSnapshot } from "../../../state/gameSlice";
 import type { MoveInfo, Position } from "../../../types";
 import { onlineDataClient } from "../../../services/onlineDataClient";
+import realtimeDatabaseService from "../../../services/realtimeDatabaseService";
 import { RootState } from "../../../state/store";
 
 // All player colors in turn order
@@ -21,6 +22,8 @@ interface UseMoveExecutionOptions {
   abortPendingDrop: () => void;
   botPlayers?: string[];
   premoveEnabled?: boolean;
+  /** Called immediately when premove is set for optimistic UI updates */
+  onPremoveSet?: (premove: { from: Position; to: Position; pieceCode: string }) => void;
 }
 
 interface UseMoveExecutionReturn {
@@ -43,6 +46,7 @@ export function useMoveExecution({
   abortPendingDrop,
   botPlayers = [],
   premoveEnabled = true,
+  onPremoveSet,
 }: UseMoveExecutionOptions): UseMoveExecutionReturn {
   const dispatch = useDispatch();
   const players = useSelector((state: RootState) => state.game.players);
@@ -125,8 +129,11 @@ export function useMoveExecution({
         if (currentPlayerColor !== currentPlayerTurn) {
           console.log('[Premove] premoveEnabled:', premoveEnabled);
           if (premoveEnabled) {
-            dispatch(setPremove({ from, to, pieceCode: pieceToMove }));
-            notificationService.show("Premove set", "info", 1000);
+            const premoveData = { from, to, pieceCode: pieceToMove };
+            // Call optimistic callback first for instant UI update
+            onPremoveSet?.(premoveData);
+            // Then dispatch to Redux for state persistence
+            dispatch(setPremove(premoveData));
           }
           abortPendingDrop();
           return;
@@ -158,23 +165,18 @@ export function useMoveExecution({
       // Handle move based on game mode
       if (effectiveMode === "online") {
         if (onlineGameService.isConnected && onlineGameService.currentGameId) {
-          onlineGameService.makeMove(moveData).catch((error: unknown) => {
-            console.error("Failed to make online move:", error);
-            const playIllegalSound = () => {
-              try {
-                const soundService = require("../../../services/soundService").default;
-                soundService.playSound("illegal");
-              } catch {
-                // Sound service not available
-              }
-            };
+          // Optimistic update: apply move locally for instant animation
+          // Server snapshot will reconcile (same moveKey = no duplicate animation)
+          dispatch(makeMove({ from, to, isPromotion: moveInfo?.isPromotion }));
 
-            if (error instanceof Error && error.message === "Not your turn") {
-              playIllegalSound();
-              notificationService.show("Not your turn", "warning", 1500);
-            } else {
-              playIllegalSound();
-              notificationService.show("Move failed - check connection", "error", 2000);
+          // Send to server - on failure, fetch fresh state to correct optimistic update
+          onlineGameService.makeMove(moveData).catch(async (error: unknown) => {
+            try { require("../../../services/soundService").default.playSound("illegal"); } catch {}
+            notificationService.show(error instanceof Error && error.message === "Not your turn" ? "Not your turn" : "Move failed", "warning", 1500);
+            const gameId = onlineGameService.currentGameId;
+            if (gameId) {
+              const fresh = await realtimeDatabaseService.fetchGameState(gameId);
+              if (fresh) dispatch(applyOnlineSnapshot({ gameState: fresh as any, lastMove: fresh.lastMove || null, version: fresh.version ?? 0 }));
             }
             abortPendingDrop();
           });
@@ -183,13 +185,13 @@ export function useMoveExecution({
         }
       } else if (effectiveMode === "p2p") {
         if (p2pGameService.isConnected && p2pGameService.currentGameId) {
+          // Optimistic update: apply move locally for instant animation
+          dispatch(makeMove({ from, to, isPromotion: moveInfo?.isPromotion }));
+
+          // Send to peer - host will broadcast correct state on failure
           p2pGameService.makeMove(moveData).catch((error) => {
-            console.error("Failed to make P2P move:", error);
-            if (error instanceof Error && error.message === "Not your turn") {
-              notificationService.show("Not your turn", "warning", 1500);
-            } else {
-              notificationService.show("Move failed - check connection", "error", 2000);
-            }
+            try { require("../../../services/soundService").default.playSound("illegal"); } catch {}
+            notificationService.show(error instanceof Error && error.message === "Not your turn" ? "Not your turn" : "Move failed", "warning", 1500);
             abortPendingDrop();
           });
         } else {
@@ -211,6 +213,7 @@ export function useMoveExecution({
       enPassantTargets,
       gameStatus,
       premoveEnabled,
+      onPremoveSet,
     ]
   );
 

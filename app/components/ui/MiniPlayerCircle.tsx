@@ -9,6 +9,13 @@ import Animated, {
   withSequence
 } from "react-native-reanimated";
 
+export const MINI_PLAYER_AVATAR_SIZE = 56;
+export const MINI_PLAYER_TIMER_HEIGHT = 18;
+export const MINI_PLAYER_GAP = 4;
+export const MINI_PLAYER_STACK_HEIGHT =
+  MINI_PLAYER_AVATAR_SIZE + MINI_PLAYER_GAP + MINI_PLAYER_TIMER_HEIGHT;
+export const MINI_PLAYER_STACK_WIDTH = 70;
+
 interface MiniPlayerCircleProps {
   player: {
     name: string;
@@ -145,17 +152,17 @@ export default function MiniPlayerCircle({
   };
 
   // Smaller avatar to fit timer below within 3x3 corner region (~78px total height)
-  const AVATAR_SIZE = 56;
-  const TIMER_HEIGHT = 18;
-  const GAP = 4;
+  const AVATAR_SIZE = MINI_PLAYER_AVATAR_SIZE;
+  const STACK_HEIGHT = MINI_PLAYER_STACK_HEIGHT;
+  const STACK_WIDTH = MINI_PLAYER_STACK_WIDTH;
 
   return (
     <Animated.View 
       style={[
         eliminationAnimatedStyle, 
         { 
-          width: 70,
-          height: AVATAR_SIZE + GAP + TIMER_HEIGHT,
+          width: STACK_WIDTH,
+          height: STACK_HEIGHT,
           justifyContent: 'flex-start',
           alignItems: 'center',
         }
@@ -295,7 +302,7 @@ export default function MiniPlayerCircle({
 
 const styles = StyleSheet.create({
   timerBadge: {
-    marginTop: 4,
+    marginTop: MINI_PLAYER_GAP,
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 12,

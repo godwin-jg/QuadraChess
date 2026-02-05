@@ -173,12 +173,21 @@ export class WebRTCConnectionManager {
   public closeConnection(peerId: string): void {
     const connection = this.connections.get(peerId);
     if (connection) {
+      // ✅ MEMORY OPTIMIZATION: Null out event handlers to prevent leaks
+      connection.onconnectionstatechange = null;
+      connection.onicecandidate = null;
+      connection.ondatachannel = null;
       connection.close();
       this.connections.delete(peerId);
     }
 
     const dataChannel = this.dataChannels.get(peerId);
     if (dataChannel) {
+      // ✅ MEMORY OPTIMIZATION: Null out event handlers to prevent leaks
+      dataChannel.onopen = null;
+      dataChannel.onmessage = null;
+      dataChannel.onerror = null;
+      dataChannel.onclose = null;
       dataChannel.close();
       this.dataChannels.delete(peerId);
     }
@@ -190,10 +199,19 @@ export class WebRTCConnectionManager {
   public closeAllConnections(): void {
     
     this.connections.forEach((connection, peerId) => {
+      // ✅ MEMORY OPTIMIZATION: Null out event handlers to prevent leaks
+      connection.onconnectionstatechange = null;
+      connection.onicecandidate = null;
+      connection.ondatachannel = null;
       connection.close();
     });
     
     this.dataChannels.forEach((dataChannel, peerId) => {
+      // ✅ MEMORY OPTIMIZATION: Null out event handlers to prevent leaks
+      dataChannel.onopen = null;
+      dataChannel.onmessage = null;
+      dataChannel.onerror = null;
+      dataChannel.onclose = null;
       dataChannel.close();
     });
     

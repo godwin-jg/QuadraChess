@@ -449,16 +449,28 @@ class NetworkDiscoveryService {
   public cleanup(): void {
     if (this.serviceFoundListener) {
       this.serviceFoundListener.remove();
+      this.serviceFoundListener = null;
     }
     if (this.serviceLostListener) {
       this.serviceLostListener.remove();
+      this.serviceLostListener = null;
     }
     if (this.networkChangeListener) {
       this.networkChangeListener();
+      this.networkChangeListener = null;
     }
+    
+    // ✅ MEMORY OPTIMIZATION: Remove zeroconf event listeners
+    this.zeroconf.removeAllListeners('found');
+    this.zeroconf.removeAllListeners('resolved');
+    this.zeroconf.removeAllListeners('start');
+    this.zeroconf.removeAllListeners('stop');
+    
     this.gameFoundListeners = [];
     this.gameLostListeners = [];
     this.activeScans.clear();
+    this.discoveredGames.clear();
+    this.isSearching = false;
   }
 }
 

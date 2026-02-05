@@ -3,7 +3,7 @@ import { Pressable, View } from "react-native";
 import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { BoardTheme } from "./BoardThemeConfig";
 import Piece from "./Piece";
-import MiniPlayerCircle from "../ui/MiniPlayerCircle";
+import MiniPlayerCircle, { MINI_PLAYER_STACK_HEIGHT } from "../ui/MiniPlayerCircle";
 import { getStaticPieceRotation } from "./PieceConfig";
 
 interface SquareProps {
@@ -107,12 +107,21 @@ const CornerSquare = React.memo(function CornerSquare({
   const screenCorner = corner
     ? CORNER_ROTATION_MAP[rotation]?.[corner] ?? corner
     : null;
-  const verticalOffset =
+  const baseOffset =
     screenCorner === "TL" || screenCorner === "TR"
       ? -Math.round(size * 0.25)
       : screenCorner === "BL" || screenCorner === "BR"
         ? Math.round(size * 0.25)
         : 0;
+  let verticalOffset = baseOffset;
+  if (screenCorner === "TL" || screenCorner === "TR") {
+    const minInnerGap = Math.max(4, Math.round(size * 0.12));
+    const maxBottomFromCenter = size * 1.5 - minInnerGap;
+    const baseBottomFromCenter = MINI_PLAYER_STACK_HEIGHT / 2 + baseOffset;
+    if (baseBottomFromCenter > maxBottomFromCenter) {
+      verticalOffset -= baseBottomFromCenter - maxBottomFromCenter;
+    }
+  }
 
   // Container is the size of a single square, but the avatar overflows
   // The avatar counter-rotates to stay upright when the board rotates

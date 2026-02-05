@@ -107,6 +107,18 @@ const buildRelevantKey = (state: GameState): string => {
 
 const canBotAct = (state: GameState): boolean => {
   if (!isGameReady(state)) return false;
+  
+  // Check game flow state
+  const flowSnapshot = getGameFlowSnapshot();
+  const flowState = flowSnapshot?.value;
+  
+  // ✅ FIX: Explicitly block during animation
+  // This catches cases where the game flow is animating
+  if (flowState === "animating") return false;
+  
+  // ✅ FIX: Also block during awaitingPromotion state
+  if (flowState === "awaitingPromotion") return false;
+  
   if (!isGameFlowReady()) return false;
   // For online mode, bots are handled server-side
   if (state.gameMode === "online") return false;
@@ -123,8 +135,15 @@ const canBotAct = (state: GameState): boolean => {
 
 const getIdleReason = (state: GameState): string | null => {
   if (!isGameReady(state)) return "notReady";
+  
+  const flowSnapshot = getGameFlowSnapshot();
+  const flowState = flowSnapshot?.value;
+  
+  // ✅ FIX: Report animating state explicitly
+  if (flowState === "animating") return "flow:animating";
+  if (flowState === "awaitingPromotion") return "flow:awaitingPromotion";
+  
   if (!isGameFlowReady()) {
-    const flowSnapshot = getGameFlowSnapshot();
     const flowValue =
       typeof flowSnapshot?.value === "string"
         ? flowSnapshot.value
@@ -148,6 +167,10 @@ const scheduleBotMove = (state: GameState) => {
   const botColor = state.currentPlayerTurn;
   const botConfig = getBotConfig(state.gameMode, state.botDifficulty);
   const botThinkTime = botConfig.MOVE_DELAY;
+  // ✅ FIX: Ensure minimum delay to allow React to process state changes
+  // This handles the race condition between Redux update and React useEffect
+  const MIN_DELAY_FOR_ANIMATION = 100;
+  const effectiveDelay = Math.max(botThinkTime, MIN_DELAY_FOR_ANIMATION);
   const maxRetries = 20;
   const retryDelay = 50;
   let retryCount = 0;
@@ -202,7 +225,7 @@ const scheduleBotMove = (state: GameState) => {
     }, delay);
   };
 
-  attemptMove(botThinkTime);
+  attemptMove(effectiveDelay);
 };
 
 const scheduleBotPromotion = (state: GameState) => {

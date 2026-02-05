@@ -1,11 +1,16 @@
 import { useCallback, useMemo } from "react";
 import { Gesture } from "react-native-gesture-handler";
 import { scheduleOnRN } from "react-native-worklets";
-import { withSpring, withTiming, type SharedValue } from "react-native-reanimated";
+import { withSpring, withTiming, Easing, type SharedValue } from "react-native-reanimated";
 
 // Spring config for smooth piece lift animation
 const LIFT_SPRING_CONFIG = { damping: 18, stiffness: 280 };
 const LIFT_TIMING_DURATION = 80;
+
+// Snap animation config - very fast (2-3 frames at 60fps)
+// Short enough to complete before mask clears, smooth enough to feel polished
+const SNAP_DURATION = 40; // ms
+const SNAP_EASING = Easing.out(Easing.quad);
 import {
   DRAG_OFFSET_Y,
   DRAG_START_DISTANCE,
@@ -25,6 +30,7 @@ interface UseBoardGesturesParams {
   onCursorChange: (cursorKey: number, fromRow: number, fromCol: number) => void;
   onSnapKeyChange: (snapKey: number, snapX: number, snapY: number) => void;
   visibilityMask: SharedValue<number[]>;
+  activeMaskIndicesValue: SharedValue<number[]>;
   clearMask: () => void;
   setPanStart: (x: number, y: number) => void;
   startDragFromPan: (x: number, y: number) => void;
@@ -78,6 +84,7 @@ export function useBoardGestures({
   onCursorChange,
   onSnapKeyChange,
   visibilityMask,
+  activeMaskIndicesValue,
   clearMask,
   setPanStart,
   startDragFromPan,
@@ -104,6 +111,32 @@ export function useBoardGestures({
     ghostOpacity,
     uiState,
   } = sharedValues;
+
+  const applyDropMask = useCallback(
+    (fromIdx: number, toIdx: number) => {
+      "worklet";
+      const next = visibilityMask.value.slice();
+      next[fromIdx] = 1;
+      next[toIdx] = 1;
+      visibilityMask.value = next;
+
+      const indices = fromIdx === toIdx ? [fromIdx] : [fromIdx, toIdx];
+      const existing = activeMaskIndicesValue.value;
+      if (!existing || existing.length === 0) {
+        activeMaskIndicesValue.value = indices;
+        return;
+      }
+      const merged = existing.slice();
+      for (let i = 0; i < indices.length; i += 1) {
+        const idx = indices[i];
+        if (merged.indexOf(idx) === -1) {
+          merged.push(idx);
+        }
+      }
+      activeMaskIndicesValue.value = merged;
+    },
+    [visibilityMask, activeMaskIndicesValue]
+  );
 
   const applyDragVisuals = useCallback(
     (localX: number, localY: number) => {
@@ -266,21 +299,19 @@ export function useBoardGestures({
             }
             
             uiState.value = 2;
-            dragX.value = dragSnapX.value;
-            dragY.value = dragSnapY.value;
-            // Snap immediately on release - no animation needed since the piece
-            // is about to be replaced by the move animation. Animating here causes
-            // the piece to visually "rise up" before landing which feels jarring.
-            dragScale.value = 1;
-            dragOffsetX.value = 0;
-            dragOffsetY.value = 0;
+            
+            // Fast snap animation - completes in ~40ms (2-3 frames)
+            // Short enough to not conflict with mask clearing
+            const snapConfig = { duration: SNAP_DURATION, easing: SNAP_EASING };
+            dragX.value = withTiming(dragSnapX.value, snapConfig);
+            dragY.value = withTiming(dragSnapY.value, snapConfig);
+            dragScale.value = withTiming(1, snapConfig);
+            dragOffsetX.value = withTiming(0, snapConfig);
+            dragOffsetY.value = withTiming(0, snapConfig);
 
             if (dragStartPos.value) {
               const fromIdx = fromRow * 14 + fromCol;
-              const next = visibilityMask.value.slice();
-              next[fromIdx] = 1;
-              next[snappedKey] = 1;
-              visibilityMask.value = next;
+              applyDropMask(fromIdx, snappedKey);
             }
 
             scheduleOnRN(commitMove, fromRow, fromCol, toRow, toCol);
@@ -354,19 +385,18 @@ export function useBoardGestures({
             }
             
             uiState.value = 2;
-            dragX.value = bestX - squareSize / 2;
-            dragY.value = bestY - squareSize / 2;
-            // Snap immediately on release - same as above
-            dragScale.value = 1;
-            dragOffsetX.value = 0;
-            dragOffsetY.value = 0;
+            
+            // Fast snap animation - completes in ~40ms (2-3 frames)
+            const snapConfig = { duration: SNAP_DURATION, easing: SNAP_EASING };
+            dragX.value = withTiming(bestX - squareSize / 2, snapConfig);
+            dragY.value = withTiming(bestY - squareSize / 2, snapConfig);
+            dragScale.value = withTiming(1, snapConfig);
+            dragOffsetX.value = withTiming(0, snapConfig);
+            dragOffsetY.value = withTiming(0, snapConfig);
 
             if (dragStartPos.value) {
               const fromIdx = fromRow * 14 + fromCol;
-              const next = visibilityMask.value.slice();
-              next[fromIdx] = 1;
-              next[bestKey] = 1;
-              visibilityMask.value = next;
+              applyDropMask(fromIdx, bestKey);
             }
 
             scheduleOnRN(commitMove, fromRow, fromCol, toRow, toCol);
@@ -407,6 +437,8 @@ export function useBoardGestures({
       uiState,
       lastSnappedKey,
       visibilityMask,
+      activeMaskIndicesValue,
+      applyDropMask,
     ]
   );
 

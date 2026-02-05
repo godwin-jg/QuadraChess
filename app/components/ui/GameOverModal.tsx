@@ -785,6 +785,8 @@ export default function GameOverModal({
                           hapticsService.buttonPress();
                         } catch (error) {
                         }
+                        // Dismiss the modal first, then navigate home
+                        onDismiss?.();
                         router.push("/(tabs)/");
                       }}
                       className="flex-1 bg-gray-600 py-3 rounded-xl active:opacity-70"

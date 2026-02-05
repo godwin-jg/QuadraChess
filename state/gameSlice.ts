@@ -43,6 +43,29 @@ export { createStateSnapshot } from "./bitboardOperations";
 
 const DEFAULT_TIME_CONTROL = { baseMs: 5 * 60 * 1000, incrementMs: 0 };
 const CLOCK_COLORS = ["r", "b", "y", "g"] as const;
+
+// ✅ MEMORY OPTIMIZATION: Limit history size to prevent unbounded growth
+const MAX_HISTORY_SIZE = 200;
+
+// Helper to add to history with size limit
+const pushHistoryWithLimit = (state: GameState) => {
+  // Remove any future history if we're not at the end
+  if (state.historyIndex < state.history.length - 1) {
+    state.history = state.history.slice(0, state.historyIndex + 1);
+  }
+  
+  // Add current state to history
+  state.history.push(createStateSnapshot(state));
+  
+  // ✅ MEMORY OPTIMIZATION: Trim history if it exceeds max size
+  if (state.history.length > MAX_HISTORY_SIZE) {
+    // Remove oldest entries to maintain size limit
+    const excessCount = state.history.length - MAX_HISTORY_SIZE;
+    state.history = state.history.slice(excessCount);
+  }
+  
+  state.historyIndex = state.history.length - 1;
+};
 type ClockColor = (typeof CLOCK_COLORS)[number];
 const DEFAULT_TEAM_ASSIGNMENTS = { r: "A", y: "A", b: "B", g: "B" } as const;
 const TEAM_IDS = ["A", "B"] as const;
@@ -245,12 +268,8 @@ const applyTimeoutLogic = (state: GameState, timedOutPlayer: ClockColor, now: nu
   // Clear move cache when game state changes
   state.moveCache = {};
 
-  // Save to history
-  if (state.historyIndex < state.history.length - 1) {
-    state.history = state.history.slice(0, state.historyIndex + 1);
-  }
-  state.history.push(createStateSnapshot(state));
-  state.historyIndex = state.history.length - 1;
+  // Save to history with size limit
+  pushHistoryWithLimit(state);
 };
 
 // Define the new payload type for our improved makeMove action
@@ -1054,16 +1073,10 @@ const gameSlice = createSlice({
 
       finalizeTurnStart(state, now);
 
-      // Save current state to history (only if not in promotion mode)
-      if (state.gameStatus !== "promotion") {
-        // Remove any future history if we're not at the end
-        if (state.historyIndex < state.history.length - 1) {
-          state.history = state.history.slice(0, state.historyIndex + 1);
-        }
-
-        // Add current state to history
-        state.history.push(createStateSnapshot(state));
-        state.historyIndex = state.history.length - 1;
+      // Save current state to history (skip for online - let server snapshot handle it)
+      // This prevents history pollution from rejected optimistic moves
+      if (state.gameStatus !== "promotion" && state.gameMode !== "online") {
+        pushHistoryWithLimit(state);
       }
     },
     resetGame: (state) => {
@@ -1247,12 +1260,8 @@ const gameSlice = createSlice({
 
       if (state.teamMode && CLOCK_COLORS.includes(currentPlayer as ClockColor)) {
         endTeamGame(state, currentPlayer as ClockColor, "finished", now);
-        // Save current state to history
-        if (state.historyIndex < state.history.length - 1) {
-          state.history = state.history.slice(0, state.historyIndex + 1);
-        }
-        state.history.push(createStateSnapshot(state));
-        state.historyIndex = state.history.length - 1;
+        // Save current state to history with size limit
+        pushHistoryWithLimit(state);
         return;
       }
 
@@ -1306,13 +1315,8 @@ const gameSlice = createSlice({
 
       finalizeTurnStart(state, now);
 
-      // Save current state to history
-      if (state.historyIndex < state.history.length - 1) {
-        state.history = state.history.slice(0, state.historyIndex + 1);
-      }
-
-      state.history.push(createStateSnapshot(state));
-      state.historyIndex = state.history.length - 1;
+      // Save current state to history with size limit
+      pushHistoryWithLimit(state);
     },
     timeoutPlayer: (
       state,
@@ -1380,13 +1384,8 @@ const gameSlice = createSlice({
       };
       state.turnStartedAt = null;
 
-      // Save current state to history
-      if (state.historyIndex < state.history.length - 1) {
-        state.history = state.history.slice(0, state.historyIndex + 1);
-      }
-
-      state.history.push(createStateSnapshot(state));
-      state.historyIndex = state.history.length - 1;
+      // Save current state to history with size limit
+      pushHistoryWithLimit(state);
     },
     applyNetworkMove: (
       state,
@@ -1410,11 +1409,7 @@ const gameSlice = createSlice({
       if (pieceCode === "RESIGN") {
         if (state.teamMode && CLOCK_COLORS.includes(playerColor as ClockColor)) {
           endTeamGame(state, playerColor as ClockColor, "finished", now);
-          if (state.historyIndex < state.history.length - 1) {
-            state.history = state.history.slice(0, state.historyIndex + 1);
-          }
-          state.history.push(createStateSnapshot(state));
-          state.historyIndex = state.history.length - 1;
+          pushHistoryWithLimit(state);
           return;
         }
         // Add player to eliminated players
@@ -1469,12 +1464,8 @@ const gameSlice = createSlice({
         // Clear move cache when game state changes
         state.moveCache = {};
 
-        // Save to history
-        if (state.historyIndex < state.history.length - 1) {
-          state.history = state.history.slice(0, state.historyIndex + 1);
-        }
-        state.history.push(createStateSnapshot(state));
-        state.historyIndex = state.history.length - 1;
+        // Save to history with size limit
+        pushHistoryWithLimit(state);
 
         return; // Exit early for resignation
       }
@@ -1555,13 +1546,8 @@ const gameSlice = createSlice({
 
       finalizeTurnStart(state, now);
 
-      // Save to history
-      if (state.historyIndex < state.history.length - 1) {
-        state.history = state.history.slice(0, state.historyIndex + 1);
-      }
-
-      state.history.push(createStateSnapshot(state));
-      state.historyIndex = state.history.length - 1;
+      // Save to history with size limit
+      pushHistoryWithLimit(state);
     },
     syncGameState: (state, action: PayloadAction<GameState>) => {
       // Sync the entire game state from network (create new state object)
@@ -1598,16 +1584,18 @@ const gameSlice = createSlice({
       const existingHistoryIndex = state.historyIndex ?? 0;
 
       // Check if this is a new move by comparing lastMove (O(1) comparison)
+      // Compare by logical content (from, to, piece, color) NOT timestamp
+      // This allows optimistic updates to be recognized as the same move
       const currentLastMove = state.lastMove;
       const newLastMove = lastMove ?? gameState.lastMove ?? null;
-      const isNewMove = newLastMove && (
-        !currentLastMove ||
-        currentLastMove.timestamp !== newLastMove.timestamp ||
-        currentLastMove.from?.row !== newLastMove.from?.row ||
-        currentLastMove.from?.col !== newLastMove.from?.col ||
-        currentLastMove.to?.row !== newLastMove.to?.row ||
-        currentLastMove.to?.col !== newLastMove.to?.col
-      );
+      const isSameMove = currentLastMove && newLastMove &&
+        currentLastMove.from?.row === newLastMove.from?.row &&
+        currentLastMove.from?.col === newLastMove.from?.col &&
+        currentLastMove.to?.row === newLastMove.to?.row &&
+        currentLastMove.to?.col === newLastMove.to?.col &&
+        currentLastMove.pieceCode === newLastMove.pieceCode &&
+        currentLastMove.playerColor === newLastMove.playerColor;
+      const isNewMove = newLastMove && !isSameMove;
 
       // ✅ CRITICAL: Also check if board state changed (elimination, timeout, etc.)
       // Compare eliminated players count - if changed, board needs recalculation
@@ -1686,7 +1674,15 @@ const gameSlice = createSlice({
           ? existingHistory.slice(0, existingHistoryIndex + 1)
           : existingHistory;
         // Add current state to history
-        mergedState.history = [...baseHistory, createStateSnapshot(mergedState)];
+        let newHistory = [...baseHistory, createStateSnapshot(mergedState)];
+        
+        // ✅ MEMORY OPTIMIZATION: Trim history if it exceeds max size
+        if (newHistory.length > MAX_HISTORY_SIZE) {
+          const excessCount = newHistory.length - MAX_HISTORY_SIZE;
+          newHistory = newHistory.slice(excessCount);
+        }
+        
+        mergedState.history = newHistory;
         mergedState.historyIndex = mergedState.history.length - 1;
       }
 

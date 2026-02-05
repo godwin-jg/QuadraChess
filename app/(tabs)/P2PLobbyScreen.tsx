@@ -1065,7 +1065,8 @@ const P2PLobbyScreen: React.FC = () => {
 
         {displayDiscoveredGames.length === 0 ? (
           <Text className="text-gray-400 text-center mt-8 pb-4">
-            The arena stands empty... Be the first to spill digital blood!
+            connect all devices to the same Wi‑Fi, create a game on one device,
+            game will appear here to join.
           </Text>
         ) : (
           <View style={{ position: 'relative', width: '100%' }}>

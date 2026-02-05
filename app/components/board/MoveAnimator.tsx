@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from "react";
 import { View } from "react-native";
 import Animated, {
   runOnJS,
+  runOnUI,
   type SharedValue,
   useAnimatedStyle,
   useSharedValue,
@@ -249,7 +250,12 @@ export default function MoveAnimator({
       if (frameId !== null) {
         cancelAnimationFrame(frameId);
       }
-      completeOnce();
+      if (!completedRef.current) {
+        if (onCompleteUI) {
+          runOnUI(onCompleteUI)();
+        }
+        completeOnce();
+      }
     };
   }, [plan, progress, animationRunning, onCompleteUI]);
 

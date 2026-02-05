@@ -6,6 +6,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useGameConnection } from "../../hooks/useGameConnection";
 import onlineGameService from "../../services/onlineGameService";
 import p2pGameService from "../../services/p2pGameService";
+import { botService } from "../../services/botService";
 import { RootState, completePromotion, resetGame } from "../../state";
 import {
   clearJustEliminated,
@@ -29,6 +30,8 @@ import { useGameFlowMachine } from "../../hooks/useGameFlowMachine";
 import { useGameFlowReady } from "../components/board/useGameFlowReady";
 import { useTurnClock } from "../../hooks/useTurnClock";
 import { buildMoveKey, consumeSkipNextMoveAnimation } from "../../services/gameFlowService";
+import { resetAnimatorState } from "../components/board/SkiaMoveAnimator";
+import { resetOrchestrationState } from "../components/board/useBoardAnimationOrchestration";
 import {
   getBotStateMachineSnapshot,
   subscribeBotStateMachine,
@@ -184,16 +187,41 @@ export default function GameScreen() {
     return currentPlayerTurn;
   }, [viewingHistoryIndex, history, currentPlayerTurn]);
   const [displayTurn, setDisplayTurn] = useState(currentPlayerTurn);
+  const wasAnimatingRef = useRef(false);
+  const lastProcessedMoveKeyRef = useRef<string | null>(null);
+
+  // Get the current move key from game flow context to know if animation completed
+  const processedMoveKey = gameFlowState?.context?.lastMoveKey ?? null;
+  const currentMoveKey = buildMoveKey(lastMove);
 
   useEffect(() => {
     if (isViewingHistory) {
       setDisplayTurn(historyTurn);
+      wasAnimatingRef.current = false;
       return;
     }
-    if (!isFlowAnimating) {
+    
+    // ✅ FIX: Only update displayTurn when animation COMPLETES
+    if (isFlowAnimating) {
+      // Animation is in progress - mark that we're waiting for it to complete
+      wasAnimatingRef.current = true;
+    } else if (wasAnimatingRef.current) {
+      // Animation just completed - now update the display turn
+      wasAnimatingRef.current = false;
       setDisplayTurn(currentPlayerTurn);
+      lastProcessedMoveKeyRef.current = currentMoveKey;
+    } else if (!lastMove) {
+      // Game just started or reset - no animation needed, update immediately
+      setDisplayTurn(currentPlayerTurn);
+      lastProcessedMoveKeyRef.current = null;
+    } else if (currentMoveKey === processedMoveKey && lastProcessedMoveKeyRef.current !== currentMoveKey) {
+      // Move was processed by game flow (either animation completed or was skipped)
+      // Update the display turn now
+      setDisplayTurn(currentPlayerTurn);
+      lastProcessedMoveKeyRef.current = currentMoveKey;
     }
-  }, [isViewingHistory, historyTurn, currentPlayerTurn, isFlowAnimating]);
+    // If the current move hasn't been processed by game flow yet, don't update displayTurn
+  }, [isViewingHistory, historyTurn, currentPlayerTurn, isFlowAnimating, lastMove, currentMoveKey, processedMoveKey]);
   
   const handleTimeout = useCallback(
     (playerColor: string) => {
@@ -927,6 +955,13 @@ export default function GameScreen() {
           }))}
           onReset={async () => {
             try {
+              // ✅ MEMORY OPTIMIZATION: Clear bot memory before starting new game
+              botService.cleanupBotMemory();
+              
+              // ✅ ANIMATION FIX: Reset animation state to prevent stale animators
+              resetAnimatorState();
+              resetOrchestrationState();
+              
               // ✅ CRITICAL FIX: For online games, create a rematch with same players and bots
               if (gameMode === 'online' && gameId) {
                 
@@ -950,6 +985,9 @@ export default function GameScreen() {
             } catch (error) {
               console.error('Error creating rematch:', error);
               // Fallback to regular reset
+              botService.cleanupBotMemory();
+              resetAnimatorState();
+              resetOrchestrationState();
               dispatch(resetGame());
             }
           }}

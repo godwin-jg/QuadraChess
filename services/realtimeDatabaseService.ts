@@ -2237,6 +2237,18 @@ class RealtimeDatabaseService {
     }
   }
 
+  // Fetch current game state (for recovery after failed optimistic move)
+  async fetchGameState(gameId: string): Promise<SerializedGameState | null> {
+    try {
+      const snapshot = await get(ref(db, `games/${gameId}/gameState`));
+      if (!snapshot.exists()) return null;
+      return snapshot.val() as SerializedGameState;
+    } catch (error) {
+      console.error("Error fetching game state:", error);
+      return null;
+    }
+  }
+
   // Ultra-fast move processing (bitboard-based)
   async makeMove(
     gameId: string,
@@ -2636,6 +2648,15 @@ class RealtimeDatabaseService {
       ) {
         // This is expected during concurrent game updates, silently ignore
         // The sweep will retry on the next interval
+        return;
+      }
+      // Handle disconnection errors - these occur when Firebase connection is lost
+      if (
+        error?.code === "database/disconnected" ||
+        error?.message?.includes("disconnected")
+      ) {
+        // Connection lost during transaction - sweep will retry when reconnected
+        console.log("[DisconnectSweep] Database disconnected, will retry when connection restored");
         return;
       }
       console.error("Error eliminating disconnected players:", error);

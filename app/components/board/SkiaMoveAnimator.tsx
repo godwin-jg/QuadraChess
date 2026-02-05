@@ -11,6 +11,7 @@ import {
   withTiming,
   useDerivedValue,
   runOnJS,
+  runOnUI,
   cancelAnimation,
   type SharedValue,
   Easing,
@@ -23,6 +24,19 @@ import { PIECE_CONFIG, getAnimationPieceRotation } from "./PieceConfig";
 import { AnimPlan, keyToRowCol } from "./chessgroundAnimations";
 import { useSettings } from "../../../context/SettingsContext";
 import { getPieceStyle, getPieceSize } from "./PieceStyleConfig";
+
+// ✅ SINGLETON GUARD: Ensure only one SkiaMoveAnimator instance runs animations
+// This prevents duplicate animations when multiple Board components are mounted
+// (e.g., during tab navigation transitions)
+let globalActiveAnimatorId: string | null = null;
+let globalAnimatorCounter = 0;
+
+// Reset global animator state - call when switching game modes
+export function resetAnimatorState(): void {
+  globalActiveAnimatorId = null;
+  globalAnimatorCounter = 0;
+  if (__DEV__) console.log('[SkiaAnim] Global animator state reset');
+}
 
 interface SkiaMoveAnimatorProps {
   plan: AnimPlan | null;
@@ -81,6 +95,29 @@ export default function SkiaMoveAnimator({
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+
+  // ✅ SINGLETON GUARD: Generate unique ID for this animator instance
+  const animatorIdRef = React.useRef<string | null>(null);
+  if (animatorIdRef.current === null) {
+    globalAnimatorCounter += 1;
+    animatorIdRef.current = `animator-${globalAnimatorCounter}`;
+  }
+  const animatorId = animatorIdRef.current;
+
+  // Register this animator as active on mount, unregister on unmount
+  useEffect(() => {
+    // Become the active animator (last mounted wins)
+    globalActiveAnimatorId = animatorId;
+    if (__DEV__) console.log('[SkiaAnim] Registered as active animator:', animatorId);
+    
+    return () => {
+      // Only clear if we're still the active animator
+      if (globalActiveAnimatorId === animatorId) {
+        globalActiveAnimatorId = null;
+        if (__DEV__) console.log('[SkiaAnim] Unregistered animator:', animatorId);
+      }
+    };
+  }, [animatorId]);
 
   const { settings } = useSettings();
   const sizeMultiplier = getPieceSize(settings);
@@ -216,15 +253,24 @@ export default function SkiaMoveAnimator({
 
   // Run animation
   useEffect(() => {
+    if (__DEV__) console.log('[SkiaAnim] useEffect plan=', !!plan, 'planKey=', planKey, 'animator=', animatorId);
     if (!plan || !planKey) return;
+
+    // ✅ SINGLETON GUARD: Only animate if we're the active animator
+    if (globalActiveAnimatorId !== animatorId) {
+      if (__DEV__) console.log('[SkiaAnim] Skip: not the active animator (active=', globalActiveAnimatorId, ')');
+      return;
+    }
 
     // Skip if we already animated this plan
     if (planKey === lastAnimatedPlanKeyRef.current) {
+      if (__DEV__) console.log('[SkiaAnim] Skip: already animated planKey');
       return;
     }
 
     // Mark this plan as being animated
     lastAnimatedPlanKeyRef.current = planKey;
+    if (__DEV__) console.log('[SkiaAnim] Starting animation for planKey:', planKey);
 
     // Cancel any ongoing animation before starting new one
     cancelAnimation(progress);
@@ -276,8 +322,14 @@ export default function SkiaMoveAnimator({
         cancelAnimationFrame(frameId);
       }
       cancelAnimation(progress);
+      if (!completedRef.current) {
+        if (onCompleteUI) {
+          runOnUI(onCompleteUI)();
+        }
+        runOnJS(completeOnce)();
+      }
     };
-  }, [plan, planKey, progress, animationRunning, onCompleteUI]);
+  }, [plan, planKey, progress, animationRunning, onCompleteUI, animatorId]);
 
   // Note: We intentionally do NOT reset lastAnimatedPlanKeyRef when plan goes null.
   // The counter-based planKey system handles new animations, and resetting here

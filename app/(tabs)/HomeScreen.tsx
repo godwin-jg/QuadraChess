@@ -219,8 +219,11 @@ export default function HomeScreen() {
     console.log(`  - Bot Team Mode: ${currentBotTeamMode}`);
     console.log(`  - Render-time difficulty was: ${botDifficulty}`);
     
-    dispatch(resetGame()); // ✅ CRITICAL FIX: Reset game state first
-    dispatch(setGameMode("single")); // Set game mode to single player
+    // ✅ CRITICAL FIX: Set game mode BEFORE resetGame() so the reset sees the correct mode
+    // resetGame() uses the current gameMode to determine if gameStatus should be "active"
+    // If we set mode after reset, the status stays "waiting" until the second click
+    dispatch(setGameMode("single")); // Set game mode first!
+    dispatch(resetGame()); // Now reset will see "single" mode and set status to "active"
     dispatch(setBotPlayers(['b', 'y', 'g'])); // Default to 3 AI players (Blue, Purple, Green)
     dispatch(setBotDifficulty(currentBotDifficulty));
     dispatch(setBotTeamMode(currentBotTeamMode));

@@ -1,9 +1,21 @@
-import React, { useRef, useMemo, useLayoutEffect } from "react";
+import React, { useRef, useMemo, useLayoutEffect, useEffect } from "react";
 import { runOnUI, type SharedValue, useSharedValue } from "react-native-reanimated";
 import { buildPiecesMap, computeAnimPlan, AnimPlan } from "./chessgroundAnimations";
 import { getRookCastlingCoords, isCastlingMove } from "../../../state/gameHelpers";
 import { buildMoveKey } from "../../../services/gameFlowService";
 import type { LastMove } from "../../../state/types";
+
+// ✅ SINGLETON GUARD: Ensure only one orchestration instance processes animations
+// This prevents duplicate animation logs when multiple Board components are mounted
+let globalActiveOrchestrationId: string | null = null;
+let globalOrchestrationCounter = 0;
+
+// Reset global orchestration state - call when switching game modes
+export function resetOrchestrationState(): void {
+  globalActiveOrchestrationId = null;
+  globalOrchestrationCounter = 0;
+  if (__DEV__) console.log('[Anim] Global orchestration state reset');
+}
 
 interface AnimationOrchestrationParams {
   displayBoardState: (string | null)[][];
@@ -16,6 +28,7 @@ interface AnimationOrchestrationParams {
   gameFlowSend: (event: any) => void;
   visibilityMask: SharedValue<number[]>;
   animationRunning: SharedValue<number>;
+  uiState?: SharedValue<number>;
 }
 
 interface AnimationOrchestrationReturn {
@@ -28,6 +41,7 @@ interface AnimationOrchestrationReturn {
   handleAnimationCompleteUI: () => void;
   clearActiveAnimationPlan: () => void;
   skipNextAnimationRef: React.MutableRefObject<boolean>;
+  activeMaskIndicesValue: SharedValue<number[]>;
 }
 
 /**
@@ -48,6 +62,7 @@ export function useBoardAnimationOrchestration({
   gameFlowSend,
   visibilityMask,
   animationRunning,
+  uiState,
 }: AnimationOrchestrationParams): AnimationOrchestrationReturn {
   const buildPlanFromLastMove = (
     move: LastMove,
@@ -137,7 +152,26 @@ export function useBoardAnimationOrchestration({
   const activeMoveKeyRef = useRef<string | null>(null);
   const planPiecesRef = useRef<Map<number, string> | null>(null);
   const activeMoveOverridesRef = useRef<Map<number, string> | null>(null);
+  const animationSetupDoneRef = useRef(false); // Track if animation setup (visibility mask) completed
   const activeMaskIndicesValue = useSharedValue<number[]>([]);
+
+  // ✅ SINGLETON GUARD: Generate unique ID for this orchestration instance
+  const orchestrationIdRef = useRef<string | null>(null);
+  if (orchestrationIdRef.current === null) {
+    globalOrchestrationCounter += 1;
+    orchestrationIdRef.current = `orch-${globalOrchestrationCounter}`;
+  }
+  const orchestrationId = orchestrationIdRef.current;
+
+  // Register this orchestration as active on mount, unregister on unmount
+  useEffect(() => {
+    globalActiveOrchestrationId = orchestrationId;
+    return () => {
+      if (globalActiveOrchestrationId === orchestrationId) {
+        globalActiveOrchestrationId = null;
+      }
+    };
+  }, [orchestrationId]);
 
   // Use ref to always have access to current animationsEnabled value
   const animationsEnabledRef = useRef(animationsEnabled);
@@ -158,6 +192,7 @@ export function useBoardAnimationOrchestration({
   // Initialize prevPiecesRef synchronously on first call (not in effect)
   // This prevents the race condition where a move happens before the effect runs
   if (prevPiecesRef.current === null) {
+    if (__DEV__) console.log('[Anim] Initializing prevPiecesRef');
     prevPiecesRef.current = currentPiecesMap;
   }
 
@@ -176,12 +211,23 @@ export function useBoardAnimationOrchestration({
   // Compute pending animation plan
   const pendingPlan = useMemo(() => {
     if (activePlanRef.current) return activePlanRef.current;
-    if (!moveKey || moveKey === lastMoveKeyRef.current) return null;
-    if (skipAnimation || !prevPiecesRef.current) return null;
+    if (!moveKey || moveKey === lastMoveKeyRef.current) {
+      if (__DEV__ && moveKey) console.log('[Anim] Skip: same moveKey', moveKey);
+      return null;
+    }
+    if (skipAnimation || !prevPiecesRef.current) {
+      if (__DEV__) console.log('[Anim] Skip: skipAnimation=', skipAnimation, 'prevPieces=', !!prevPiecesRef.current);
+      return null;
+    }
 
     const deterministicPlan = lastMove
       ? buildPlanFromLastMove(lastMove, prevPiecesRef.current)
       : null;
+    if (__DEV__ && lastMove && !deterministicPlan) {
+      const fromKey = lastMove.from.row * 14 + lastMove.from.col;
+      const pieceAtFrom = prevPiecesRef.current?.get(fromKey);
+      console.log('[Anim] buildPlanFromLastMove returned null. pieceAtFrom=', pieceAtFrom, 'expected=', lastMove.pieceCode, 'fromKey=', fromKey);
+    }
     if (deterministicPlan) {
       activePlanRef.current = deterministicPlan.plan;
       activeMoveKeyRef.current = moveKey;
@@ -208,6 +254,10 @@ export function useBoardAnimationOrchestration({
     const indices = activeMaskIndicesValue.value;
     animationRunning.value = 0;
     if (!indices || indices.length === 0) {
+      const dragging = uiState ? uiState.value === 1 || uiState.value === 2 : false;
+      if (!dragging) {
+        visibilityMask.value = new Array(196).fill(0);
+      }
       return;
     }
     const next = visibilityMask.value.slice();
@@ -219,14 +269,17 @@ export function useBoardAnimationOrchestration({
     }
     visibilityMask.value = next;
     activeMaskIndicesValue.value = [];
-  }, [visibilityMask, animationRunning, activeMaskIndicesValue]);
+  }, [visibilityMask, animationRunning, activeMaskIndicesValue, uiState]);
 
   const handleAnimationComplete = React.useCallback(
     (options?: { baselinePieces?: Map<number, string>; moveKeyOverride?: string | null }) => {
       if (!activePlanRef.current && !options?.baselinePieces) {
+        if (__DEV__) console.log('[Anim] handleAnimationComplete early return');
         return;
       }
       const planPieces = planPiecesRef.current;
+      const source = options?.baselinePieces ? 'baseline' : planPieces ? 'planPieces' : 'currentRef';
+      if (__DEV__) console.log('[Anim] handleAnimationComplete updating prevPieces from:', source);
       prevPiecesRef.current =
         options?.baselinePieces ?? planPieces ?? currentPiecesMapRef.current;
       const moveKeyToSet = options?.moveKeyOverride ?? activeMoveKeyRef.current;
@@ -237,6 +290,7 @@ export function useBoardAnimationOrchestration({
       activeMoveKeyRef.current = null;
       planPiecesRef.current = null;
       activeMoveOverridesRef.current = null;
+      animationSetupDoneRef.current = false; // Reset for next animation
       gameFlowSend({ type: "ANIMATION_DONE" });
     },
     [gameFlowSend]
@@ -246,6 +300,17 @@ export function useBoardAnimationOrchestration({
   React.useLayoutEffect(() => {
     if (!moveKey || moveKey === lastMoveKeyRef.current) return;
 
+    // ✅ SINGLETON GUARD: Only process if we're the active orchestration
+    if (globalActiveOrchestrationId !== orchestrationId) {
+      return;
+    }
+
+    // Skip if animation setup already done for this exact move (optimistic + server confirmation)
+    if (animationSetupDoneRef.current && activeMoveKeyRef.current === moveKey) {
+      return;
+    }
+
+    // Skip if busy animating a DIFFERENT move (wait for it to complete)
     if (
       activePlanRef.current &&
       activeMoveKeyRef.current &&
@@ -266,6 +331,8 @@ export function useBoardAnimationOrchestration({
         activeMaskIndicesValue.value = indices;
       }
       activeMoveKeyRef.current = moveKey;
+      animationSetupDoneRef.current = true;
+      lastMoveKeyRef.current = moveKey;
       runOnUI(handleAnimationCompleteUI)();
       handleAnimationComplete({ baselinePieces: currentPiecesMap, moveKeyOverride: moveKey });
       return;
@@ -276,8 +343,13 @@ export function useBoardAnimationOrchestration({
     pendingPlan.fadings.forEach((_, key) => indices.push(key));
 
     if (indices.length > 0) {
+      if (__DEV__) console.log('[Anim] Starting animation, indices:', indices.length, 'moveKey:', moveKey);
       // Freeze the pieces map for this animation plan to avoid flicker
       planPiecesRef.current = currentPiecesMap;
+      // Mark this moveKey as being animated immediately (not waiting for completion)
+      // This ensures server confirmations skip at the first check
+      lastMoveKeyRef.current = moveKey;
+      animationSetupDoneRef.current = true;
       activeMaskIndicesValue.value = indices;
       const next = visibilityMask.value.slice();
       for (let i = 0; i < indices.length; i++) {
@@ -298,6 +370,7 @@ export function useBoardAnimationOrchestration({
     animationRunning,
     handleAnimationComplete,
     handleAnimationCompleteUI,
+    orchestrationId,
   ]);
 
   // Handle flow animating state without a plan
@@ -342,6 +415,7 @@ export function useBoardAnimationOrchestration({
     handleAnimationCompleteUI,
     clearActiveAnimationPlan,
     skipNextAnimationRef,
+    activeMaskIndicesValue,
   };
 }
 

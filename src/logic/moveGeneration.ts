@@ -21,17 +21,40 @@ import {
   getSlidingAttacks,
 } from "./bitboardUtils";
 export const getKnightAttacks = (knights: bigint): bigint => {
-  let l1 = (knights >> BigInt(15)) & NOT_FILE_N; // Up 1, Left 2
-  let l2 = (knights >> BigInt(13)) & NOT_FILE_A; // Up 1, Right 2
-  let l3 = (knights >> BigInt(30)) & NOT_FILE_MN; // Up 2, Left 1
-  let l4 = (knights >> BigInt(26)) & NOT_FILE_AB; // Up 2, Right 1
+  // ✅ FIX: Use correct shift values for 14-wide board
+  // Knight moves: (±1 row, ±2 cols) or (±2 rows, ±1 col)
+  // Row change: ±14, Col change: ±1
+  // Up 1, Left 2: -14 - 2 = -16
+  // Up 1, Right 2: -14 + 2 = -12
+  // Up 2, Left 1: -28 - 1 = -29
+  // Up 2, Right 1: -28 + 1 = -27
+  // Down variants are positive versions
+  
+  const east2 = knights & NOT_FILE_MN; // Can move right 2 cols
+  const west2 = knights & NOT_FILE_AB; // Can move left 2 cols
+  const east1 = knights & NOT_FILE_N;  // Can move right 1 col
+  const west1 = knights & NOT_FILE_A;  // Can move left 1 col
 
-  let r1 = (knights << BigInt(15)) & NOT_FILE_A; // Down 1, Right 2
-  let r2 = (knights << BigInt(13)) & NOT_FILE_N; // Down 1, Left 2
-  let r3 = (knights << BigInt(30)) & NOT_FILE_AB; // Down 2, Right 1
-  let r4 = (knights << BigInt(26)) & NOT_FILE_MN; // Down 2, Left 1
+  let attacks = 0n;
+  
+  // Up 1 row, Right 2 cols: -14 + 2 = -12
+  attacks |= shift(east2, -12);
+  // Down 1 row, Right 2 cols: +14 + 2 = 16
+  attacks |= shift(east2, 16);
+  // Up 1 row, Left 2 cols: -14 - 2 = -16
+  attacks |= shift(west2, -16);
+  // Down 1 row, Left 2 cols: +14 - 2 = 12
+  attacks |= shift(west2, 12);
+  // Up 2 rows, Right 1 col: -28 + 1 = -27
+  attacks |= shift(east1, -27);
+  // Down 2 rows, Right 1 col: +28 + 1 = 29
+  attacks |= shift(east1, 29);
+  // Up 2 rows, Left 1 col: -28 - 1 = -29
+  attacks |= shift(west1, -29);
+  // Down 2 rows, Left 1 col: +28 - 1 = 27
+  attacks |= shift(west1, 27);
 
-  return (l1 | l2 | l3 | l4 | r1 | r2 | r3 | r4) & PLAYABLE_MASK;
+  return attacks & PLAYABLE_MASK;
 };
 
 export const getPawnAttacksBB = (color: string, pawns: bigint): bigint => {
@@ -601,15 +624,25 @@ export const getValidMovesBB = (
       // Double check - only King can move
       return 0n;
     } else if (checkerMask === -1n) {
-      // ✅ BUG FIX: checkStatus says in check but getCheckerMask found no checkers
-      // This indicates the attack maps might be stale - be conservative
+      // getCheckerMask found no checkers despite inCheck being true
       const isSimulation = state.lastMove?.timestamp === 0;
-      if (!isSimulation && state.currentPlayerTurn === pieceColor) {
-        console.warn(`[moveGeneration] Inconsistency: ${pieceColor} checkStatus=true but no checkers found`);
+      
+      if (actuallyInCheck) {
+        // ✅ BUG: Attack maps show we're in check, but getCheckerMask can't find the checker
+        // This is a bug in getCheckerMask - log it and be conservative
+        if (!isSimulation && state.currentPlayerTurn === pieceColor) {
+          console.warn(`[moveGeneration] Bug: ${pieceColor} actuallyInCheck=true but getCheckerMask found no checkers`);
+        }
+        // Return 0n - we can't determine which moves escape check
+        return 0n;
+      } else {
+        // checkStatusSaysInCheck is true but actuallyInCheck is false
+        // This means checkStatus is stale/out of sync - allow normal moves
+        if (!isSimulation && state.currentPlayerTurn === pieceColor) {
+          console.warn(`[moveGeneration] Stale checkStatus for ${pieceColor}: checkStatus=true but not actually in check - allowing moves`);
+        }
+        // Don't apply checker mask restriction - player isn't really in check
       }
-      // ✅ FIX: If actuallyInCheck is true but checkerMask is -1, there's a bug
-      // in getCheckerMask. For safety, allow no non-king moves.
-      return 0n;
     } else {
       moves &= checkerMask;
     }

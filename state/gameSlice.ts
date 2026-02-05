@@ -101,7 +101,7 @@ const getTeamColors = (assignments: GameState["teamAssignments"], teamId: TeamId
 const getOpposingTeam = (teamId: TeamId): TeamId => (teamId === "A" ? "B" : "A");
 
 const getColorName = (color: string): string => {
-  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Purple", g: "Green" };
   return names[color] || color.toUpperCase();
 };
 

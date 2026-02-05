@@ -534,14 +534,17 @@ export default function Board({
     if (ENABLE_DRAG_PERF_LOG) {
       perfRef.current.cancelCount += 1;
     }
-    // Clear dragState first so the dragged piece disappears
+    // Clear visibility mask SYNCHRONOUSLY before removing DraggedPiece
+    // This ensures the real piece is visible the same frame DraggedPiece disappears
+    // (Using direct call instead of runOnUI for synchronous SharedValue update)
+    visibilityMask.value = new Array(196).fill(0);
+    // Now clear dragState - the piece at destination is already visible
     if (dragState) {
       setDragState(null);
     }
     clearPanStart();
     clearDragStart();
     uiState.value = 0;
-    runOnUI(clearMask)();
     dragSnapActive.value = 0;
     // Animate scale/offset back smoothly when cancelling
     dragScale.value = withTiming(1, { duration: 100 });
@@ -581,7 +584,7 @@ export default function Board({
     lastSnappedKey,
     lastCursorKey,
     uiState,
-    clearMask,
+    visibilityMask,
     clearActiveAnimationPlan,
   ]);
 
@@ -610,11 +613,22 @@ export default function Board({
     const matchesBoardState = pieceAtTarget === pending.piece;
 
     if (matchesLastMove || matchesBoardState) {
+      // Instantly position DraggedPiece at destination before cleanup
+      // This ensures smooth transition even if snap animation hasn't completed
+      // (especially important for local mode where Redux updates synchronously)
+      const destX = pending.to.col * squareSize;
+      const destY = pending.to.row * squareSize;
+      dragX.value = destX;
+      dragY.value = destY;
+      dragScale.value = 1;
+      dragOffsetX.value = 0;
+      dragOffsetY.value = 0;
+      
       pendingDropRef.current = null;
       uiState.value = 0;
       cancelDrag();
     }
-  }, [lastMove, boardState, cancelDrag, uiState]);
+  }, [lastMove, boardState, cancelDrag, uiState, squareSize, dragX, dragY, dragScale, dragOffsetX, dragOffsetY]);
 
   // Helper functions are imported from boardHelpers.ts
 

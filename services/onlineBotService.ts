@@ -27,7 +27,7 @@ const getTeamForColor = (assignments: TeamAssignments, color: ClockColor): TeamI
   assignments[color];
 
 const getColorName = (color: string): string => {
-  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Yellow", g: "Green" };
+  const names: Record<string, string> = { r: "Red", b: "Blue", y: "Purple", g: "Green" };
   return names[color] || color.toUpperCase();
 };
 

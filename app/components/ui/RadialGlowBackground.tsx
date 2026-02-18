@@ -11,7 +11,7 @@ const RadialGlowBackground: React.FC = () => {
           cx="50%"
           cy="40%"
           rx="70%"
-          ry="60%"
+          ry="75%"
           fx="50%"
           fy="40%"
         >

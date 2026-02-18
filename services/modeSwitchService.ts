@@ -5,8 +5,6 @@ import networkService from "../app/services/networkService";
 import { botService } from "./botService";
 import { resetGame } from "../state/gameSlice";
 import { store } from "../state/store";
-import { resetAnimatorState } from "../app/components/board/SkiaMoveAnimator";
-import { resetOrchestrationState } from "../app/components/board/useBoardAnimationOrchestration";
 
 export interface ModeSwitchOptions {
   currentMode: "online" | "local" | "solo" | "single" | "p2p";
@@ -70,11 +68,8 @@ class ModeSwitchService {
 
     // If confirmation was already shown (e.g., by tab bar), skip the alert
     if (options?.skipConfirmation) {
-      console.log("🔄 MODE SWITCH: Skipping confirmation (already confirmed), starting disconnection");
       await this.disconnectFromCurrentGame();
-      console.log("🔄 MODE SWITCH: Disconnection completed, confirming mode switch");
       setTimeout(() => {
-        console.log("🔄 MODE SWITCH: Mode switch confirmed and completed");
         onConfirm();
       }, 100);
       return;
@@ -95,13 +90,10 @@ class ModeSwitchService {
             text: "Switch Anyway",
             style: "destructive",
             onPress: async () => {
-              console.log("🔄 MODE SWITCH: User confirmed mode switch, starting disconnection");
               // Disconnect FIRST, then confirm
               await this.disconnectFromCurrentGame();
-              console.log("🔄 MODE SWITCH: Disconnection completed, confirming mode switch");
               // Add a small delay to ensure disconnection is complete
               setTimeout(() => {
-                console.log("🔄 MODE SWITCH: Mode switch confirmed and completed");
                 onConfirm();
               }, 100);
             },
@@ -174,14 +166,8 @@ class ModeSwitchService {
       // ✅ CRITICAL FIX: Cancel all bot moves before disconnecting
       botService.cancelAllBotMoves();
       
-      // ✅ MEMORY OPTIMIZATION: Clear bot memory (transposition table, history, killer moves)
       botService.cleanupBotMemory();
 
-      // ✅ ANIMATION FIX: Reset animation state to prevent stale animators
-      resetAnimatorState();
-      resetOrchestrationState();
-
-      // ✅ CRITICAL FIX: Reset game state when switching modes
       store.dispatch(resetGame());
 
       // ✅ CRITICAL FIX: Add a longer delay to ensure all disconnections and state cleanup are complete

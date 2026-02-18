@@ -12,7 +12,6 @@ import { useSettings } from "../../../context/SettingsContext";
 import { getPieceStyle, getPieceSize } from "./PieceStyleConfig";
 import SkiaPiece from "./SkiaPiece";
 
-// Set to true to use GPU-accelerated Skia rendering for pieces
 const USE_SKIA_PIECES = true;
 
 interface PieceProps {
@@ -24,6 +23,7 @@ interface PieceProps {
   isHighlighted?: boolean; // For move highlights
   animationDelay?: number; // For staggered animations
   previewStyle?: string; // Override piece style for preview purposes
+  styleKey?: string; // Propagated from settings to bust React.memo caches
 }
 
 const Piece = React.memo(function Piece({
@@ -35,6 +35,7 @@ const Piece = React.memo(function Piece({
   isHighlighted = false,
   animationDelay = 0,
   previewStyle,
+  styleKey,
 }: PieceProps) {
   const { settings } = useSettings();
   
@@ -48,6 +49,7 @@ const Piece = React.memo(function Piece({
         isEliminated={isEliminated}
         isSelected={isSelected}
         previewStyle={previewStyle}
+        styleKey={styleKey}
       />
     );
   }

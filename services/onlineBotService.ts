@@ -111,7 +111,6 @@ class OnlineBotService {
       if (cancellationToken.cancelled) {
         console.warn(`Bot ${botColor} timed out`);
         if (chosenMove) {
-          console.log(`Bot ${botColor} using partial calculation result`);
           // Continue to execute the best move found so far
         } else {
           // No move found at all explicitly due to timeout - resign/skip to keep game moving
@@ -401,8 +400,6 @@ class OnlineBotService {
       }
 
       if (result && result.committed) {
-        console.log(`[BotDebug] Transaction committed for ${botColor}`);
-        const totalTime = Date.now() - startTime;
         // Bot move completed successfully
 
         // Cancel any thinking notifications immediately since move is complete
@@ -423,7 +420,6 @@ class OnlineBotService {
         error.message?.includes('overridden-by-set') ||
         error.message?.includes('transaction was overridden')) {
         // Game state changed during bot calculation - this is normal, just skip this move
-        console.log(`[BotDebug] overridden-by-set`);
         return;
       }
 
@@ -431,7 +427,6 @@ class OnlineBotService {
         error.message?.includes('max-retries') ||
         error.message?.includes('too many retries')) {
         // Max retries exceeded for bot move - just skip this move instead of crashing
-        console.log(`[BotDebug] max-retries`);
         return; // Skip this bot move instead of throwing error
       }
 
@@ -439,7 +434,6 @@ class OnlineBotService {
         error.message?.includes('disconnected')) {
         // Firebase disconnected during transaction - this can happen due to network issues
         // or app going to background. Just skip this move, bot will retry when reconnected.
-        console.log(`[BotDebug] disconnected - will retry when connection restored`);
         return;
       }
 
@@ -465,7 +459,6 @@ class OnlineBotService {
           !currentGameState.eliminatedPlayers.includes(botColor) &&
           (currentGameState.version ?? 0) !== expectedVersion
         ) {
-          console.log(`[BotRetry] Local state advanced (v${currentGameState.version} vs v${expectedVersion}). Retrying.`);
           // We use setTimeout to break the promise chain and allow the stack to clear
           setTimeout(() => {
             this.scheduleBotMove(gameId, botColor, currentGameState);

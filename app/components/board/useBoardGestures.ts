@@ -26,6 +26,7 @@ interface UseBoardGesturesParams {
   onCursorChange: (cursorKey: number, fromRow: number, fromCol: number) => void;
   onSnapKeyChange: (snapKey: number, snapX: number, snapY: number) => void;
   visibilityMask: SharedValue<number[]>;
+  maskRevision: SharedValue<number>;
   activeMaskIndicesValue: SharedValue<number[]>;
   clearMask: () => void;
   setPanStart: (x: number, y: number) => void;
@@ -80,6 +81,7 @@ export function useBoardGestures({
   onCursorChange,
   onSnapKeyChange,
   visibilityMask,
+  maskRevision,
   activeMaskIndicesValue,
   clearMask,
   setPanStart,
@@ -115,6 +117,7 @@ export function useBoardGestures({
       next[fromIdx] = 1;
       next[toIdx] = 1;
       visibilityMask.value = next;
+      maskRevision.value += 1;
 
       const indices = fromIdx === toIdx ? [fromIdx] : [fromIdx, toIdx];
       const existing = activeMaskIndicesValue.value;
@@ -131,7 +134,7 @@ export function useBoardGestures({
       }
       activeMaskIndicesValue.value = merged;
     },
-    [visibilityMask, activeMaskIndicesValue]
+    [visibilityMask, maskRevision, activeMaskIndicesValue]
   );
 
   const applyDragVisuals = useCallback(
@@ -430,6 +433,7 @@ export function useBoardGestures({
       uiState,
       lastSnappedKey,
       visibilityMask,
+      maskRevision,
       activeMaskIndicesValue,
       applyDropMask,
     ]

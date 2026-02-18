@@ -15,7 +15,6 @@ import {
   cancelAnimation,
   type SharedValue,
   Easing,
-  useAnimatedStyle,
 } from "react-native-reanimated";
 import Animated from "react-native-reanimated";
 import { ANIMATION_DURATIONS } from "../../../config/gameConfig";
@@ -31,10 +30,10 @@ import { getPieceStyle, getPieceSize } from "./PieceStyleConfig";
 let globalActiveAnimatorId: string | null = null;
 let globalAnimatorCounter = 0;
 
-// Reset global animator state - call when switching game modes
+// Reset global animator state - call when switching game modes.
+// Only clears the active ID; the counter keeps incrementing to avoid collisions.
 export function resetAnimatorState(): void {
   globalActiveAnimatorId = null;
-  globalAnimatorCounter = 0;
   if (__DEV__) console.log('[SkiaAnim] Global animator state reset');
 }
 
@@ -106,18 +105,21 @@ export default function SkiaMoveAnimator({
 
   // Register this animator as active on mount, unregister on unmount
   useEffect(() => {
-    // Become the active animator (last mounted wins)
     globalActiveAnimatorId = animatorId;
     if (__DEV__) console.log('[SkiaAnim] Registered as active animator:', animatorId);
     
     return () => {
-      // Only clear if we're still the active animator
       if (globalActiveAnimatorId === animatorId) {
         globalActiveAnimatorId = null;
         if (__DEV__) console.log('[SkiaAnim] Unregistered animator:', animatorId);
       }
     };
   }, [animatorId]);
+
+  // Self-healing: re-register if the global was cleared externally
+  if (globalActiveAnimatorId === null) {
+    globalActiveAnimatorId = animatorId;
+  }
 
   const { settings } = useSettings();
   const sizeMultiplier = getPieceSize(settings);
@@ -336,13 +338,6 @@ export default function SkiaMoveAnimator({
   // would cause cached plans to re-animate when the same plan object is returned
   // from useMemo after a drag cancel or other re-render.
 
-  // Opacity animation based on running state to prevent double-piece artifacts
-  const containerStyle = useAnimatedStyle(() => {
-    return {
-      opacity: animationRunning ? animationRunning.value : 1,
-    };
-  }, [animationRunning]);
-
   if (!plan || (animatedPieces.length === 0 && fadingPieces.length === 0)) {
     return null;
   }
@@ -351,15 +346,12 @@ export default function SkiaMoveAnimator({
 
   return (
     <Animated.View
-      style={[
-        {
-          position: "absolute",
-          width: boardSize,
-          height: boardSize,
-          zIndex: 2,
-        },
-        containerStyle,
-      ]}
+      style={{
+        position: "absolute",
+        width: boardSize,
+        height: boardSize,
+        zIndex: 2,
+      }}
       pointerEvents="none"
     >
       <Canvas

@@ -5,8 +5,6 @@ import { LinearGradient } from "expo-linear-gradient";
 
 interface UpdatePromptModalProps {
   visible: boolean;
-  currentVersion: string;
-  latestVersion: string;
   updateMessage: string;
   forceUpdate: boolean;
   onUpdate: () => void;
@@ -15,8 +13,6 @@ interface UpdatePromptModalProps {
 
 export default function UpdatePromptModal({
   visible,
-  currentVersion,
-  latestVersion,
   updateMessage,
   forceUpdate,
   onUpdate,
@@ -39,19 +35,6 @@ export default function UpdatePromptModal({
           <Text className="text-2xl font-bold text-center mb-2 text-white">
             {forceUpdate ? "Update Required" : "Update Available"}
           </Text>
-
-          {/* Version info */}
-          <View className="bg-gray-800 rounded-xl p-3 mb-4">
-            <View className="flex-row justify-between items-center">
-              <Text className="text-gray-400 text-sm">Current version</Text>
-              <Text className="text-gray-300 font-semibold">{currentVersion}</Text>
-            </View>
-            <View className="h-px bg-gray-700 my-2" />
-            <View className="flex-row justify-between items-center">
-              <Text className="text-gray-400 text-sm">New version</Text>
-              <Text className="text-green-400 font-semibold">{latestVersion}</Text>
-            </View>
-          </View>
 
           {/* Update message */}
           <Text className="text-base text-center mb-6 text-gray-300 leading-6">

@@ -213,12 +213,6 @@ export default function HomeScreen() {
     const currentBotDifficulty = (currentSettings.game.botDifficulty || "easy") as BotDifficulty;
     const currentBotTeamMode = currentSettings.game.botTeamMode || false;
     
-    // Log for verification
-    console.log(`[Settings] Starting game with fresh settings:`);
-    console.log(`  - Bot Difficulty: ${currentBotDifficulty} (from service)`);
-    console.log(`  - Bot Team Mode: ${currentBotTeamMode}`);
-    console.log(`  - Render-time difficulty was: ${botDifficulty}`);
-    
     // ✅ CRITICAL FIX: Set game mode BEFORE resetGame() so the reset sees the correct mode
     // resetGame() uses the current gameMode to determine if gameStatus should be "active"
     // If we set mode after reset, the status stays "waiting" until the second click
@@ -278,7 +272,6 @@ export default function HomeScreen() {
         },
         () => {
           // Cancel: Stay on current screen
-          console.log("Mode switch cancelled by user");
         }
       );
     } finally {

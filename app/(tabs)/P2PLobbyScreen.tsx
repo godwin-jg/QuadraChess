@@ -37,8 +37,15 @@ import { useSettings } from "../../context/SettingsContext";
 import p2pService, { P2PGame, P2PPlayer } from "../../services/p2pService";
 import networkDiscoveryService from "../../services/networkDiscoveryService";
 import { FontAwesome, MaterialCommunityIcons } from "@expo/vector-icons";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  withDelay,
+} from "react-native-reanimated";
 import GridBackground from "../components/ui/GridBackground";
-import AnimatedButton from "../components/ui/AnimatedButton";
+import RadialGlowBackground from "../components/ui/RadialGlowBackground";
 import TeamAssignmentDnD from "../components/ui/TeamAssignmentDnD";
 import { hapticsService } from "../../services/hapticsService";
 import { getTabBarSpacer } from "../utils/responsive";
@@ -57,6 +64,115 @@ const SECTION_TITLE_CLASS = "text-white text-lg font-semibold";
 const TIME_CONTROL_LIMITS = {
   baseMinutes: { min: 1, max: 30, step: 1 },
   incrementSeconds: { min: 0, max: 30, step: 1 },
+};
+
+const LOBBY_FONTS = {
+  title: "Rajdhani_700Bold",
+  heading: "Rajdhani_600SemiBold",
+  body: "Rajdhani_500Medium",
+};
+
+interface LobbyMenuButtonProps {
+  onPress: () => void;
+  disabled: boolean;
+  iconName: string;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  borderColor?: string;
+  delay?: number;
+}
+
+const LobbyMenuButton: React.FC<LobbyMenuButtonProps> = ({
+  onPress,
+  disabled,
+  iconName,
+  iconColor,
+  title,
+  subtitle,
+  borderColor = "rgba(255,255,255,0.15)",
+  delay = 0,
+}) => {
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(30);
+
+  useEffect(() => {
+    opacity.value = withDelay(delay, withTiming(1, { duration: 600 }));
+    translateY.value = withDelay(
+      delay,
+      withSpring(0, { damping: 12, stiffness: 80 })
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }, { translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
+    hapticsService.buttonPress();
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, { damping: 15, stiffness: 400 });
+  };
+
+  const iconFill =
+    iconColor.startsWith("#") && iconColor.length === 7
+      ? `${iconColor}26`
+      : "rgba(255,255,255,0.08)";
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={disabled}
+        className="py-4 px-5 rounded-2xl active:opacity-80 flex-row items-center overflow-hidden"
+        style={{
+          backgroundColor: "rgba(255,255,255,0.05)",
+          borderWidth: 1,
+          borderColor,
+        }}
+      >
+        <View
+          className="w-12 h-12 rounded-xl justify-center items-center mr-4"
+          style={{ backgroundColor: iconFill }}
+        >
+          <MaterialCommunityIcons
+            name={iconName as any}
+            size={26}
+            color={iconColor}
+          />
+        </View>
+        <View className="flex-1">
+          <Text
+            className="text-xl tracking-wide"
+            style={{ color: "#ffffff", fontFamily: LOBBY_FONTS.heading }}
+          >
+            {title}
+          </Text>
+          <Text
+            className="text-base mt-0.5"
+            style={{
+              color: "rgba(255,255,255,0.5)",
+              fontFamily: LOBBY_FONTS.body,
+            }}
+          >
+            {subtitle}
+          </Text>
+        </View>
+        <MaterialCommunityIcons
+          name="chevron-right"
+          size={24}
+          color="rgba(255,255,255,0.3)"
+        />
+      </TouchableOpacity>
+    </Animated.View>
+  );
 };
 
 const P2PLobbyScreen: React.FC = () => {
@@ -98,7 +214,6 @@ const P2PLobbyScreen: React.FC = () => {
   // ✅ CRITICAL FIX: Clear game context immediately when user resigned
   useEffect(() => {
     if (resigned === "true") {
-      console.log("[P2PLobby] User resigned from game, clearing game context immediately");
       dispatch(setCurrentGame(null));
       dispatch(setBotPlayers([]));
       dispatch(setPlayers([]));
@@ -226,11 +341,7 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = (color: string) => {
-    console.log(`[BotToggle] Toggle called for color: ${color}, isHost: ${isHost}, gameId: ${currentGame?.id}`);
-    console.log(`[BotToggle] Current botPlayers state:`, botPlayers);
-    
     if (!isHost || !currentGame) {
-      console.log(`[BotToggle] Aborting - not host or no game`);
       return;
     }
     
@@ -238,13 +349,11 @@ const P2PLobbyScreen: React.FC = () => {
       ? botPlayers.filter(c => c !== color)
       : [...botPlayers, color];
     
-    console.log(`[BotToggle] New botPlayers will be:`, newBotPlayers);
     dispatch(setBotPlayers(newBotPlayers));
     
     // Update bot configuration in P2P service
     try {
       p2pService.updateBotConfiguration(newBotPlayers);
-      console.log(`[BotToggle] Update successful`);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       // Revert local state on error
@@ -292,8 +401,6 @@ const P2PLobbyScreen: React.FC = () => {
         soundService.playSuccessSound();
       } catch (error) {
       }
-      
-      console.log("P2P Game created:", game);
     } catch (error) {
       console.error("Error creating P2P game:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to create game";
@@ -323,7 +430,6 @@ const P2PLobbyScreen: React.FC = () => {
       // Find the game in discovered games to set currentGame as fallback
       const gameToJoin = discoveredGames.find(game => game.id === gameId);
       if (gameToJoin) {
-        console.log("Setting currentGame from discovered games:", gameToJoin);
         dispatch(setCurrentGame({
           id: gameToJoin.id,
           name: gameToJoin.name,
@@ -348,8 +454,6 @@ const P2PLobbyScreen: React.FC = () => {
         soundService.playSuccessSound();
       } catch (error) {
       }
-      
-      console.log("Joined P2P game:", gameId);
     } catch (error) {
       console.error("Error joining P2P game:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to join game";
@@ -414,27 +518,22 @@ const P2PLobbyScreen: React.FC = () => {
 
   // Leave the game - manual state reset
   const leaveGame = () => {
-    console.log("P2PLobbyScreen: Leaving game manually...");
-    
     try {
       // 1. Try to disconnect from P2P service (but don't rely on it for state)
       try {
         (p2pService as any).disconnect(false); // Don't notify UI to avoid connection error
-        console.log("P2PLobbyScreen: P2P service disconnected");
       } catch (p2pError) {
-        console.warn("P2PLobbyScreen: P2P disconnect failed, continuing with manual reset:", p2pError);
+        // Continue with manual reset
       }
       
       // 2. Stop discovery if running
       try {
         p2pService.stopDiscovery();
-        console.log("P2PLobbyScreen: Discovery stopped");
       } catch (discoveryError) {
-        console.warn("P2PLobbyScreen: Stop discovery failed:", discoveryError);
+        // Continue with manual reset
       }
       
       // 3. Manually reset all Redux state
-      console.log("P2PLobbyScreen: Resetting Redux state manually...");
       
       // Clear connection error first to prevent "Connection lost" message
       dispatch(setConnectionError(null));
@@ -458,8 +557,6 @@ const P2PLobbyScreen: React.FC = () => {
       // Clear P2P game state
       dispatch(syncP2PGameState(null));
       
-      console.log("P2PLobbyScreen: Manual state reset completed successfully");
-      
     } catch (error) {
       console.error("P2PLobbyScreen: Error during manual leave game:", error);
       
@@ -471,7 +568,6 @@ const P2PLobbyScreen: React.FC = () => {
         dispatch(setPlayers([]));
         dispatch(setIsHost(false));
         dispatch(setIsConnected(false));
-        console.log("P2PLobbyScreen: Emergency state reset completed");
       } catch (emergencyError) {
         console.error("P2PLobbyScreen: Emergency state reset failed:", emergencyError);
       }
@@ -515,21 +611,36 @@ const P2PLobbyScreen: React.FC = () => {
       >
         <View className="flex-row justify-between items-center">
           <View className="flex-1">
-            <Text className={`text-lg font-bold ${isFull ? "text-gray-400" : "text-white"}`}>
+            <Text
+              className={`text-lg font-bold ${isFull ? "text-gray-400" : "text-white"}`}
+              style={{ fontFamily: LOBBY_FONTS.heading }}
+            >
               {item.hostName}'s Game
             </Text>
-            <Text className="text-gray-300 text-sm">
+            <Text
+              className="text-gray-300 text-sm"
+              style={{ fontFamily: LOBBY_FONTS.body }}
+            >
               {playerCount}/{item.maxPlayers} players
             </Text>
-            <Text className="text-gray-400 text-xs">
+            <Text
+              className="text-gray-400 text-xs"
+              style={{ fontFamily: LOBBY_FONTS.body }}
+            >
               Code: {item.joinCode}
             </Text>
           </View>
           <View className="items-end">
-            <Text className={`text-sm ${isFull ? "text-red-400" : "text-green-400"}`}>
+            <Text
+              className={`text-sm ${isFull ? "text-red-400" : "text-green-400"}`}
+              style={{ fontFamily: LOBBY_FONTS.heading }}
+            >
               {isFull ? "Full" : "Available"}
             </Text>
-            <Text className="text-gray-400 text-xs mt-0.5">
+            <Text
+              className="text-gray-400 text-xs mt-0.5"
+              style={{ fontFamily: LOBBY_FONTS.body }}
+            >
               {timeControlLabel}
             </Text>
           </View>
@@ -558,34 +669,63 @@ const P2PLobbyScreen: React.FC = () => {
   const sliderTrackColor = timeControlLocked ? "#374151" : "#9ca3af";
   const sliderThumbColor = timeControlLocked ? "#9ca3af" : "#ffffff";
 
-  // Show connection error screen
   if (connectionError) {
     return (
-      <View className="flex-1 bg-black justify-center items-center p-6">
-        <Text className="text-red-400 text-xl font-bold mb-4">Connection Error</Text>
-        <Text className="text-white text-lg text-center mb-6">{connectionError}</Text>
-        <TouchableOpacity
-          className="w-full py-4 px-6 rounded-xl bg-white shadow-lg"
-          onPress={() => {
-            dispatch(setConnectionError(null));
-            dispatch(setIsConnected(true));
-          }}
-        >
-          <Text className="text-black text-xl font-bold text-center">Retry</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={{ flex: 1 }} className="bg-black">
+        <RadialGlowBackground />
+        <GridBackground />
+        <View className="flex-1 justify-center items-center p-6" style={{ zIndex: 1 }}>
+          <Text
+            className="text-red-400 text-xl font-bold mb-4"
+            style={{ fontFamily: LOBBY_FONTS.title }}
+          >
+            Connection Error
+          </Text>
+          <Text
+            className="text-white text-lg text-center mb-6"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
+            {connectionError}
+          </Text>
+          <TouchableOpacity
+            className="w-full px-6 py-3 rounded-xl"
+            style={{
+              backgroundColor: "rgba(255,255,255,0.05)",
+              borderWidth: 1,
+              borderColor: "rgba(59,130,246,0.3)",
+            }}
+            onPress={() => {
+              dispatch(setConnectionError(null));
+              dispatch(setIsConnected(true));
+            }}
+          >
+            <Text
+              className="text-white text-xl font-bold text-center"
+              style={{ fontFamily: LOBBY_FONTS.heading }}
+            >
+              Retry
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
-  // Show loading screen
   if (isLoading) {
     return (
-      <View className="flex-1 bg-black justify-center items-center">
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text className="text-white text-lg mt-4">
-          {isHost ? "Creating game..." : "Joining game..."}
-        </Text>
-      </View>
+      <SafeAreaView style={{ flex: 1 }} className="bg-black">
+        <RadialGlowBackground />
+        <GridBackground />
+        <View className="flex-1 justify-center items-center" style={{ zIndex: 1 }}>
+          <ActivityIndicator size="large" color="#ffffff" />
+          <Text
+            className="text-white text-lg mt-4"
+            style={{ fontFamily: LOBBY_FONTS.heading }}
+          >
+            {isHost ? "Creating game..." : "Joining game..."}
+          </Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -593,17 +733,24 @@ const P2PLobbyScreen: React.FC = () => {
   if (currentGame) {
     return (
       <SafeAreaView style={{ flex: 1 }} className="bg-black">
-        {/* Subtle blueprint grid background */}
+        <RadialGlowBackground />
         <GridBackground />
         <ScrollView
           contentContainerStyle={{ padding: 24, paddingBottom: tabBarSpacer }}
           showsVerticalScrollIndicator={false}
+          style={{ zIndex: 1 }}
         >
         <View className="items-center mb-6">
-          <Text className="text-gray-300 text-base mb-2">Playing as:</Text>
+          <Text
+            className="text-gray-300 text-base mb-2"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
+            Playing as:
+          </Text>
           {isEditingName ? (
             <TextInput
               className="text-white text-2xl font-semibold text-center border-b border-white/30 pb-1"
+              style={{ fontFamily: LOBBY_FONTS.title }}
               value={tempName}
               onChangeText={(text) => dispatch(setTempName(text))}
               onSubmitEditing={saveName}
@@ -617,7 +764,10 @@ const P2PLobbyScreen: React.FC = () => {
               hapticsService.selection();
               startEditingName();
             }}>
-              <Text className="text-white text-2xl font-semibold">
+              <Text
+                className="text-white text-2xl font-semibold"
+                style={{ fontFamily: LOBBY_FONTS.title }}
+              >
                 {settings.profile.name}
               </Text>
             </TouchableOpacity>
@@ -625,12 +775,20 @@ const P2PLobbyScreen: React.FC = () => {
         </View>
 
         <View className="bg-white/10 p-5 rounded-xl mb-5 items-center">
-          <Text className="text-gray-300 text-sm mb-4 text-center">
+          <Text
+            className="text-gray-300 text-sm mb-4 text-center"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
             Join Code: <Text className="text-white font-bold">{currentGame.joinCode}</Text>
           </Text>
 
           <View className="space-y-3 w-full">
-            <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
+            <Text
+              className="text-white text-lg font-semibold mb-2 text-center"
+              style={{ fontFamily: LOBBY_FONTS.heading }}
+            >
+              Players ({players.length})
+            </Text>
             {/* ✅ CRITICAL FIX: Show all players (bots are already included in Redux players array) */}
             {(() => {
               // All players (including bots) come from Redux players array
@@ -643,7 +801,10 @@ const P2PLobbyScreen: React.FC = () => {
                     key={player.id || `player-${index}`}
                     className="flex-row items-center justify-between"
                   >
-                    <Text className="text-white text-lg">
+                    <Text
+                      className="text-white text-lg"
+                      style={{ fontFamily: LOBBY_FONTS.heading }}
+                    >
                       {player.isBot
                         ? `Bot ${COLOR_LABELS[player.color] ?? "Player"}`
                         : player.name}{" "}
@@ -663,21 +824,34 @@ const P2PLobbyScreen: React.FC = () => {
                                   : "bg-gray-500"
                         }`}
                       />
-                      <Text className="text-gray-400 text-base">
+                      <Text
+                        className="text-gray-400 text-base"
+                        style={{ fontFamily: LOBBY_FONTS.body }}
+                      >
                         {player.isBot ? 'Bot' : (player.connectionState || 'connected')}
                       </Text>
                     </View>
                   </View>
                 ))
               ) : (
-                <Text className="text-gray-400 text-base text-center">No players yet</Text>
+                <Text
+                  className="text-gray-400 text-base text-center"
+                  style={{ fontFamily: LOBBY_FONTS.body }}
+                >
+                  No players yet
+                </Text>
               );
             })()}
             
             {/* Bot Configuration Section (Host Only) */}
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
-                <Text className="text-white text-lg font-semibold mb-2 text-center">Add Bots</Text>
+                <Text
+                  className="text-white text-lg font-semibold mb-2 text-center"
+                  style={{ fontFamily: LOBBY_FONTS.heading }}
+                >
+                  Add Bots
+                </Text>
                 <Text className="text-gray-400 text-xs mb-3 text-center">
                   Tap to toggle bot players
                 </Text>
@@ -726,7 +900,7 @@ const P2PLobbyScreen: React.FC = () => {
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
                 <View className="flex-row items-center justify-between mb-2">
-                  <Text className={SECTION_TITLE_CLASS} numberOfLines={1}>Team Play</Text>
+                  <Text className={SECTION_TITLE_CLASS} numberOfLines={1} style={{ fontFamily: LOBBY_FONTS.heading }}>Team Play</Text>
                   <Switch
                     value={teamMode}
                     onValueChange={(nextValue) => {
@@ -761,7 +935,7 @@ const P2PLobbyScreen: React.FC = () => {
             )}
             <View className="mt-4 pt-4 border-t border-white/20">
               <View className="flex-row items-center justify-between mb-3">
-                <Text className={SECTION_TITLE_CLASS}>Time Control</Text>
+                <Text className={SECTION_TITLE_CLASS} style={{ fontFamily: LOBBY_FONTS.heading }}>Time Control</Text>
                 <View className="flex-row items-center gap-2">
                   <Text className="text-gray-400 text-sm">{formatTimeControlLabel(timeControl)}</Text>
                   <TouchableOpacity
@@ -902,7 +1076,10 @@ const P2PLobbyScreen: React.FC = () => {
         {isHost && (
           <View className="items-center gap-4 mb-4">
             {players.length < 4 && (
-              <Text className="text-gray-400 text-base mb-3">
+              <Text
+                className="text-gray-400 text-base mb-3"
+                style={{ fontFamily: LOBBY_FONTS.body }}
+              >
                 Need 4 players to start
               </Text>
             )}
@@ -920,6 +1097,7 @@ const P2PLobbyScreen: React.FC = () => {
                   players.length !== 4 ? "text-gray-300" : "text-black"
                 }`}
                 style={{
+                  fontFamily: LOBBY_FONTS.title,
                   fontWeight: '900',
                   letterSpacing: 1.2,
                   textShadowColor: 'rgba(0,0,0,0.3)',
@@ -954,6 +1132,7 @@ const P2PLobbyScreen: React.FC = () => {
           <Text 
             className="text-white text-xl font-bold text-center"
             style={{
+              fontFamily: LOBBY_FONTS.title,
               fontWeight: '900',
               letterSpacing: 1.2,
               textShadowColor: 'rgba(0,0,0,0.3)',
@@ -973,17 +1152,24 @@ const P2PLobbyScreen: React.FC = () => {
   // Main menu
   return (
     <SafeAreaView style={{ flex: 1 }} className="bg-black">
-      {/* Subtle blueprint grid background */}
+      <RadialGlowBackground />
       <GridBackground />
       <ScrollView
         contentContainerStyle={{ padding: 24, paddingBottom: tabBarSpacer }}
         showsVerticalScrollIndicator={false}
+        style={{ zIndex: 1 }}
       >
       <View className="items-center mb-8">
-        <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
+        <Text
+          className="text-gray-300 text-sm mb-3"
+          style={{ fontFamily: LOBBY_FONTS.body }}
+        >
+          Playing as:
+        </Text>
         {isEditingName ? (
           <TextInput
             className="text-white text-2xl font-bold text-center border-b border-white/30 pb-1"
+            style={{ fontFamily: LOBBY_FONTS.title }}
             value={tempName}
             onChangeText={(text) => dispatch(setTempName(text))}
             onSubmitEditing={saveName}
@@ -997,74 +1183,71 @@ const P2PLobbyScreen: React.FC = () => {
             hapticsService.selection();
             startEditingName();
           }}>
-            <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
+            <Text
+              className="text-white text-2xl font-bold"
+              style={{ fontFamily: LOBBY_FONTS.title }}
+            >
+              {settings.profile.name}
+            </Text>
           </TouchableOpacity>
         )}
         
-        {/* Connection status indicator */}
         <View className="flex-row items-center mt-2">
           <View className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <Text className="text-gray-400 text-sm">
+          <Text
+            className="text-gray-400 text-sm"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
             {isConnected ? 'Connected' : 'Disconnected'}
           </Text>
         </View>
       </View>
 
-      <View className="mb-8">
-        <AnimatedButton
-          icon="🎮"
+      <View className="gap-3 mb-8">
+        <LobbyMenuButton
+          iconName="wifi"
+          iconColor="#a855f7"
           title="Create Game"
-          subtitle={isLoading ? "Creating..." : "Start a new game"}
-          gradientColors={['#ffffff', '#f0f0f0']}
-          textColor="black"
-          subtitleColor="gray-600"
+          subtitle={isLoading ? "Creating..." : "Start a local game"}
+          borderColor="rgba(168, 85, 247, 0.3)"
           onPress={createGame}
           disabled={isLoading}
           delay={0}
         />
-
-        <View style={{ marginTop: 16 }}>
-          <AnimatedButton
-            icon="🏠"
-            title="Back to Home"
-            subtitle="Return to main menu"
-            gradientColors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
-            textColor="white"
-            subtitleColor="gray-300"
-            onPress={() => {
-              // 🔊 Play button sound for back to home action
-              try {
-                const soundService = require('../../services/soundService').default;
-                soundService.playButtonSound();
-              } catch (error) {
-              }
-              router.back();
-            }}
-            disabled={false}
-            delay={150}
-          />
-        </View>
+        <LobbyMenuButton
+          iconName="home-outline"
+          iconColor="#3b82f6"
+          title="Back to Home"
+          subtitle="Return to main menu"
+          borderColor="rgba(59, 130, 246, 0.3)"
+          onPress={() => {
+            try {
+              const soundService = require('../../services/soundService').default;
+              soundService.playButtonSound();
+            } catch (error) {
+            }
+            router.back();
+          }}
+          disabled={false}
+          delay={150}
+        />
       </View>
 
       <View className="flex-1 items-center">
-        <View className="flex-row items-center justify-between w-full mb-4">
-          <Text className="text-white text-xl font-bold text-center flex-1">
+        <View className="w-full mb-4">
+          <Text
+            className="text-white text-xl font-bold text-center"
+            style={{ fontFamily: LOBBY_FONTS.heading }}
+          >
             Available Games
           </Text>
-          <TouchableOpacity
-            onPress={() => {
-              p2pService.discoverGames().catch(error => {
-                console.error("Error refreshing games:", error);
-              });
-            }}
-            className="bg-blue-500 px-3 py-2 rounded-lg"
-          >
-            <Text className="text-white text-sm font-semibold">Refresh</Text>
-          </TouchableOpacity>
         </View>
 
         {displayDiscoveredGames.length === 0 ? (
-          <Text className="text-gray-400 text-center mt-8 pb-4">
+          <Text
+            className="text-gray-400 text-center mt-8 pb-4"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
             connect all devices to the same Wi‑Fi, create a game on one device,
             game will appear here to join.
           </Text>

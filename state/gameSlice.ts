@@ -46,6 +46,33 @@ const CLOCK_COLORS = ["r", "b", "y", "g"] as const;
 
 // ✅ MEMORY OPTIMIZATION: Limit history size to prevent unbounded growth
 const MAX_HISTORY_SIZE = 200;
+const BOARD_SIZE = 14;
+
+const isWithinBoard = (row: number, col: number) =>
+  row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
+
+const isSnapshotLastMoveConsistent = (
+  boardState: GameState["boardState"],
+  move: GameState["lastMove"]
+) => {
+  if (!move) return true;
+  if (
+    !isWithinBoard(move.from.row, move.from.col) ||
+    !isWithinBoard(move.to.row, move.to.col)
+  ) {
+    return false;
+  }
+
+  const pieceAtTo = boardState?.[move.to.row]?.[move.to.col] ?? null;
+  if (!pieceAtTo) return false;
+
+  const moverColor = move.playerColor || move.pieceCode[0];
+  if (pieceAtTo[0] !== moverColor) return false;
+  if (pieceAtTo === move.pieceCode) return true;
+  // Promotion can legitimately change pawn type at destination.
+  if (move.pieceCode[1] === "P" && pieceAtTo[1] !== "P") return true;
+  return false;
+};
 
 // Helper to add to history with size limit
 const pushHistoryWithLimit = (state: GameState) => {
@@ -1256,7 +1283,6 @@ const gameSlice = createSlice({
 
       // Use provided player color or default to current player turn
       const currentPlayer = action.payload || state.currentPlayerTurn;
-      console.log("resignGame reducer: action.payload:", action.payload, "currentPlayerTurn:", state.currentPlayerTurn, "final currentPlayer:", currentPlayer);
 
       if (state.teamMode && CLOCK_COLORS.includes(currentPlayer as ClockColor)) {
         endTeamGame(state, currentPlayer as ClockColor, "finished", now);
@@ -1587,7 +1613,13 @@ const gameSlice = createSlice({
       // Compare by logical content (from, to, piece, color) NOT timestamp
       // This allows optimistic updates to be recognized as the same move
       const currentLastMove = state.lastMove;
-      const newLastMove = lastMove ?? gameState.lastMove ?? null;
+      const rawNewLastMove = lastMove ?? gameState.lastMove ?? null;
+      const newLastMove = isSnapshotLastMoveConsistent(
+        gameState.boardState,
+        rawNewLastMove
+      )
+        ? rawNewLastMove
+        : null;
       const isSameMove = currentLastMove && newLastMove &&
         currentLastMove.from?.row === newLastMove.from?.row &&
         currentLastMove.from?.col === newLastMove.from?.col &&
@@ -1768,14 +1800,6 @@ const gameSlice = createSlice({
       state,
       action: PayloadAction<"solo" | "local" | "online" | "p2p" | "single">
     ) => {
-      console.log(
-        "setGameMode: Setting game mode from",
-        state.gameMode,
-        "to",
-        action.payload,
-        "call stack:",
-        new Error().stack?.split('\n').slice(1, 4).join('\n')
-      );
       state.gameMode = action.payload;
     },
     // P2P Lobby actions

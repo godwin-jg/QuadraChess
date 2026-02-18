@@ -3,7 +3,7 @@ import { Pressable, View } from "react-native";
 import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { BoardTheme } from "./BoardThemeConfig";
 import Piece from "./Piece";
-import MiniPlayerCircle, { MINI_PLAYER_STACK_HEIGHT } from "../ui/MiniPlayerCircle";
+import MiniPlayerCircle, { getMiniPlayerSizes } from "../ui/MiniPlayerCircle";
 import { getStaticPieceRotation } from "./PieceConfig";
 
 interface SquareProps {
@@ -38,6 +38,12 @@ interface SquareProps {
   boardRotation?: number;
   viewerColor?: string | null;
   visibilityMask?: SharedValue<number[]>;
+  maskRevision?: SharedValue<number>;
+  animationRunning?: SharedValue<number>;
+  uiState?: SharedValue<number>;
+  dragPieceActive?: boolean;
+  maskActive?: boolean;
+  pieceStyleKey?: string;
 }
 
 
@@ -107,19 +113,29 @@ const CornerSquare = React.memo(function CornerSquare({
   const screenCorner = corner
     ? CORNER_ROTATION_MAP[rotation]?.[corner] ?? corner
     : null;
+  const scaledSizes = getMiniPlayerSizes(size);
   const baseOffset =
     screenCorner === "TL" || screenCorner === "TR"
       ? -Math.round(size * 0.25)
       : screenCorner === "BL" || screenCorner === "BR"
         ? Math.round(size * 0.25)
         : 0;
+  // Clamp top & bottom corners so the timer badge never overflows past the board edge
   let verticalOffset = baseOffset;
+  const minInnerGap = Math.max(4, Math.round(size * 0.12));
   if (screenCorner === "TL" || screenCorner === "TR") {
-    const minInnerGap = Math.max(4, Math.round(size * 0.12));
+    // Top: prevent bottom of stack from exceeding corner boundary toward board
     const maxBottomFromCenter = size * 1.5 - minInnerGap;
-    const baseBottomFromCenter = MINI_PLAYER_STACK_HEIGHT / 2 + baseOffset;
+    const baseBottomFromCenter = scaledSizes.stackHeight / 2 - verticalOffset;
     if (baseBottomFromCenter > maxBottomFromCenter) {
       verticalOffset -= baseBottomFromCenter - maxBottomFromCenter;
+    }
+  } else if (screenCorner === "BL" || screenCorner === "BR") {
+    // Bottom: prevent top of stack from exceeding corner boundary toward board
+    const maxTopFromCenter = size * 1.5 - minInnerGap;
+    const baseTopFromCenter = scaledSizes.stackHeight / 2 + verticalOffset;
+    if (baseTopFromCenter > maxTopFromCenter) {
+      verticalOffset += baseTopFromCenter - maxTopFromCenter;
     }
   }
 
@@ -150,6 +166,7 @@ const CornerSquare = React.memo(function CornerSquare({
           boardRotation={boardRotation}
           timeMs={player.timeMs}
           isTimerDisabled={player.isTimerDisabled}
+          squareSize={size}
         />
       </Animated.View>
     </View>
@@ -175,6 +192,12 @@ const PlayableSquare = React.memo(function PlayableSquare({
   boardRotation = 0,
   viewerColor = null,
   visibilityMask,
+  maskRevision,
+  animationRunning,
+  uiState,
+  dragPieceActive = false,
+  maskActive = false,
+  pieceStyleKey,
 }: SquareProps) {
   const getCaptureBackgroundColor = (capturingColor: string) => {
     switch (capturingColor) {
@@ -219,13 +242,26 @@ const PlayableSquare = React.memo(function PlayableSquare({
   };
 
   const pieceStyle = useAnimatedStyle(() => {
+    const _rev = maskRevision ? maskRevision.value : 0;
+    void _rev;
+
+    const isAnimActive = animationRunning ? animationRunning.value === 1 : false;
+    const isDragMaskActive = dragPieceActive;
+    const shouldApplyMask = isDragMaskActive || (maskActive && isAnimActive);
+
+    if (isSelected && !isDragMaskActive) {
+      return { opacity: 1 };
+    }
+
+    if (!shouldApplyMask) return { opacity: 1 };
+
     const currentIndex = row * 14 + col;
     const isHiddenByMask =
       visibilityMask ? visibilityMask.value[currentIndex] === 1 : false;
     return {
       opacity: isHiddenByMask ? 0 : 1,
     };
-  }, [row, col, visibilityMask]);
+  }, [row, col, visibilityMask, maskRevision, animationRunning, dragPieceActive, maskActive, isSelected]);
 
   const rotationDegrees = piece
     ? getStaticPieceRotation(piece[0], viewerColor)
@@ -242,7 +278,6 @@ const PlayableSquare = React.memo(function PlayableSquare({
       hitSlop={{ left: pressSlopX, right: pressSlopX }}
       style={({ pressed }) => ({
         opacity: !isInteractable ? 0.6 : pressEnabled && pressed ? 0.8 : 1,
-        transform: [{ scale: !isInteractable ? 1 : 1 }],
       })}
     >
       <View
@@ -256,9 +291,8 @@ const PlayableSquare = React.memo(function PlayableSquare({
       >
         {piece && (
           <Animated.View style={[pieceStyle, { zIndex: 1 }]}>
-            {/* Keep rotation on a non-animated View to update immediately */}
             <View style={{ transform: [{ rotate: `${rotationDegrees}deg` }] }}>
-              <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} />
+              <Piece piece={piece} size={size} isEliminated={isEliminated} isSelected={isSelected} styleKey={pieceStyleKey} />
             </View>
           </Animated.View>
         )}

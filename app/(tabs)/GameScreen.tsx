@@ -1,5 +1,5 @@
 import { Text } from "@/components/Themed";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { ActivityIndicator, useWindowDimensions, View, TouchableOpacity, StyleSheet } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
@@ -29,9 +29,9 @@ import SimpleNotification from "../components/ui/SimpleNotification";
 import { useGameFlowMachine } from "../../hooks/useGameFlowMachine";
 import { useGameFlowReady } from "../components/board/useGameFlowReady";
 import { useTurnClock } from "../../hooks/useTurnClock";
-import { buildMoveKey, consumeSkipNextMoveAnimation } from "../../services/gameFlowService";
-import { resetAnimatorState } from "../components/board/SkiaMoveAnimator";
+import { buildMoveKey, consumeSkipNextMoveAnimation, sendGameFlowEvent } from "../../services/gameFlowService";
 import { resetOrchestrationState } from "../components/board/useBoardAnimationOrchestration";
+import { resetAnimatorState } from "../components/board/SkiaMoveAnimator";
 import {
   getBotStateMachineSnapshot,
   subscribeBotStateMachine,
@@ -49,6 +49,8 @@ import Animated, {
   withSpring, 
   withTiming,
   Easing,
+  FadeInLeft,
+  FadeOutLeft,
 } from "react-native-reanimated";
 
 const PLAYER_COLOR_LABELS: Record<string, string> = {
@@ -62,10 +64,13 @@ export default function GameScreen() {
   // Get dispatch function
   const dispatch = useDispatch();
   const router = useRouter();
-  const { gameId, mode } = useLocalSearchParams<{
+  const navigation = useNavigation();
+  const { gameId, mode, spectate } = useLocalSearchParams<{
     gameId?: string;
     mode?: string;
+    spectate?: string;
   }>();
+  const isSpectatorMode = spectate === "true";
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // Responsive layout values
@@ -90,15 +95,16 @@ export default function GameScreen() {
   const bottomHudHeight = baseHudHeight;
   const hudTextScale = 1;
   
-  const { connectionStatus, isOnline: isOnlineMode, isP2P: isP2PMode } =
-    useGameConnection(mode, gameId);
+  const effectiveMode = isSpectatorMode ? "spectate" : mode;
+  const { connectionStatus, isOnline: isOnlineMode, isP2P: isP2PMode, isSpectating } =
+    useGameConnection(effectiveMode, gameId);
   
 
   // Simple notifications state
   const [notifications, setNotifications] = useState<Array<{
     id: string;
     message: string;
-    type: 'info' | 'warning' | 'error' | 'success';
+    type: 'info' | 'warning' | 'error' | 'success' | 'betrayal';
   }>>([]);
   const [botMachineDebug, setBotMachineDebug] = useState<BotMachineSnapshot | null>(
     __DEV__ ? getBotStateMachineSnapshot() : null
@@ -127,6 +133,7 @@ export default function GameScreen() {
     viewerColor: string | null;
   }>({ rotation: 0, viewerColor: null });
   const [introCountdown, setIntroCountdown] = useState<number | null>(null);
+  const introCountdownValueRef = useRef<number | null>(null);
   const introCountdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const introCountdownCompletedAtRef = useRef<number | null>(null);
   const pendingPerspectiveRef = useRef<{ rotation: number; viewerColor: string | null } | null>(
@@ -427,7 +434,6 @@ export default function GameScreen() {
 
     // Check immediately
     const color = getCurrentPlayerColor();
-    console.log(`[BoardRotation] Initial color check: ${color}`);
     commitPlayerColor(color ?? null);
     
     // Keep polling to detect color changes (e.g., when host is reassigned due to bot config)
@@ -435,7 +441,6 @@ export default function GameScreen() {
     const interval = setInterval(() => {
       const currentColor = getCurrentPlayerColor();
       if (currentColor !== lastColor) {
-        console.log(`[BoardRotation] Color changed: ${lastColor} -> ${currentColor}`);
         lastColor = currentColor;
         commitPlayerColor(currentColor ?? null);
       }
@@ -471,12 +476,10 @@ export default function GameScreen() {
         default:
           rotation = 0;
       }
-      
-      console.log(`[BoardRotation] Setting rotation for ${localPlayerColor}: ${rotation}°`);
+
       setBoardRotation(rotation);
     } else {
       // For local games, keep default rotation
-      console.log(`[BoardRotation] No local player color, keeping default rotation`);
       setBoardRotation(0);
     }
   }, [localPlayerColor]);
@@ -487,7 +490,6 @@ export default function GameScreen() {
   
   // ✅ Reset rotation refs when game changes (to handle navigation between games)
   useEffect(() => {
-    console.log(`[BoardRotation] Game changed, resetting rotation refs`);
     isFirstRender.current = true;
     previousRotation.current = 0;
     hasShownInitialPerspectiveRef.current = false;
@@ -497,6 +499,7 @@ export default function GameScreen() {
       clearInterval(introCountdownIntervalRef.current);
       introCountdownIntervalRef.current = null;
     }
+    introCountdownValueRef.current = null;
     setIntroCountdown(null);
     // ✅ Also clear localPlayerColor to prevent countdown from triggering on stale data
     lastStablePlayerColorRef.current = null;
@@ -511,22 +514,19 @@ export default function GameScreen() {
       if (introCountdownIntervalRef.current) {
         clearInterval(introCountdownIntervalRef.current);
       }
+      introCountdownValueRef.current = null;
     };
   }, []);
   
   // ✅ Animate board perspective change with smooth ease-in-out transition
   useEffect(() => {
-    console.log(
-      `[BoardRotation] Animation effect: boardRotation=${boardRotation}, ` +
-        `isFirst=${isFirstRender.current}, prev=${previousRotation.current}, ` +
-        `player=${localPlayerColor}`
-    );
     const targetPlayerColor = localPlayerColor ?? null;
     
     const targetPerspective = { rotation: boardRotation, viewerColor: targetPlayerColor };
 
     const shouldWaitForLocalPlayer =
       (isOnlineMode || isP2PMode) &&
+      !isSpectatorMode &&
       !targetPlayerColor &&
       !hasShownInitialPerspectiveRef.current;
 
@@ -536,14 +536,15 @@ export default function GameScreen() {
       return;
     }
 
-    // ✅ Only show countdown for online/P2P modes - not for solo/single player
-    if (!hasShownInitialPerspectiveRef.current && targetPlayerColor && (isOnlineMode || isP2PMode)) {
+    // ✅ Only show countdown for online/P2P modes - not for solo/single player or spectators
+    if (!hasShownInitialPerspectiveRef.current && targetPlayerColor && (isOnlineMode || isP2PMode) && !isSpectatorMode) {
       hasShownInitialPerspectiveRef.current = true;
       pendingPerspectiveRef.current = targetPerspective;
       // Keep the previous board visible during the countdown
       boardOpacity.value = 1;
       boardScale.value = 1;
       introCountdownCompletedAtRef.current = null;
+      introCountdownValueRef.current = 3;
       setIntroCountdown(3);
 
       if (introCountdownIntervalRef.current) {
@@ -551,24 +552,29 @@ export default function GameScreen() {
       }
 
       introCountdownIntervalRef.current = setInterval(() => {
-        setIntroCountdown((prev) => {
-          if (prev === null) return null;
-          if (prev <= 1) {
-            if (introCountdownIntervalRef.current) {
-              clearInterval(introCountdownIntervalRef.current);
-              introCountdownIntervalRef.current = null;
-            }
-            introCountdownCompletedAtRef.current = Date.now();
-            const pending = pendingPerspectiveRef.current ?? targetPerspective;
-            setVisualPerspective(pending);
-            previousRotation.current = pending.rotation;
-            isFirstRender.current = false;
-            boardOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
-            boardScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
-            return null;
+        const current = introCountdownValueRef.current;
+        if (current === null) return;
+
+        if (current <= 1) {
+          if (introCountdownIntervalRef.current) {
+            clearInterval(introCountdownIntervalRef.current);
+            introCountdownIntervalRef.current = null;
           }
-          return prev - 1;
-        });
+          introCountdownCompletedAtRef.current = Date.now();
+          const pending = pendingPerspectiveRef.current ?? targetPerspective;
+          setVisualPerspective(pending);
+          previousRotation.current = pending.rotation;
+          isFirstRender.current = false;
+          introCountdownValueRef.current = null;
+          setIntroCountdown(null);
+          boardOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+          boardScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
+          return;
+        }
+
+        const next = current - 1;
+        introCountdownValueRef.current = next;
+        setIntroCountdown(next);
       }, 1000);
       return;
     }
@@ -583,7 +589,6 @@ export default function GameScreen() {
       isFirstRender.current = false;
       previousRotation.current = boardRotation;
       setVisualPerspective(targetPerspective);
-      console.log(`[BoardRotation] Direct set (no animation): ${boardRotation}°`);
       boardOpacity.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
       boardScale.value = withTiming(1, { duration: 200, easing: Easing.out(Easing.cubic) });
       return;
@@ -597,22 +602,18 @@ export default function GameScreen() {
     // Capture the target rotation for setTimeout closures
     const targetRotation = boardRotation;
     const targetViewerColor = targetPlayerColor;
-    
-    console.log(`[BoardRotation] Starting fade animation to ${targetRotation}°`);
-    
+
     // Step 1: Fade out and scale down
     boardOpacity.value = withTiming(0, { duration: 200, easing: easeOut });
     boardScale.value = withTiming(0.95, { duration: 200, easing: easeOut });
     
     // Step 2: After fade out, change rotation
     const rotationTimeout = setTimeout(() => {
-      console.log(`[BoardRotation] Fade out complete, setting rotation to ${targetRotation}°`);
       setVisualPerspective({ rotation: targetRotation, viewerColor: targetViewerColor });
     }, 210);
     
     // Step 3: Fade back in
     const fadeInTimeout = setTimeout(() => {
-      console.log(`[BoardRotation] Starting fade in`);
       boardOpacity.value = withTiming(1, { duration: 250, easing: easeIn });
       boardScale.value = withTiming(1, { duration: 250, easing: easeIn });
     }, 220);
@@ -640,6 +641,20 @@ export default function GameScreen() {
       notificationService.clear();
     };
   }, []);
+
+  // ✅ Spectator: clean up fully when navigating away (back gesture, hardware back, etc.)
+  useEffect(() => {
+    if (!isSpectatorMode) return;
+    const unsubscribe = navigation.addListener("beforeRemove", () => {
+      botService.cancelAllBotMoves();
+      botService.cleanupBotMemory();
+      sendGameFlowEvent({ type: "RESET" });
+      resetOrchestrationState();
+      resetAnimatorState();
+      dispatch(resetGame());
+    });
+    return unsubscribe;
+  }, [isSpectatorMode, navigation, dispatch]);
 
   // Clear justEliminated after notification is shown
   useEffect(() => {
@@ -772,6 +787,11 @@ export default function GameScreen() {
     ]
   );
 
+  const boardIsReadOnly =
+    isSpectatorMode ||
+    isSpectating ||
+    ((isOnlineMode || isP2PMode) && !localPlayerColor);
+
   // Show loading screen if game state isn't ready
   if (!isGameStateReady) {
     return (
@@ -849,7 +869,7 @@ export default function GameScreen() {
         <View style={{ width: idealBoardSize, height: idealBoardSize }}>
           <Animated.View
             style={boardRotationStyle}
-            pointerEvents={introCountdown !== null ? "none" : "auto"}
+            pointerEvents={introCountdown !== null || boardIsReadOnly ? "none" : "auto"}
           >
             <Board 
               playerData={players}
@@ -857,6 +877,7 @@ export default function GameScreen() {
               viewerColor={visualPerspective.viewerColor}
               displayTurn={displayTurn}
               maxBoardSize={idealBoardSize}
+              isSpectatorMode={boardIsReadOnly}
             />
           </Animated.View>
           {introCountdown !== null && (
@@ -900,30 +921,45 @@ export default function GameScreen() {
 
       {/* --- Absolutely Positioned Overlays --- */}
       
-      {/* Toggle Button - Top Right Corner */}
-      <Animated.View style={[toggleAnimatedStyle, styles.toggleButtonContainer]}>
-        <TouchableOpacity
-          onPress={() => {
-            toggleScale.value = withSpring(0.9, { damping: 15, stiffness: 200 }, () => {
-              toggleScale.value = withSpring(1, { damping: 15, stiffness: 200 });
-            });
-            toggleOpacity.value = withSpring(isUtilityMode ? 0.7 : 1, { damping: 15, stiffness: 200 });
-            setIsUtilityMode(!isUtilityMode);
-          }}
-          style={[
-            styles.toggleButton,
-            isUtilityMode ? styles.toggleButtonActive : styles.toggleButtonInactive
-          ]}
-          activeOpacity={0.8}
-        >
-          <FontAwesome
-            name={isUtilityMode ? "users" : "sliders"}
-            size={TOGGLE_ICON_SIZE}
-            color="#FFFFFF"
-          />
-        </TouchableOpacity>
-      </Animated.View>
+      {/* Toggle Button - Top Right Corner (hidden for spectators) */}
+      {!boardIsReadOnly && (
+        <Animated.View style={[toggleAnimatedStyle, styles.toggleButtonContainer]}>
+          <TouchableOpacity
+            onPress={() => {
+              toggleScale.value = withSpring(0.9, { damping: 15, stiffness: 200 }, () => {
+                toggleScale.value = withSpring(1, { damping: 15, stiffness: 200 });
+              });
+              toggleOpacity.value = withSpring(isUtilityMode ? 0.7 : 1, { damping: 15, stiffness: 200 });
+              setIsUtilityMode(!isUtilityMode);
+            }}
+            style={[
+              styles.toggleButton,
+              isUtilityMode ? styles.toggleButtonActive : styles.toggleButtonInactive
+            ]}
+            activeOpacity={0.8}
+          >
+            <FontAwesome
+              name={isUtilityMode ? "users" : "sliders"}
+              size={TOGGLE_ICON_SIZE}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
 
+
+      {/* Spectator Indicator */}
+      {isSpectatorMode && (
+        <Animated.View
+          entering={FadeInLeft.duration(300).springify().damping(18)}
+          exiting={FadeOutLeft.duration(200)}
+          style={styles.spectatorBanner}
+        >
+          <View style={styles.spectatorBadge}>
+            <FontAwesome name="eye" size={15} color="#4ade80" />
+          </View>
+        </Animated.View>
+      )}
 
       {/* Game Notification (for eliminations during ongoing game) */}
       <GameNotification
@@ -955,14 +991,9 @@ export default function GameScreen() {
           }))}
           onReset={async () => {
             try {
-              // ✅ MEMORY OPTIMIZATION: Clear bot memory before starting new game
               botService.cleanupBotMemory();
               
-              // ✅ ANIMATION FIX: Reset animation state to prevent stale animators
-              resetAnimatorState();
-              resetOrchestrationState();
-              
-              // ✅ CRITICAL FIX: For online games, create a rematch with same players and bots
+              // For online games, create a rematch with same players and bots
               if (gameMode === 'online' && gameId) {
                 
                 // Create rematch game with same players and bots
@@ -984,10 +1015,7 @@ export default function GameScreen() {
               }
             } catch (error) {
               console.error('Error creating rematch:', error);
-              // Fallback to regular reset
               botService.cleanupBotMemory();
-              resetAnimatorState();
-              resetOrchestrationState();
               dispatch(resetGame());
             }
           }}
@@ -1004,7 +1032,7 @@ export default function GameScreen() {
 
       {/* Promotion Modal - Only show to the player who needs to promote in multiplayer games */}
       <PromotionModal
-        visible={promotionState.isAwaiting && 
+        visible={!isSpectatorMode && promotionState.isAwaiting && 
                 (localPlayerColor === null || // Local games - show to all players
                  promotionState.color === localPlayerColor)} // Multiplayer - show only to promoting player
         playerColor={promotionState.color || ""}
@@ -1111,5 +1139,21 @@ const styles = StyleSheet.create({
     fontSize: 56,
     fontWeight: "700",
     letterSpacing: 2,
+  },
+  spectatorBanner: {
+    position: "absolute",
+    top: TOGGLE_OFFSET_Y,
+    left: TOGGLE_OFFSET_X + 6,
+    zIndex: 20,
+  },
+  spectatorBadge: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(74, 222, 128, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(74, 222, 128, 0.3)",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
   },
 });

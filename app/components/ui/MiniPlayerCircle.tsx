@@ -1,20 +1,50 @@
 import React, { useEffect } from "react";
-import { View, Image, Text, StyleSheet } from "react-native";
+import { View, Image, Text } from "react-native";
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
   withSpring, 
   withTiming,
   withRepeat,
-  withSequence
+  withSequence,
+  cancelAnimation,
 } from "react-native-reanimated";
 
+// Default sizes (used as fallback when no squareSize is provided)
 export const MINI_PLAYER_AVATAR_SIZE = 56;
 export const MINI_PLAYER_TIMER_HEIGHT = 18;
 export const MINI_PLAYER_GAP = 4;
 export const MINI_PLAYER_STACK_HEIGHT =
   MINI_PLAYER_AVATAR_SIZE + MINI_PLAYER_GAP + MINI_PLAYER_TIMER_HEIGHT;
 export const MINI_PLAYER_STACK_WIDTH = 70;
+
+/** Derive all mini-player sizes from a single square size so they scale with the board */
+export function getMiniPlayerSizes(squareSize?: number) {
+  if (!squareSize || squareSize <= 0) {
+    return {
+      avatarSize: MINI_PLAYER_AVATAR_SIZE,
+      timerHeight: MINI_PLAYER_TIMER_HEIGHT,
+      gap: MINI_PLAYER_GAP,
+      stackHeight: MINI_PLAYER_STACK_HEIGHT,
+      stackWidth: MINI_PLAYER_STACK_WIDTH,
+      crestSize: 32,
+      timerFontSize: 12,
+      turnDotSize: 14,
+      turnDotInner: 6,
+    };
+  }
+  // Avatar ≈ 1.8× square size, clamped between 28–56px
+  const avatarSize = Math.round(Math.min(56, Math.max(28, squareSize * 1.8)));
+  const gap = Math.round(Math.max(2, avatarSize * 0.05));
+  const timerHeight = Math.round(Math.max(12, avatarSize * 0.25));
+  const stackHeight = avatarSize + gap + timerHeight;
+  const stackWidth = Math.round(Math.max(40, avatarSize * 1.2));
+  const crestSize = Math.round(Math.max(16, avatarSize * 0.6));
+  const timerFontSize = Math.round(Math.max(8, avatarSize * 0.21));
+  const turnDotSize = Math.round(Math.max(8, avatarSize * 0.25));
+  const turnDotInner = Math.round(Math.max(4, turnDotSize * 0.43));
+  return { avatarSize, timerHeight, gap, stackHeight, stackWidth, crestSize, timerFontSize, turnDotSize, turnDotInner };
+}
 
 interface MiniPlayerCircleProps {
   player: {
@@ -27,6 +57,7 @@ interface MiniPlayerCircleProps {
   boardRotation?: number;
   timeMs?: number;
   isTimerDisabled?: boolean;
+  squareSize?: number;
 }
 
 const formatTime = (ms?: number) => {
@@ -44,6 +75,7 @@ export default function MiniPlayerCircle({
   boardRotation = 0,
   timeMs,
   isTimerDisabled = false,
+  squareSize,
 }: MiniPlayerCircleProps) {
   // Animation values
   const scale = useSharedValue(1);
@@ -98,6 +130,13 @@ export default function MiniPlayerCircle({
     // Update previous values
     previousIsCurrentTurn.value = isCurrentTurn;
     previousIsEliminated.value = isEliminated;
+
+    return () => {
+      cancelAnimation(scale);
+      cancelAnimation(glowOpacity);
+      cancelAnimation(eliminationOpacity);
+      cancelAnimation(eliminationScale);
+    };
   }, [isCurrentTurn, isEliminated]);
 
   // Animation styles
@@ -151,18 +190,16 @@ export default function MiniPlayerCircle({
     }
   };
 
-  // Smaller avatar to fit timer below within 3x3 corner region (~78px total height)
-  const AVATAR_SIZE = MINI_PLAYER_AVATAR_SIZE;
-  const STACK_HEIGHT = MINI_PLAYER_STACK_HEIGHT;
-  const STACK_WIDTH = MINI_PLAYER_STACK_WIDTH;
+  // All sizes scale with squareSize (falls back to fixed defaults)
+  const sizes = getMiniPlayerSizes(squareSize);
 
   return (
     <Animated.View 
       style={[
         eliminationAnimatedStyle, 
         { 
-          width: STACK_WIDTH,
-          height: STACK_HEIGHT,
+          width: sizes.stackWidth,
+          height: sizes.stackHeight,
           justifyContent: 'flex-start',
           alignItems: 'center',
         }
@@ -173,9 +210,9 @@ export default function MiniPlayerCircle({
         style={[
           avatarAnimatedStyle,
           {
-            width: AVATAR_SIZE,
-            height: AVATAR_SIZE,
-            borderRadius: AVATAR_SIZE / 2,
+            width: sizes.avatarSize,
+            height: sizes.avatarSize,
+            borderRadius: sizes.avatarSize / 2,
             backgroundColor: isEliminated 
               ? 'rgba(107, 114, 128, 0.3)' // Gray glass for eliminated
               : isCurrentTurn
@@ -204,116 +241,81 @@ export default function MiniPlayerCircle({
         <Image
           source={getPlayerCrestSource(player.color)}
           style={{
-            width: 32,
-            height: 32,
+            width: sizes.crestSize,
+            height: sizes.crestSize,
             opacity: isEliminated ? 0.5 : 1,
             zIndex: 1,
           }}
           resizeMode="contain"
         />
 
-        {/* Current Turn Indicator - Glassy */}
-        {isCurrentTurn && !isEliminated && (
-          <Animated.View 
-            style={[
-              glowAnimatedStyle,
-              {
-                position: 'absolute',
-                top: -1,
-                right: -1,
-                width: 14,
-                height: 14,
-                borderRadius: 7,
-                backgroundColor: 'rgba(251, 191, 36, 0.8)', // Amber with transparency
-                borderWidth: 1,
-                borderColor: 'rgba(255, 255, 255, 0.9)',
-                shadowColor: '#F59E0B',
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.6,
-                shadowRadius: 3,
-                elevation: 8,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }
-            ]}
-          >
-            <View 
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: 'rgba(255, 255, 255, 0.6)',
-              }} 
-            />
-          </Animated.View>
-        )}
-
-      </Animated.View>
-
-      {/* Timer Badge - Below avatar */}
-      {timeMs !== undefined && (
-        <View 
+        {/* Current Turn Indicator - always mounted to avoid Fabric view-tag race */}
+        <Animated.View 
+          pointerEvents="none"
           style={[
-            styles.timerBadge,
+            glowAnimatedStyle,
             {
-              backgroundColor: isTimerDisabled
-                ? 'rgba(17, 24, 39, 0.6)'
-                : isEliminated 
-                  ? 'rgba(107, 114, 128, 0.9)' 
-                  : isCurrentTurn
-                    ? 'rgba(0, 0, 0, 0.85)'
-                    : 'rgba(0, 0, 0, 0.7)',
-              borderColor: isTimerDisabled
-                ? 'rgba(156, 163, 175, 0.45)'
-                : isEliminated
-                  ? 'rgba(107, 114, 128, 0.6)'
-                  : isCurrentTurn
-                    ? (player.color === 'r' ? 'rgba(239, 68, 68, 0.8)' : 
-                       player.color === 'b' ? 'rgba(59, 130, 246, 0.8)' : 
-                       player.color === 'y' ? 'rgba(124, 58, 237, 0.8)' : 'rgba(16, 185, 129, 0.8)')
-                    : 'rgba(255, 255, 255, 0.3)',
-              opacity: isTimerDisabled ? 0.75 : 1,
+              position: 'absolute',
+              top: -1,
+              right: -1,
+              width: sizes.turnDotSize,
+              height: sizes.turnDotSize,
+              borderRadius: sizes.turnDotSize / 2,
+              backgroundColor: 'rgba(251, 191, 36, 0.8)',
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.9)',
+              shadowColor: '#F59E0B',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.6,
+              shadowRadius: 3,
+              elevation: 8,
+              justifyContent: 'center',
+              alignItems: 'center',
             }
           ]}
         >
-          <Text 
-            style={[
-              styles.timerText,
-              {
-                color: isTimerDisabled
-                  ? '#9CA3AF'
-                  : isEliminated 
-                    ? '#9CA3AF' 
-                    : (timeMs <= 10000 && !isEliminated)
-                      ? '#F87171' // Red when low time
-                      : isCurrentTurn 
-                        ? '#FFFFFF' 
-                        : '#D1D5DB',
-              }
-            ]}
-          >
-            {formatTime(timeMs)}
-          </Text>
-        </View>
+          <View 
+            style={{
+              width: sizes.turnDotInner,
+              height: sizes.turnDotInner,
+              borderRadius: sizes.turnDotInner / 2,
+              backgroundColor: 'rgba(255, 255, 255, 0.6)',
+            }} 
+          />
+        </Animated.View>
+
+      </Animated.View>
+
+      {/* Timer text - below avatar, no background */}
+      {timeMs !== undefined && (
+        <Text 
+          style={{
+            marginTop: sizes.gap,
+            fontSize: Math.round(sizes.timerFontSize * (isTimerDisabled ? 1.7 : 1.25)),
+            fontWeight: '800',
+            fontVariant: ['tabular-nums'],
+            letterSpacing: isTimerDisabled ? 0 : 1.2,
+            textAlign: 'center',
+            opacity: isTimerDisabled ? 0.6 : 1,
+            textShadowColor: 'rgba(0, 0, 0, 0.8)',
+            textShadowOffset: { width: 0, height: 1 },
+            textShadowRadius: 3,
+            color: isTimerDisabled
+              ? '#9CA3AF'
+              : isEliminated 
+                ? '#9CA3AF' 
+                : (timeMs <= 10000 && !isEliminated)
+                  ? '#F87171'
+                  : isCurrentTurn 
+                    ? '#FFFFFF' 
+                    : '#D1D5DB',
+          }}
+        >
+          {isTimerDisabled ? '∞' : formatTime(timeMs)}
+        </Text>
       )}
     </Animated.View>
   );
 }
 
-const styles = StyleSheet.create({
-  timerBadge: {
-    marginTop: MINI_PLAYER_GAP,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    minWidth: 54,
-    alignItems: 'center',
-  },
-  timerText: {
-    fontSize: 12,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 0.5,
-  },
-});
+// StyleSheet removed — all sizes now derived from squareSize via getMiniPlayerSizes()

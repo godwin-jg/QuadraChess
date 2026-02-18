@@ -21,6 +21,9 @@ import { Alert } from "react-native";
 import { onlineSessionMachine as onlineGameService } from "../../services/onlineSessionMachine";
 import p2pGameService from "../../services/p2pGameService";
 import { botService } from "../../services/botService";
+import { sendGameFlowEvent } from "../../services/gameFlowService";
+import { resetOrchestrationState } from "../components/board/useBoardAnimationOrchestration";
+import { resetAnimatorState } from "../components/board/SkiaMoveAnimator";
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const { bottom } = useSafeAreaInsets();
@@ -30,18 +33,26 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
 
     hapticsService.selection();
 
+    const currentRoute = state.routes[state.index];
+    const isSpectating =
+      currentRoute.name === "GameScreen" &&
+      (currentRoute.params as any)?.spectate === "true";
+
+    if (isSpectating) {
+      botService.cancelAllBotMoves();
+      botService.cleanupBotMemory();
+      sendGameFlowEvent({ type: "RESET" });
+      resetOrchestrationState();
+      resetAnimatorState();
+      store.dispatch(resetGame());
+      navigation.navigate(routeName);
+      return;
+    }
+
     // ✅ Check if game is actually in progress
     // Default state is now "waiting", so "active" means a real game is running
     const gameState = store.getState().game;
     const isInActiveGame = gameState.gameStatus === "active";
-
-    // DEBUG: Log what we're checking
-    console.log("🔍 TAB PRESS DEBUG:", {
-      routeName,
-      gameMode: gameState.gameMode,
-      gameStatus: gameState.gameStatus,
-      isInActiveGame,
-    });
 
     // Only warn for multiplayer games (online/P2P), not for single player
     // Skip warning for GameScreen (that's where the game is - they're going TO it, not leaving it)
@@ -62,8 +73,6 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             text: "Leave Anyway",
             style: "destructive",
             onPress: async () => {
-              console.log("🔄 TAB SWITCH: User confirmed leaving game, disconnecting directly");
-              
               // ✅ Directly disconnect without going through modeSwitchService
               // This avoids any possibility of a second confirmation dialog
               try {

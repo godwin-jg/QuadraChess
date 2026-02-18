@@ -8,10 +8,12 @@ import {
   ActivityIndicator,
   ScrollView,
   Switch,
+  Platform,
 } from "react-native";
 import Slider from "@react-native-community/slider";
+import ThickSlider from "../components/ui/ThickSlider";
 import { LinearGradient } from "expo-linear-gradient";
-import { FontAwesome, MaterialCommunityIcons } from "@expo/vector-icons";
+import { FontAwesome, FontAwesome5, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
@@ -23,8 +25,15 @@ import realtimeDatabaseService, {
 } from "../../services/realtimeDatabaseService";
 import { useSettings } from "../../context/SettingsContext";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  withDelay,
+} from "react-native-reanimated";
 import GridBackground from "../components/ui/GridBackground";
-import AnimatedButton from "../components/ui/AnimatedButton";
+import RadialGlowBackground from "../components/ui/RadialGlowBackground";
 import TeamAssignmentDnD from "../components/ui/TeamAssignmentDnD";
 import { hapticsService } from "../../services/hapticsService";
 import { getTabBarSpacer } from "../utils/responsive";
@@ -46,6 +55,115 @@ const TIME_CONTROL_LIMITS = {
 };
 const AUTO_CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
 const AUTO_CLEANUP_MIN_AGE_MS = 30 * 60 * 1000;
+
+const LOBBY_FONTS = {
+  title: "Rajdhani_700Bold",
+  heading: "Rajdhani_600SemiBold",
+  body: "Rajdhani_500Medium",
+};
+
+interface LobbyMenuButtonProps {
+  onPress: () => void;
+  disabled: boolean;
+  iconName: string;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  borderColor?: string;
+  delay?: number;
+}
+
+const LobbyMenuButton: React.FC<LobbyMenuButtonProps> = ({
+  onPress,
+  disabled,
+  iconName,
+  iconColor,
+  title,
+  subtitle,
+  borderColor = "rgba(255,255,255,0.15)",
+  delay = 0,
+}) => {
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(30);
+
+  useEffect(() => {
+    opacity.value = withDelay(delay, withTiming(1, { duration: 600 }));
+    translateY.value = withDelay(
+      delay,
+      withSpring(0, { damping: 12, stiffness: 80 })
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }, { translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.96, { damping: 15, stiffness: 400 });
+    hapticsService.buttonPress();
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, { damping: 15, stiffness: 400 });
+  };
+
+  const iconFill =
+    iconColor.startsWith("#") && iconColor.length === 7
+      ? `${iconColor}26`
+      : "rgba(255,255,255,0.08)";
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <TouchableOpacity
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={disabled}
+        className="py-4 px-5 rounded-2xl active:opacity-80 flex-row items-center overflow-hidden"
+        style={{
+          backgroundColor: "rgba(255,255,255,0.05)",
+          borderWidth: 1,
+          borderColor,
+        }}
+      >
+        <View
+          className="w-12 h-12 rounded-xl justify-center items-center mr-4"
+          style={{ backgroundColor: iconFill }}
+        >
+          <MaterialCommunityIcons
+            name={iconName as any}
+            size={26}
+            color={iconColor}
+          />
+        </View>
+        <View className="flex-1">
+          <Text
+            className="text-xl tracking-wide"
+            style={{ color: "#ffffff", fontFamily: LOBBY_FONTS.heading }}
+          >
+            {title}
+          </Text>
+          <Text
+            className="text-base mt-0.5"
+            style={{
+              color: "rgba(255,255,255,0.5)",
+              fontFamily: LOBBY_FONTS.body,
+            }}
+          >
+            {subtitle}
+          </Text>
+        </View>
+        <MaterialCommunityIcons
+          name="chevron-right"
+          size={24}
+          color="rgba(255,255,255,0.3)"
+        />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 const OnlineLobbyScreen: React.FC = () => {
   const dispatch = useDispatch();
@@ -71,6 +189,7 @@ const OnlineLobbyScreen: React.FC = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const [availableGames, setAvailableGames] = useState<RealtimeGame[]>([]);
+  const [playingGames, setPlayingGames] = useState<RealtimeGame[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [currentGameId, setCurrentGameId] = useState<string | null>(null);
   const [currentGameStatus, setCurrentGameStatus] = useState<RealtimeGame["status"] | null>(null);
@@ -82,6 +201,14 @@ const OnlineLobbyScreen: React.FC = () => {
   const [timeControl, setTimeControl] = useState<TimeControlSettings>(DEFAULT_TIME_CONTROL);
   const [isUpdatingTimeControl, setIsUpdatingTimeControl] = useState(false);
   const [isTimeControlExpanded, setIsTimeControlExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<'live' | 'available'>('available');
+  const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [isJoiningByCode, setIsJoiningByCode] = useState(false);
+  const [currentGameJoinCode, setCurrentGameJoinCode] = useState<string | null>(null);
+  const [currentGameIsPrivate, setCurrentGameIsPrivate] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showFullGames, setShowFullGames] = useState(false);
+  const [staleTick, setStaleTick] = useState(0);
   const isFocused = useIsFocused();
   const authInFlightRef = useRef(false);
   const lastAutoCleanupAtRef = useRef(0);
@@ -101,6 +228,8 @@ const OnlineLobbyScreen: React.FC = () => {
   useEffect(() => {
     if (!currentGameId) {
       setCurrentGameStatus(null);
+      setCurrentGameJoinCode(null);
+      setCurrentGameIsPrivate(false);
       setTimeControl(DEFAULT_TIME_CONTROL);
       lastSyncedTimeControlRef.current = `${DEFAULT_TIME_CONTROL.baseMinutes}:${DEFAULT_TIME_CONTROL.incrementSeconds}`;
     }
@@ -110,7 +239,6 @@ const OnlineLobbyScreen: React.FC = () => {
   // This ensures the waiting room is not shown after resignation
   useEffect(() => {
     if (resigned === "true") {
-      console.log("[OnlineLobby] User resigned from game, clearing game context immediately");
       setCurrentGameId(null);
       setBotPlayers([]);
       dispatch(setPlayers([]));
@@ -173,6 +301,28 @@ const OnlineLobbyScreen: React.FC = () => {
     return unsubscribe;
   }, [isConnected, isFocused]);
 
+  // Subscribe to live (playing) games for spectating
+  useEffect(() => {
+    if (!isConnected || !isFocused) return;
+    
+    const unsubscribe = realtimeDatabaseService.subscribeToPlayingGames(
+      (games) => {
+        setPlayingGames(games);
+      }
+    );
+
+    return unsubscribe;
+  }, [isConnected, isFocused]);
+
+  // Periodic tick to re-evaluate playing games staleness
+  // (Firebase listener only fires on data changes; if all players left a
+  //  game and nothing else writes to it, the listener won't re-fire.)
+  useEffect(() => {
+    if (!isFocused) return;
+    const id = setInterval(() => setStaleTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, [isFocused]);
+
   // Subscribe to current game updates for navigation
   useEffect(() => {
     if (!currentGameId || !isFocused) return;
@@ -188,7 +338,6 @@ const OnlineLobbyScreen: React.FC = () => {
           
           // If user is not in the game anymore (resigned/left), clear the game context
           if (!isUserInGame) {
-            console.log("[OnlineLobby] User is no longer in the game, clearing game context");
             setCurrentGameId(null);
             dispatch(setPlayers([]));
             dispatch(setIsHost(false));
@@ -198,7 +347,6 @@ const OnlineLobbyScreen: React.FC = () => {
           
           // If game is finished, clear the game context
           if (game.status === "finished") {
-            console.log("[OnlineLobby] Game is finished, clearing game context");
             setCurrentGameId(null);
             dispatch(setPlayers([]));
             dispatch(setIsHost(false));
@@ -226,11 +374,11 @@ const OnlineLobbyScreen: React.FC = () => {
           const botPlayersFromGame = normalizedPlayers
             .filter((player: any) => player.isBot === true)
             .map((player: any) => player.color);
-          console.log(`[BotSnapshot] Players from Firebase:`, normalizedPlayers.map(p => ({ color: p.color, isBot: p.isBot })));
-          console.log(`[BotSnapshot] Extracted botPlayers:`, botPlayersFromGame);
           setBotPlayers(botPlayersFromGame);
 
           setCurrentGameStatus(game.status);
+          setCurrentGameJoinCode(game.joinCode || null);
+          setCurrentGameIsPrivate(!!game.isPrivate);
           const baseMs = game.gameState?.timeControl?.baseMs ?? DEFAULT_TIME_CONTROL.baseMinutes * 60 * 1000;
           const incrementMs = game.gameState?.timeControl?.incrementMs ?? DEFAULT_TIME_CONTROL.incrementSeconds * 1000;
           const nextBaseMinutes = clampValue(
@@ -283,14 +431,11 @@ const OnlineLobbyScreen: React.FC = () => {
 
       autoCleanupInFlightRef.current = true;
       try {
-        const deletedCount = await realtimeDatabaseService.cleanupCorruptedGames({
+        await realtimeDatabaseService.cleanupCorruptedGames({
           minAgeMs: AUTO_CLEANUP_MIN_AGE_MS,
         });
-        if (deletedCount > 0) {
-          console.log(`[OnlineLobby] Auto cleanup (${source}) deleted ${deletedCount} games`);
-        }
       } catch (error) {
-        console.warn("[OnlineLobby] Auto cleanup failed:", error);
+        // Auto cleanup failed - continue silently
       } finally {
         lastAutoCleanupAtRef.current = now;
         autoCleanupInFlightRef.current = false;
@@ -388,7 +533,7 @@ const OnlineLobbyScreen: React.FC = () => {
       
       const gameId = await realtimeDatabaseService.createGame(
         settings.profile.name.trim(),
-        [] // Start with no bots - will be configured in waiting room
+        []
       );
       setCurrentGameId(gameId);
       
@@ -407,7 +552,7 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
-  const joinGame = async (gameId: string) => {
+  const joinGame = async (gameId: string, code?: string) => {
     if (!settings.profile.name.trim()) {
       Alert.alert("Error", "Please enter a name");
       return;
@@ -417,16 +562,53 @@ const OnlineLobbyScreen: React.FC = () => {
     try {
       // Reset local game state before joining new game
       dispatch(resetGame());
-      // ✅ CRITICAL FIX: Set game mode to "online" when joining a game
       dispatch(setGameMode("online"));
       
-      await realtimeDatabaseService.joinGame(gameId, settings.profile.name);
+      await realtimeDatabaseService.joinGame(gameId, settings.profile.name, code);
       setCurrentGameId(gameId);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error joining game:", error);
-      Alert.alert("Error", "Failed to join game");
+      const msg = error?.message || "";
+      if (msg.includes("Invalid game code")) {
+        Alert.alert("Invalid Code", "The code you entered is incorrect.");
+      } else {
+        Alert.alert("Error", "Failed to join game");
+      }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const joinGameWithCode = async () => {
+    const code = joinCodeInput.replace(/[^0-9]/g, "").slice(0, 4);
+    if (code.length !== 4) {
+      Alert.alert("Invalid Code", "Please enter a 4-digit game code.");
+      return;
+    }
+    if (!settings.profile.name.trim()) {
+      Alert.alert("Error", "Please enter a name");
+      return;
+    }
+
+    setIsJoiningByCode(true);
+    try {
+      const game = await realtimeDatabaseService.findGameByJoinCode(code);
+      if (!game) {
+        Alert.alert("Not Found", "No waiting game found with that code.");
+        return;
+      }
+      await joinGame(game.id, code);
+      setJoinCodeInput("");
+    } catch (error: any) {
+      console.error("Error joining by code:", error);
+      const msg = error?.message || "";
+      if (msg.includes("Invalid game code")) {
+        Alert.alert("Invalid Code", "The code you entered is incorrect.");
+      } else {
+        Alert.alert("Error", "Failed to join game with that code.");
+      }
+    } finally {
+      setIsJoiningByCode(false);
     }
   };
 
@@ -456,8 +638,6 @@ const OnlineLobbyScreen: React.FC = () => {
           dispatch(setPlayers([]));
           dispatch(setIsHost(false));
           dispatch(setCanStartGame(false));
-          
-          console.log("Left game despite connection issues - continuing normally");
         } else {
           // For other errors, still try to clean up locally
           setCurrentGameId(null);
@@ -476,16 +656,13 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
-  // Back to home action
-  const handleBackToHome = () => {
-    // 🔊 Play button sound for back to home action
+  const spectateGame = (gameId: string) => {
     try {
-      const soundService = require('../../services/soundService').default;
-      soundService.playButtonSound();
+      const { hapticsService } = require('../../services/hapticsService');
+      hapticsService.buttonPress();
     } catch (error) {
     }
-    
-    router.back();
+    router.push(`/(tabs)/GameScreen?gameId=${gameId}&mode=spectate&spectate=true`);
   };
 
   const startGame = async () => {
@@ -515,11 +692,7 @@ const OnlineLobbyScreen: React.FC = () => {
 
   // Toggle bot status for a player color (host only)
   const toggleBotPlayer = async (color: string) => {
-    console.log(`[BotToggle] Toggle called for color: ${color}, isHost: ${isHost}, gameId: ${currentGameId}`);
-    console.log(`[BotToggle] Current botPlayers state:`, botPlayers);
-    
     if (!isHost || !currentGameId) {
-      console.log(`[BotToggle] Aborting - not host or no game`);
       return;
     }
     
@@ -527,13 +700,11 @@ const OnlineLobbyScreen: React.FC = () => {
       ? botPlayers.filter(c => c !== color)
       : [...botPlayers, color];
     
-    console.log(`[BotToggle] New botPlayers will be:`, newBotPlayers);
     setBotPlayers(newBotPlayers);
     
     // Update bot configuration in database
     try {
       await realtimeDatabaseService.updateBotConfiguration(currentGameId, newBotPlayers);
-      console.log(`[BotToggle] Update successful`);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       // Revert local state on error
@@ -565,15 +736,14 @@ const OnlineLobbyScreen: React.FC = () => {
     }
   };
 
-  const renderGameItem = (item: RealtimeGame, index: number) => {
-    // Only count valid players (with proper data)
+  const renderGameItem = (item: RealtimeGame, index: number, isLive: boolean = false) => {
     const validPlayers = Object.values(item.players || {}).filter(player => 
       player && player.id && player.name && player.color
     );
     const playerCount = validPlayers.length;
     const isFull = playerCount >= (item.maxPlayers || 4);
+    const isPrivateGame = !!item.isPrivate;
 
-    // Extract time control from game state
     const baseMs = item.gameState?.timeControl?.baseMs ?? 5 * 60 * 1000;
     const incrementMs = item.gameState?.timeControl?.incrementMs ?? 0;
     const baseMinutes = Math.round(baseMs / (60 * 1000));
@@ -582,90 +752,222 @@ const OnlineLobbyScreen: React.FC = () => {
       ? `${baseMinutes}+${incrementSeconds}` 
       : `${baseMinutes} min`;
 
+    const blocked = !isLive && isFull;
+
     return (
       <TouchableOpacity
         key={item.id || `game-${index}`}
         className={`p-4 rounded-xl mb-3 border ${
-          isFull 
-            ? "bg-white/5 border-white/10 opacity-60" 
-            : "bg-white/10 border-white/20"
+          isLive
+            ? "bg-blue-900/20 border-blue-500/30"
+            : blocked 
+              ? "bg-white/5 border-white/10 opacity-60" 
+              : "bg-green-900/20 border-green-500/30"
         }`}
         onPress={() => {
+          if (isLive) {
+            spectateGame(item.id);
+            return;
+          }
           if (isFull) {
             Alert.alert("Game Full", "This game already has 4 players.");
             return;
           }
-          // ✅ Add haptic feedback for buttons that don't play sounds
-          try {
-            const { hapticsService } = require('../../services/hapticsService');
-            hapticsService.buttonPress();
-          } catch (error) {
+          if (isPrivateGame) {
+            if (Platform.OS === "ios" && typeof Alert.prompt === "function") {
+              Alert.prompt(
+                "Private Game",
+                "Enter the 4-digit code to join this game:",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Join",
+                    onPress: (code: string | undefined) => {
+                      const trimmed = (code || "").replace(/[^0-9]/g, "").slice(0, 4);
+                      if (trimmed.length !== 4) {
+                        Alert.alert("Invalid Code", "Please enter a 4-digit game code.");
+                        return;
+                      }
+                      setJoinCodeInput(trimmed);
+                      void joinGame(item.id, trimmed);
+                    },
+                  },
+                ],
+                "plain-text",
+                "",
+                "number-pad"
+              );
+            } else {
+              Alert.alert(
+                "Private Game",
+                "Enter the 4-digit code in the Join with Code section, then tap Join."
+              );
+            }
+            return;
           }
+          hapticsService.buttonPress();
           joinGame(item.id);
         }}
-        disabled={isLoading || isFull}
+        disabled={!isLive && (isLoading || isFull)}
       >
         <View className="flex-row justify-between items-center">
-          <View className="flex-1">
-            <Text className={`text-lg font-bold ${isFull ? "text-gray-400" : "text-white"}`}>
-              {item.hostName}'s Game
-            </Text>
-            <Text className="text-gray-300 text-sm">
-              {playerCount}/{item.maxPlayers} players
-            </Text>
+          <View className="flex-1 flex-row items-center">
+            {isLive && (
+              <FontAwesome name="eye" size={14} color="#3b82f6" style={{ marginRight: 8 }} />
+            )}
+            {!isLive && isPrivateGame && (
+              <FontAwesome name="lock" size={14} color="#facc15" style={{ marginRight: 8 }} />
+            )}
+            <View className="flex-1">
+              <Text
+                className={`text-lg font-bold ${isLive ? "text-blue-300" : blocked ? "text-gray-400" : "text-white"}`}
+                style={{ fontFamily: LOBBY_FONTS.heading }}
+              >
+                {item.hostName}'s Game
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 3 }}>
+                {Array.from({ length: item.maxPlayers || 4 }).map((_, i) => (
+                  <FontAwesome5
+                    key={i}
+                    name="couch"
+                    size={12}
+                    color={i < playerCount ? (isLive ? '#3b82f6' : '#facc15') : '#4b5563'}
+                  />
+                ))}
+                <Text style={{ color: '#9ca3af', fontSize: 11, marginLeft: 3, fontFamily: LOBBY_FONTS.body }}>
+                  {isLive ? `${playerCount} in game` : isFull ? 'Full' : `${(item.maxPlayers || 4) - playerCount} open`}
+                </Text>
+              </View>
+            </View>
           </View>
-          <View className="items-end">
-            <Text className={`text-sm ${isFull ? "text-red-400" : "text-green-400"}`}>
-              {isFull ? "Full" : "Available"}
-            </Text>
-            <Text className="text-gray-400 text-xs mt-0.5">
-              {timeControlLabel}
-            </Text>
+          <View className="items-end flex-row items-center gap-2">
+            <View className="items-end">
+              <Text
+                className={`text-sm ${
+                  isLive ? "text-blue-400" : isFull ? "text-red-400" : isPrivateGame ? "text-yellow-400" : "text-green-400"
+                }`}
+                style={{ fontFamily: LOBBY_FONTS.heading }}
+              >
+                {isLive ? "Live" : isFull ? "Full" : isPrivateGame ? "Private" : "Available"}
+              </Text>
+              <Text
+                className="text-gray-400 text-xs mt-0.5"
+                style={{ fontFamily: LOBBY_FONTS.body }}
+              >
+                {timeControlLabel}
+              </Text>
+            </View>
           </View>
         </View>
       </TouchableOpacity>
     );
   };
 
-  const displayAvailableGames = useMemo(
-    () =>
-      availableGames
-        .slice()
-        .filter((game, index, self) =>
-          game.id && self.findIndex(g => g.id === game.id) === index
-        )
-        .sort((a, b) => {
-          const timestampA = a.lastActivity || a.createdAt || 0;
-          const timestampB = b.lastActivity || b.createdAt || 0;
-          return timestampB - timestampA;
-        }),
-    [availableGames]
-  );
+  const displayAvailableGames = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return availableGames
+      .slice()
+      .filter((game, index, self) =>
+        game.id && self.findIndex(g => g.id === game.id) === index
+      )
+      .filter((game) => {
+        if (!showFullGames) {
+          const playerCount = Object.values(game.players || {}).filter(
+            (p) => p && p.id && p.name && p.color
+          ).length;
+          if (playerCount >= (game.maxPlayers || 4)) return false;
+        }
+        if (query) {
+          const hostMatch = (game.hostName || "").toLowerCase().includes(query);
+          const codeMatch = (game.joinCode || "").toLowerCase().includes(query);
+          return hostMatch || codeMatch;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const timestampA = a.lastActivity || a.createdAt || 0;
+        const timestampB = b.lastActivity || b.createdAt || 0;
+        return timestampB - timestampA;
+      });
+  }, [availableGames, searchQuery, showFullGames]);
+
+  const displayPlayingGames = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const now = Date.now();
+    const ALL_OFFLINE_MS = 3 * 60_000;
+    return playingGames
+      .slice()
+      .filter((game, index, self) =>
+        game.id && self.findIndex(g => g.id === game.id) === index
+      )
+      .filter((game) => {
+        // Drop games where every non-eliminated human player is offline
+        const gs = game.gameState;
+        const eliminated: string[] = gs?.eliminatedPlayers ?? [];
+        const humans = Object.values(game.players || {}).filter(
+          (p) => p && !p.isBot && p.color && !eliminated.includes(p.color)
+        );
+        if (humans.length > 0) {
+          const allOffline = humans.every(
+            (p) => now - (p.lastSeen ?? 0) > ALL_OFFLINE_MS
+          );
+          if (allOffline) return false;
+        }
+        if (!query) return true;
+        const hostMatch = (game.hostName || "").toLowerCase().includes(query);
+        return hostMatch;
+      })
+      .sort((a, b) => {
+        const timestampA = a.lastActivity || a.createdAt || 0;
+        const timestampB = b.lastActivity || b.createdAt || 0;
+        return timestampB - timestampA;
+      });
+  }, [playingGames, searchQuery, staleTick]);
 
   const timeControlLocked =
     !isHost || currentGameStatus !== "waiting" || isUpdatingTimeControl;
   const timeControlLabel = formatTimeControlLabel(timeControl);
-  const sliderAccentColor = timeControlLocked ? "#6b7280" : "#ffffff";
-  const sliderTrackColor = timeControlLocked ? "#374151" : "#9ca3af";
-  const sliderThumbColor = timeControlLocked ? "#9ca3af" : "#ffffff";
+  const sliderAccentColors = timeControlLocked ? ["#4b5563", "#374151"] : ["#14b8a6", "#6366f1"];
+  const sliderTrackColor = timeControlLocked ? "#1f2937" : "rgba(255,255,255,0.1)";
+  const sliderThumbColor = timeControlLocked ? "#6b7280" : "#ffffff";
 
   if (!isConnected) {
     return (
-      <View className="flex-1 bg-black justify-center items-center">
-        <ActivityIndicator size="large" color="#ffffff" />
-        <Text className="text-white text-lg mt-4">
-          {connectionStatus}
-        </Text>
-        <Text className="text-gray-400 text-sm mt-2">
-          Please wait while we connect...
-        </Text>
-        <TouchableOpacity
-          className="bg-blue-600 px-4 py-2 rounded-lg mt-5"
-          onPress={() => initializeAuth("Re-authenticating...")}
-        >
-          <Text className="text-white text-sm font-bold">Retry</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={{ flex: 1 }} className="bg-black">
+        <RadialGlowBackground />
+        <GridBackground />
+        <View className="flex-1 justify-center items-center" style={{ zIndex: 1 }}>
+          <ActivityIndicator size="large" color="#ffffff" />
+          <Text
+            className="text-white text-lg mt-4"
+            style={{ fontFamily: LOBBY_FONTS.heading }}
+          >
+            {connectionStatus}
+          </Text>
+          <Text
+            className="text-gray-400 text-sm mt-2"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
+            Please wait while we connect...
+          </Text>
+          <TouchableOpacity
+            className="px-5 py-2.5 rounded-xl mt-5"
+            style={{
+              backgroundColor: "rgba(255,255,255,0.05)",
+              borderWidth: 1,
+              borderColor: "rgba(59,130,246,0.3)",
+            }}
+            onPress={() => initializeAuth("Re-authenticating...")}
+          >
+            <Text
+              className="text-white text-sm font-bold"
+              style={{ fontFamily: LOBBY_FONTS.heading }}
+            >
+              Retry
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -673,41 +975,36 @@ const OnlineLobbyScreen: React.FC = () => {
     // In-game waiting room
     return (
       <SafeAreaView style={{ flex: 1 }} className="bg-black">
-        {/* Subtle blueprint grid background */}
+        <RadialGlowBackground />
         <GridBackground />
         <ScrollView
           contentContainerStyle={{ padding: 18, paddingBottom: tabBarSpacer }}
           showsVerticalScrollIndicator={false}
+          style={{ zIndex: 1 }}
         >
         <View className="items-center mb-6">
-          <Text className="text-gray-300 text-base mb-2">Playing as:</Text>
-          {isEditingName ? (
-            <TextInput
-              className="text-white text-2xl font-semibold text-center border-b border-white/30 pb-1"
-              value={tempName}
-              onChangeText={setTempName}
-              onSubmitEditing={saveName}
-              onBlur={saveName}
-              autoFocus
-              placeholder="Enter name"
-              placeholderTextColor="#9CA3AF"
-            />
-          ) : (
-            <TouchableOpacity onPress={() => {
-              hapticsService.selection();
-              startEditingName();
-            }}>
-              <Text className="text-white text-2xl font-semibold">
-                {settings.profile.name}
-              </Text>
-            </TouchableOpacity>
-          )}
+          <Text
+            className="text-gray-300 text-base mb-2"
+            style={{ fontFamily: LOBBY_FONTS.body }}
+          >
+            Playing as:
+          </Text>
+          <Text
+            className="text-white text-2xl font-semibold"
+            style={{ fontFamily: LOBBY_FONTS.title }}
+          >
+            {settings.profile.name}
+          </Text>
         </View>
 
         <View className="bg-white/10 p-5 rounded-xl mb-5 items-center">
           <View className="space-y-3 w-full">
-            <Text className="text-white text-lg font-semibold mb-2 text-center">Players ({players.length})</Text>
-            {/* ✅ CRITICAL FIX: Show all players (bots are already included in Redux players array) */}
+            <Text
+              className="text-white text-lg font-semibold mb-2 text-center"
+              style={{ fontFamily: LOBBY_FONTS.heading }}
+            >
+              Players ({players.length})
+            </Text>
             {(() => {
               // All players (including bots) come from Redux players array
               // No need to duplicate bots from botPlayers state
@@ -719,7 +1016,10 @@ const OnlineLobbyScreen: React.FC = () => {
                     key={player.id || `player-${index}`}
                     className="flex-row items-center justify-between"
                   >
-                    <Text className="text-white text-lg">
+                    <Text
+                      className="text-white text-lg"
+                      style={{ fontFamily: LOBBY_FONTS.heading }}
+                    >
                       {player.isBot
                         ? `Bot ${COLOR_LABELS[player.color] ?? "Player"}`
                         : player.name}{" "}
@@ -739,21 +1039,34 @@ const OnlineLobbyScreen: React.FC = () => {
                                   : "bg-gray-500"
                         }`}
                       />
-                      <Text className="text-gray-400 text-base">
+                      <Text
+                        className="text-gray-400 text-base"
+                        style={{ fontFamily: LOBBY_FONTS.body }}
+                      >
                         {player.isBot ? 'Bot' : (player.connectionState || 'connected')}
                       </Text>
                     </View>
                   </View>
                 ))
               ) : (
-                <Text className="text-gray-400 text-base text-center">No players yet</Text>
+                <Text
+                  className="text-gray-400 text-base text-center"
+                  style={{ fontFamily: LOBBY_FONTS.body }}
+                >
+                  No players yet
+                </Text>
               );
             })()}
             
             {/* Bot Configuration Section (Host Only) */}
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
-                <Text className="text-white text-lg font-semibold mb-2 text-center">Add Bots</Text>
+                <Text
+                  className="text-white text-lg font-semibold mb-2 text-center"
+                  style={{ fontFamily: LOBBY_FONTS.heading }}
+                >
+                  Add Bots
+                </Text>
                 <Text className="text-gray-400 text-xs mb-3 text-center">
                   Tap to toggle bot players
                 </Text>
@@ -802,7 +1115,7 @@ const OnlineLobbyScreen: React.FC = () => {
             {isHost && (
               <View className="mt-4 pt-4 border-t border-white/20">
                 <View className="flex-row items-center justify-between mb-2">
-                  <Text className={SECTION_TITLE_CLASS} numberOfLines={1}>Team Play</Text>
+                  <Text className={SECTION_TITLE_CLASS} numberOfLines={1} style={{ fontFamily: LOBBY_FONTS.heading }}>Team Play</Text>
                   <Switch
                     value={teamMode}
                     onValueChange={(nextValue) => {
@@ -835,9 +1148,51 @@ const OnlineLobbyScreen: React.FC = () => {
                 )}
               </View>
             )}
+            {currentGameJoinCode && (
+              <View className="mt-4 pt-4 border-t border-white/20">
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center">
+                    <Text className={SECTION_TITLE_CLASS} style={{ fontFamily: LOBBY_FONTS.heading }}>Private</Text>
+                    <FontAwesome name="lock" size={18} color="#facc15" style={{ marginLeft: 6 }} />
+                  </View>
+                  {isHost && currentGameStatus === "waiting" && (
+                    <View className="flex-row items-center">
+                      <Switch
+                        value={currentGameIsPrivate}
+                        onValueChange={async (val) => {
+                          hapticsService.selection();
+                          try {
+                            await realtimeDatabaseService.updateGamePrivacy(currentGameId!, val);
+                          } catch (error) {
+                            console.error("Error updating game privacy:", error);
+                            Alert.alert("Error", "Failed to update game privacy");
+                          }
+                        }}
+                        trackColor={{ false: "#374151", true: "#eab308" }}
+                        thumbColor={currentGameIsPrivate ? "#ffffff" : "#d1d5db"}
+                        ios_backgroundColor="#374151"
+                      />
+                    </View>
+                  )}
+                </View>
+                {currentGameIsPrivate && (
+                  <Text className="text-white text-2xl font-bold tracking-[6px] mt-3 text-center">
+                    {currentGameJoinCode}
+                  </Text>
+                )}
+                {currentGameIsPrivate && (
+                  <Text className="text-yellow-600 text-xs mt-2 text-center" style={{ lineHeight: 16 }}>
+                    Only players with the code can join this game.
+                  </Text>
+                )}
+              </View>
+            )}
             <View className="mt-4 pt-4 border-t border-white/20">
               <View className="flex-row items-center justify-between mb-3">
-                <Text className={SECTION_TITLE_CLASS}>Time Control</Text>
+                <View className="flex-row items-center">
+                  <MaterialCommunityIcons name="clock-outline" size={16} color="#9ca3af" style={{ marginRight: 6 }} />
+                  <Text className={SECTION_TITLE_CLASS} style={{ fontFamily: LOBBY_FONTS.heading }}>Time Control</Text>
+                </View>
                 <View className="flex-row items-center gap-2">
                   <Text className="text-gray-400 text-sm">{timeControlLabel}</Text>
                   <TouchableOpacity
@@ -861,22 +1216,30 @@ const OnlineLobbyScreen: React.FC = () => {
               </View>
               {isTimeControlExpanded && (
                 <>
-                  <View className="mb-3">
+                  <View className="mb-2">
                     <View className="flex-row items-center justify-between mb-1">
-                      <Text className="text-white text-sm">Base time</Text>
-                      <Text className="text-gray-300 text-sm">
-                        {timeControl.baseMinutes} min
-                      </Text>
+                      <Text className="text-gray-400 text-xs uppercase tracking-wider" style={{ fontFamily: LOBBY_FONTS.body }}>Base time</Text>
+                      <View style={{
+                        backgroundColor: 'rgba(96,165,250,0.15)',
+                        paddingHorizontal: 10,
+                        paddingVertical: 3,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: 'rgba(96,165,250,0.25)',
+                      }}>
+                        <Text style={{ color: '#93c5fd', fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'], fontFamily: LOBBY_FONTS.heading }}>
+                          {timeControl.baseMinutes} min
+                        </Text>
+                      </View>
                     </View>
-                    <Slider
-                      style={{ width: "100%", height: 30 }}
+                    <ThickSlider
                       minimumValue={TIME_CONTROL_LIMITS.baseMinutes.min}
                       maximumValue={TIME_CONTROL_LIMITS.baseMinutes.max}
                       step={TIME_CONTROL_LIMITS.baseMinutes.step}
                       value={timeControl.baseMinutes}
-                      minimumTrackTintColor={sliderAccentColor}
-                      maximumTrackTintColor={sliderTrackColor}
-                      thumbTintColor={sliderThumbColor}
+                      accentColors={sliderAccentColors}
+                      trackColor={sliderTrackColor}
+                      thumbColor={sliderThumbColor}
                       disabled={timeControlLocked}
                       onValueChange={(value) => {
                         if (timeControlLocked) return;
@@ -912,22 +1275,28 @@ const OnlineLobbyScreen: React.FC = () => {
                   </View>
                   <View>
                     <View className="flex-row items-center justify-between mb-1">
-                      <Text className="text-white text-sm">Increment</Text>
-                      <Text className="text-gray-300 text-sm">
-                        {timeControl.incrementSeconds > 0
-                          ? `+${timeControl.incrementSeconds}s`
-                          : "0s"}
-                      </Text>
+                      <Text className="text-gray-400 text-xs uppercase tracking-wider" style={{ fontFamily: LOBBY_FONTS.body }}>Increment</Text>
+                      <View style={{
+                        backgroundColor: 'rgba(96,165,250,0.15)',
+                        paddingHorizontal: 10,
+                        paddingVertical: 3,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: 'rgba(96,165,250,0.25)',
+                      }}>
+                        <Text style={{ color: '#93c5fd', fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'], fontFamily: LOBBY_FONTS.heading }}>
+                          {timeControl.incrementSeconds > 0 ? `+${timeControl.incrementSeconds}s` : "0s"}
+                        </Text>
+                      </View>
                     </View>
-                    <Slider
-                      style={{ width: "100%", height: 30 }}
+                    <ThickSlider
                       minimumValue={TIME_CONTROL_LIMITS.incrementSeconds.min}
                       maximumValue={TIME_CONTROL_LIMITS.incrementSeconds.max}
                       step={TIME_CONTROL_LIMITS.incrementSeconds.step}
                       value={timeControl.incrementSeconds}
-                      minimumTrackTintColor={sliderAccentColor}
-                      maximumTrackTintColor={sliderTrackColor}
-                      thumbTintColor={sliderThumbColor}
+                      accentColors={sliderAccentColors}
+                      trackColor={sliderTrackColor}
+                      thumbColor={sliderThumbColor}
                       disabled={timeControlLocked}
                       onValueChange={(value) => {
                         if (timeControlLocked) return;
@@ -983,7 +1352,10 @@ const OnlineLobbyScreen: React.FC = () => {
         {isHost && (
           <View className="items-center gap-4 mb-4">
             {players.length < 4 && (
-              <Text className="text-gray-400 text-base mb-3">
+              <Text
+                className="text-gray-400 text-base mb-3"
+                style={{ fontFamily: LOBBY_FONTS.body }}
+              >
                 Need 4 players to start
               </Text>
             )}
@@ -1001,6 +1373,7 @@ const OnlineLobbyScreen: React.FC = () => {
                   players.length !== 4 ? "text-gray-300" : "text-black"
                 }`}
                 style={{
+                  fontFamily: LOBBY_FONTS.title,
                   fontWeight: '900',
                   letterSpacing: 1.2,
                   textShadowColor: 'rgba(0,0,0,0.3)',
@@ -1035,6 +1408,7 @@ const OnlineLobbyScreen: React.FC = () => {
           <Text 
             className="text-white text-xl font-bold text-center"
             style={{
+              fontFamily: LOBBY_FONTS.title,
               fontWeight: '900',
               letterSpacing: 1.2,
               textShadowColor: 'rgba(0,0,0,0.3)',
@@ -1054,17 +1428,24 @@ const OnlineLobbyScreen: React.FC = () => {
   // Main menu
   return (
     <SafeAreaView style={{ flex: 1 }} className="bg-black">
-      {/* Subtle blueprint grid background */}
+      <RadialGlowBackground />
       <GridBackground />
       <ScrollView
         contentContainerStyle={{ padding: 24, paddingBottom: tabBarSpacer }}
         showsVerticalScrollIndicator={false}
+        style={{ zIndex: 1 }}
       >
       <View className="items-center mb-8">
-        <Text className="text-gray-300 text-sm mb-3">Playing as:</Text>
+        <Text
+          className="text-gray-300 text-sm mb-3"
+          style={{ fontFamily: LOBBY_FONTS.body }}
+        >
+          Playing as:
+        </Text>
         {isEditingName ? (
           <TextInput
             className="text-white text-2xl font-bold text-center border-b border-white/30 pb-1"
+            style={{ fontFamily: LOBBY_FONTS.title }}
             value={tempName}
             onChangeText={setTempName}
             onSubmitEditing={saveName}
@@ -1078,71 +1459,341 @@ const OnlineLobbyScreen: React.FC = () => {
             hapticsService.selection();
             startEditingName();
           }}>
-            <Text className="text-white text-2xl font-bold">{settings.profile.name}</Text>
+            <Text
+              className="text-white text-2xl font-bold"
+              style={{ fontFamily: LOBBY_FONTS.title }}
+            >
+              {settings.profile.name}
+            </Text>
           </TouchableOpacity>
         )}
       </View>
 
-
-      <View className="mb-8">
-        <AnimatedButton
-          icon="🌐"
+      <View className="gap-3 mb-6">
+        <LobbyMenuButton
+          iconName="earth"
+          iconColor="#3b82f6"
           title="Create Game"
           subtitle={isLoading ? "Creating..." : "Start an online game"}
-          gradientColors={['#ffffff', '#f0f0f0']}
-          textColor="black"
-          subtitleColor="gray-600"
+          borderColor="rgba(59, 130, 246, 0.3)"
           onPress={createGame}
           disabled={isLoading}
           delay={0}
         />
+      </View>
 
-        <View style={{ marginTop: 16 }}>
-          <AnimatedButton
-            icon="🏠"
-            title="Back to Home"
-            subtitle="Return to main menu"
-            gradientColors={['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.1)']}
-            textColor="white"
-            subtitleColor="gray-300"
-            onPress={handleBackToHome}
-            disabled={false}
-            delay={150}
+      <View
+        className="mb-6 p-4 rounded-2xl"
+        style={{
+          backgroundColor: "rgba(255,255,255,0.05)",
+          borderWidth: 1,
+          borderColor: "rgba(250, 204, 21, 0.28)",
+        }}
+      >
+        <View className="flex-row items-center mb-2">
+          <FontAwesome name="lock" size={13} color="#facc15" style={{ marginRight: 8 }} />
+          <Text
+            className="text-white text-sm tracking-wide"
+            style={{ fontFamily: LOBBY_FONTS.heading }}
+          >
+            Join with Code
+          </Text>
+        </View>
+        <Text
+          className="text-gray-400 text-xs mb-3"
+          style={{ fontFamily: LOBBY_FONTS.body }}
+        >
+          Enter a 4-digit private game code shared by the host.
+        </Text>
+        <View className="flex-row items-center">
+          <TextInput
+            value={joinCodeInput}
+            onChangeText={(text) =>
+              setJoinCodeInput(text.replace(/[^0-9]/g, "").slice(0, 4))
+            }
+            placeholder="0000"
+            placeholderTextColor="#6b7280"
+            keyboardType="number-pad"
+            maxLength={4}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (!isLoading && !isJoiningByCode && joinCodeInput.length === 4) {
+                void joinGameWithCode();
+              }
+            }}
+            style={{
+              flex: 1,
+              color: "#ffffff",
+              fontSize: 18,
+              letterSpacing: 6,
+              textAlign: "center",
+              borderRadius: 10,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              borderWidth: 1,
+              borderColor: "rgba(255,255,255,0.18)",
+              backgroundColor: "rgba(0,0,0,0.25)",
+              fontFamily: LOBBY_FONTS.title,
+            }}
           />
+          <TouchableOpacity
+            className="ml-3 px-4 py-2.5 rounded-xl"
+            style={{
+              backgroundColor:
+                !isLoading && !isJoiningByCode && joinCodeInput.length === 4
+                  ? "rgba(250, 204, 21, 0.2)"
+                  : "rgba(107, 114, 128, 0.25)",
+              borderWidth: 1,
+              borderColor:
+                !isLoading && !isJoiningByCode && joinCodeInput.length === 4
+                  ? "rgba(250, 204, 21, 0.45)"
+                  : "rgba(107, 114, 128, 0.35)",
+              minWidth: 74,
+              alignItems: "center",
+            }}
+            disabled={isLoading || isJoiningByCode || joinCodeInput.length !== 4}
+            onPress={() => {
+              hapticsService.buttonPress();
+              void joinGameWithCode();
+            }}
+            activeOpacity={0.75}
+          >
+            {isJoiningByCode ? (
+              <ActivityIndicator size="small" color="#facc15" />
+            ) : (
+              <Text
+                className="text-yellow-300 text-sm"
+                style={{ fontFamily: LOBBY_FONTS.heading }}
+              >
+                Join
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
-      <View className="flex-1 items-center">
-        <View className="items-center mb-4">
-          <Text className="text-white text-xl font-bold text-center mb-4">
-            Available Games
+      {/* Game Tab Toggle */}
+      <View style={{
+        flexDirection: 'row',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        borderRadius: 28,
+        padding: 4,
+        marginBottom: 16,
+      }}>
+        <TouchableOpacity
+          onPress={() => {
+            hapticsService.selection();
+            setActiveTab('available');
+          }}
+          style={{
+            flex: 1,
+            paddingVertical: 11,
+            borderRadius: 24,
+            backgroundColor: activeTab === 'available' ? '#ffffff' : 'transparent',
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+          activeOpacity={0.7}
+        >
+          <FontAwesome
+            name="plus-circle"
+            size={13}
+            color={activeTab === 'available' ? '#000000' : '#6b7280'}
+          />
+          <Text style={{
+            color: activeTab === 'available' ? '#000000' : '#9ca3af',
+            fontWeight: '700',
+            fontSize: 14,
+            fontFamily: LOBBY_FONTS.heading,
+          }}>
+            Available
           </Text>
-        </View>
-
-        {displayAvailableGames.length === 0 ? (
-          <Text className="text-gray-400 text-center mt-8 pb-4">
-            No games available. Be the first to spill digital blood!
-          </Text>
-        ) : (
-          <View style={{ position: 'relative', width: '100%' }}>
-            <View style={{ width: '100%', paddingBottom: 20 }}>
-              {displayAvailableGames.map((game, index) => renderGameItem(game, index))}
+          {displayAvailableGames.length > 0 && (
+            <View style={{
+              backgroundColor: activeTab === 'available' ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.3)',
+              paddingHorizontal: 7,
+              paddingVertical: 1,
+              borderRadius: 10,
+              minWidth: 20,
+              alignItems: 'center',
+            }}>
+              <Text style={{
+                color: activeTab === 'available' ? '#16a34a' : '#4ade80',
+                fontSize: 11,
+                fontWeight: '700',
+              }}>
+                {displayAvailableGames.length}
+              </Text>
             </View>
-            {/* Smooth fade-out gradient overlay */}
-            <LinearGradient
-              colors={['transparent', 'rgba(0, 0, 0, 0.8)', 'rgba(0, 0, 0, 1)']}
-              style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 40 + insets.bottom,
-                pointerEvents: 'none',
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            hapticsService.selection();
+            setActiveTab('live');
+          }}
+          style={{
+            flex: 1,
+            paddingVertical: 11,
+            borderRadius: 24,
+            backgroundColor: activeTab === 'live' ? '#ffffff' : 'transparent',
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+          activeOpacity={0.7}
+        >
+          <FontAwesome
+            name="eye"
+            size={13}
+            color={activeTab === 'live' ? '#000000' : '#6b7280'}
+          />
+          <Text style={{
+            color: activeTab === 'live' ? '#000000' : '#9ca3af',
+            fontWeight: '700',
+            fontSize: 14,
+            fontFamily: LOBBY_FONTS.heading,
+          }}>
+            Live Games
+          </Text>
+          {displayPlayingGames.length > 0 && (
+            <View style={{
+              backgroundColor: activeTab === 'live' ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.3)',
+              paddingHorizontal: 7,
+              paddingVertical: 1,
+              borderRadius: 10,
+              minWidth: 20,
+              alignItems: 'center',
+            }}>
+              <Text style={{
+                color: activeTab === 'live' ? '#2563eb' : '#60a5fa',
+                fontSize: 11,
+                fontWeight: '700',
+              }}>
+                {displayPlayingGames.length}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Search & Filter */}
+      <View style={{ marginBottom: 12 }}>
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          borderRadius: 12,
+          paddingHorizontal: 12,
+          height: 42,
+        }}>
+          <FontAwesome name="search" size={14} color="#6b7280" style={{ marginRight: 8 }} />
+          <TextInput
+            style={{
+              flex: 1,
+              color: '#ffffff',
+              fontSize: 14,
+              paddingVertical: 0,
+              fontFamily: LOBBY_FONTS.body,
+            }}
+            placeholder={activeTab === 'live' ? "Search live games..." : "Search by host or code..."}
+            placeholderTextColor="#6b7280"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <FontAwesome name="times-circle" size={16} color="#6b7280" />
+            </TouchableOpacity>
+          )}
+        </View>
+        {activeTab === 'available' && (
+          <TouchableOpacity
+            onPress={() => {
+              hapticsService.selection();
+              setShowFullGames((prev) => !prev);
+            }}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginTop: 10,
+              paddingHorizontal: 4,
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: '#9ca3af', fontSize: 13, fontFamily: LOBBY_FONTS.body }}>Show all games</Text>
+            <Switch
+              value={showFullGames}
+              onValueChange={(val) => {
+                hapticsService.selection();
+                setShowFullGames(val);
               }}
+              trackColor={{ false: '#374151', true: '#22c55e' }}
+              thumbColor={showFullGames ? '#ffffff' : '#d1d5db'}
+              ios_backgroundColor="#374151"
+              style={{ transform: [{ scale: 0.8 }] }}
             />
-          </View>
+          </TouchableOpacity>
         )}
       </View>
+
+      {/* Tab Content */}
+      {activeTab === 'live' ? (
+        <View style={{ minHeight: 120 }}>
+          {displayPlayingGames.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+              <FontAwesome name="eye" size={28} color="#374151" style={{ marginBottom: 12 }} />
+              <Text
+                className="text-gray-500 text-center text-base"
+                style={{ fontFamily: LOBBY_FONTS.heading }}
+              >
+                No live games right now
+              </Text>
+              <Text
+                className="text-gray-600 text-xs text-center mt-1"
+                style={{ fontFamily: LOBBY_FONTS.body }}
+              >
+                Active games will appear here to spectate
+              </Text>
+            </View>
+          ) : (
+            <View style={{ paddingBottom: 20 }}>
+              {displayPlayingGames.map((game, index) => renderGameItem(game, index, true))}
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={{ minHeight: 120 }}>
+          {displayAvailableGames.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+              <FontAwesome name="gamepad" size={28} color="#374151" style={{ marginBottom: 12 }} />
+              <Text
+                className="text-gray-400 text-center text-base"
+                style={{ fontFamily: LOBBY_FONTS.heading }}
+              >
+                No games available
+              </Text>
+              <Text
+                className="text-gray-600 text-xs text-center mt-1"
+                style={{ fontFamily: LOBBY_FONTS.body }}
+              >
+                Be the first to create a game!
+              </Text>
+            </View>
+          ) : (
+            <View style={{ paddingBottom: 20 }}>
+              {displayAvailableGames.map((game, index) => renderGameItem(game, index, false))}
+            </View>
+          )}
+        </View>
+      )}
       </ScrollView>
     </SafeAreaView>
   );

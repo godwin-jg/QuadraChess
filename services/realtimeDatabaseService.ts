@@ -96,6 +96,7 @@ export interface RealtimeGame {
   currentPlayerTurn: string;
   winner: string | null;
   joinCode?: string; // 4-digit join code for easy sharing
+  isPrivate?: boolean; // Code-protected game — requires joinCode to join
   lastMove: {
     from: { row: number; col: number };
     to: { row: number; col: number };
@@ -630,11 +631,6 @@ class RealtimeDatabaseService {
           const inCheck = isKingInCheck(opponent, hydratedState);
           const status = inCheck ? "checkmate" : "stalemate";
 
-          console.log(
-            `[RealtimeDB] Player ${opponent} has no legal moves. ` +
-            `inCheck=${inCheck}, status=${status}, teamMode=${hydratedState.teamMode}`
-          );
-
           if (hydratedState.teamMode) {
             return this.applyTeamEliminationToGameData(
               gameData,
@@ -789,24 +785,10 @@ class RealtimeDatabaseService {
     // Only check the current player's clock for timeout validation
     actualRemainingMs = Math.max(0, (gameState.clocks?.[playerColor] ?? 0) - elapsedMs);
 
-    console.log(
-      `[RealtimeDB] Timeout request for player ${playerColor}. ` +
-      `teamMode=${gameState.teamMode}, storedClock=${gameState.clocks?.[playerColor]}ms, ` +
-      `elapsed=${elapsedMs}ms, actualRemaining=${actualRemainingMs}ms`
-    );
-
     // Reject timeout if player still has time (with 500ms grace period for network latency)
     if (actualRemainingMs > 500) {
-      console.log(
-        `[RealtimeDB] Rejecting premature timeout - ${playerColor} has ${actualRemainingMs}ms remaining`
-      );
       return gameData;
     }
-
-    console.log(
-      `[RealtimeDB] Applying timeout for player ${playerColor}. ` +
-      `teamMode=${gameState.teamMode}, clock=${gameState.clocks?.[playerColor]}ms`
-    );
 
     if (gameState.teamMode) {
       const resolvedPieces =
@@ -814,12 +796,8 @@ class RealtimeDatabaseService {
       const resolvedEliminatedPieces =
         eliminatedPieceBitboards ??
         (gameState.eliminatedPieceBitboards
-          ? deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
+          ?           deserializeBitboardPieces(gameState.eliminatedPieceBitboards as any)
           : createEmptyPieceBitboards());
-
-      console.log(
-        `[RealtimeDB] Team timeout elimination triggered for ${playerColor} (team mode)`
-      );
 
       return this.applyTeamEliminationToGameData(
         gameData,
@@ -1298,13 +1276,6 @@ class RealtimeDatabaseService {
     const losingColors = getTeamColors(gameState.teamAssignments, losingTeam);
     const winningColors = getTeamColors(gameState.teamAssignments, winningTeam);
 
-    console.log(
-      `[RealtimeDB] TEAM ELIMINATION: Player ${losingColor} triggered ${status}. ` +
-      `Losing team ${losingTeam} (${losingColors.join(",")}), ` +
-      `Winning team ${winningTeam} (${winningColors.join(",")})` +
-      (lastMove ? `, after move: ${lastMove.pieceCode} to (${lastMove.to.row},${lastMove.to.col})` : "")
-    );
-
     // ✅ UPDATED: Set each eliminated player's clock to 0 individually
     losingColors.forEach((color) => {
       gameState.clocks[color] = 0;
@@ -1408,7 +1379,6 @@ class RealtimeDatabaseService {
         this.setupLightweightAuthListener();
         this.startServerTimeOffsetListener();
         this.startKeepAlive();
-        console.log("[Auth] Restored existing Firebase user:", currentUser.uid);
         return currentUser.uid;
       }
 
@@ -1423,13 +1393,11 @@ class RealtimeDatabaseService {
           this.setupLightweightAuthListener();
           this.startServerTimeOffsetListener();
           this.startKeepAlive();
-          console.log("[Auth] Restored cached Firebase user:", restoredUser.uid);
           return restoredUser.uid;
         }
       }
 
       // No existing user, sign in anonymously
-      console.log("[Auth] No cached user found, signing in anonymously...");
       const userCredential = await withTimeout(
         signInAnonymously(authInstance),
         10000,
@@ -1439,7 +1407,6 @@ class RealtimeDatabaseService {
 
       // Cache the user ID in AsyncStorage for future sessions
       await AsyncStorage.setItem(AUTH_USER_KEY, userCredential.user.uid).catch(() => { });
-      console.log("[Auth] New anonymous user created and cached:", userCredential.user.uid);
 
       // Set up lightweight auth state listener (minimal overhead)
       this.setupLightweightAuthListener();
@@ -1532,14 +1499,14 @@ class RealtimeDatabaseService {
 
 
   // Create game directly in database (Cloud Functions temporarily disabled)
-  async createGame(hostName: string, botColors: string[] = []): Promise<string> {
+  async createGame(hostName: string, botColors: string[] = [], isPrivate: boolean = false): Promise<string> {
     try {
       const user = this.getCurrentUser();
       if (!user) throw new Error("User not authenticated");
 
 
       // Use direct database creation method
-      return await this.createGameDirectly(hostName, botColors);
+      return await this.createGameDirectly(hostName, botColors, isPrivate);
     } catch (error) {
       console.error("Error creating game:", error);
       throw error;
@@ -1547,7 +1514,7 @@ class RealtimeDatabaseService {
   }
 
   // Fallback method to create game directly in database
-  private async createGameDirectly(hostName: string, botColors: string[] = []): Promise<string> {
+  private async createGameDirectly(hostName: string, botColors: string[] = [], isPrivate: boolean = false): Promise<string> {
     const user = this.getCurrentUser();
     if (!user) throw new Error("User not authenticated");
 
@@ -1651,6 +1618,7 @@ class RealtimeDatabaseService {
       currentPlayerTurn: "r",
       winner: null,
       joinCode: this.generateJoinCode(), // Generate 4-digit join code
+      isPrivate: isPrivate,
       lastMove: null,
       lastActivity: Date.now(),
     };
@@ -1682,7 +1650,7 @@ class RealtimeDatabaseService {
     return gameId;
   }
 
-  async joinGame(gameId: string, playerName: string): Promise<void> {
+  async joinGame(gameId: string, playerName: string, joinCode?: string): Promise<void> {
     const user = this.getCurrentUser();
     if (!user) throw new Error("User not authenticated");
 
@@ -1697,6 +1665,11 @@ class RealtimeDatabaseService {
 
       const gameState = this.ensureGameState(gameData, "joinGame");
       if (!gameState) {
+        return undefined;
+      }
+
+      // Reject if the game is private and no valid code was supplied
+      if (gameData.isPrivate && gameData.joinCode !== joinCode) {
         return undefined;
       }
 
@@ -1757,6 +1730,11 @@ class RealtimeDatabaseService {
       }
 
       const gameData = snapshot.val();
+
+      if (gameData.isPrivate && gameData.joinCode !== joinCode) {
+        throw new Error("Invalid game code");
+      }
+
       const playerCount = Object.keys(gameData.players || {}).length;
 
       if (playerCount >= (gameData.maxPlayers || 4)) {
@@ -1810,7 +1788,6 @@ class RealtimeDatabaseService {
     try {
       const gameSnapshot = await get(ref(db, `games/${gameId}`));
       if (!gameSnapshot.exists()) {
-        console.log(`Game ${gameId} does not exist - player already left or game was deleted`);
         return; // Game doesn't exist, consider this success
       }
     } catch (error) {
@@ -1835,7 +1812,6 @@ class RealtimeDatabaseService {
 
           const player = gameData.players[user.uid];
           if (!player) {
-            console.log(`Player ${user.uid} not found in game ${gameId} - already left or never joined`);
             return null; // Consider this success - player is not in the game
           }
 
@@ -2012,6 +1988,26 @@ class RealtimeDatabaseService {
     return () => unsubscribe();
   }
 
+  async findGameByJoinCode(code: string): Promise<RealtimeGame | null> {
+    const gamesRef = query(
+      ref(db, "games"),
+      orderByChild("joinCode"),
+      equalTo(code)
+    );
+
+    const snapshot = await get(gamesRef);
+    if (!snapshot.exists()) return null;
+
+    const gamesData = snapshot.val();
+    const entries = Object.entries(gamesData) as [string, any][];
+    for (const [gameId, gameData] of entries) {
+      if (gameData && gameData.status === "waiting") {
+        return { id: gameId, ...gameData } as RealtimeGame;
+      }
+    }
+    return null;
+  }
+
   subscribeToAvailableGames(
     onUpdate: (games: RealtimeGame[]) => void
   ): () => void {
@@ -2049,6 +2045,111 @@ class RealtimeDatabaseService {
     });
 
     return () => unsubscribe();
+  }
+
+  subscribeToPlayingGames(
+    onUpdate: (games: RealtimeGame[]) => void
+  ): () => void {
+    const gamesRef = query(
+      ref(db, "games"),
+      orderByChild("status"),
+      equalTo("playing")
+    );
+
+    const unsubscribe = onValue(gamesRef, (snapshot) => {
+      const games: RealtimeGame[] = [];
+      const now = Date.now();
+      if (snapshot && snapshot.exists()) {
+        const gamesData = snapshot.val();
+        if (gamesData && typeof gamesData === 'object') {
+          Object.entries(gamesData).forEach(([gameId, gameData]: [string, any]) => {
+            if (gameData && typeof gameData === 'object') {
+              const players = gameData.players || {};
+              const validPlayers = Object.values(players).filter((player: any) =>
+                player && player.id && player.name && player.color
+              );
+
+              if (validPlayers.length > 0 && !this.isGameStale(gameData, now)) {
+                games.push({
+                  id: gameId,
+                  ...gameData,
+                });
+              }
+            }
+          });
+        }
+      }
+      onUpdate(games);
+    });
+
+    return () => unsubscribe();
+  }
+
+  private isGameStale(gameData: any, now: number): boolean {
+    const gs = gameData?.gameState;
+    if (!gs) return true;
+
+    const gsStatus = gs.gameStatus;
+    if (gsStatus === "finished" || gsStatus === "checkmate" || gsStatus === "stalemate") {
+      return true;
+    }
+
+    const tc = gs.timeControl;
+    const baseMs = tc?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+    const incrementMs = tc?.incrementMs ?? 0;
+    const clocks = gs.clocks;
+    const turnStartedAt = gs.turnStartedAt;
+    const currentTurn = gs.currentPlayerTurn;
+    const GRACE_MS = 60_000;
+
+    if (
+      currentTurn &&
+      CLOCK_COLORS.includes(currentTurn as ClockColor) &&
+      typeof turnStartedAt === "number" &&
+      turnStartedAt > 0 &&
+      clocks &&
+      typeof clocks === "object"
+    ) {
+      const clockMs = typeof clocks[currentTurn] === "number" ? clocks[currentTurn] : baseMs;
+      if (now - turnStartedAt > clockMs + incrementMs + GRACE_MS) {
+        return true;
+      }
+    }
+
+    if (turnStartedAt === null || turnStartedAt === undefined) {
+      if (clocks && typeof clocks === "object") {
+        const eliminated = Array.isArray(gs.eliminatedPlayers) ? gs.eliminatedPlayers : [];
+        const active = CLOCK_COLORS.filter((c) => !eliminated.includes(c));
+        const allZero = active.length > 0 && active.every(
+          (c) => typeof clocks[c] === "number" && clocks[c] <= 0
+        );
+        if (allZero) return true;
+      }
+
+      const gameAge = now - (gameData.createdAt || 0);
+      if (gameAge > baseMs * 4 + 10 * 60_000) {
+        return true;
+      }
+    }
+
+    // All human players offline → game is abandoned
+    const ALL_OFFLINE_THRESHOLD_MS = 3 * 60_000;
+    const players = gameData.players;
+    if (players && typeof players === "object") {
+      const eliminated = Array.isArray(gs.eliminatedPlayers) ? gs.eliminatedPlayers : [];
+      const humanEntries = Object.values(players).filter(
+        (p: any) => p && !p.isBot && p.color && !eliminated.includes(p.color)
+      );
+      if (humanEntries.length > 0) {
+        const allOffline = humanEntries.every((p: any) => {
+          const lastSeen = typeof p.lastSeen === "number" ? p.lastSeen : 0;
+          return now - lastSeen > ALL_OFFLINE_THRESHOLD_MS;
+        });
+        if (allOffline) return true;
+      }
+    }
+
+    return false;
   }
 
   // Make a promotion move in online game
@@ -2490,6 +2591,8 @@ class RealtimeDatabaseService {
             status: "finished",
             eliminatedPlayer: null,
           };
+          gameData.winner = winner;
+          gameData.status = "finished";
         }
       } else {
         // Advance to next active player if it was this player's turn
@@ -2636,7 +2739,6 @@ class RealtimeDatabaseService {
       if (!result.committed) {
         // Transaction was aborted - this is normal when concurrent writes occur
         // The sweep will retry on the next interval
-        console.log("[DisconnectSweep] Transaction not committed, will retry on next interval");
       }
     } catch (error: any) {
       // Handle transaction conflicts gracefully - these occur when bot moves
@@ -2656,7 +2758,6 @@ class RealtimeDatabaseService {
         error?.message?.includes("disconnected")
       ) {
         // Connection lost during transaction - sweep will retry when reconnected
-        console.log("[DisconnectSweep] Database disconnected, will retry when connection restored");
         return;
       }
       console.error("Error eliminating disconnected players:", error);
@@ -2788,7 +2889,6 @@ class RealtimeDatabaseService {
               gameData.hostId = newHostId;
               gameData.hostName = newHost.name;
               gameData.players[newHostId].isHost = true;
-              console.log(`[RealtimeDB] Host transferred from ${user.uid} to ${newHostId}`);
             }
           }
 
@@ -2815,6 +2915,8 @@ class RealtimeDatabaseService {
                 status: "finished",
                 eliminatedPlayer: null,
               };
+              gameData.winner = winner;
+              gameData.status = "finished";
             }
           } else {
             // Advance to next active player
@@ -3220,11 +3322,22 @@ class RealtimeDatabaseService {
     }
   }
 
+  async updateGamePrivacy(gameId: string, isPrivate: boolean): Promise<void> {
+    const user = this.getCurrentUser();
+    if (!user) throw new Error("User not authenticated");
+
+    const gameRef = ref(db, `games/${gameId}`);
+    const snapshot = await get(gameRef);
+    if (!snapshot.exists()) throw new Error("Game not found");
+    const game = snapshot.val();
+    if (game.hostId !== user.uid) throw new Error("Only the host can change privacy");
+
+    await update(gameRef, { isPrivate });
+  }
+
   // Update bot configuration for a game (host only)
   async updateBotConfiguration(gameId: string, botColors: string[]): Promise<void> {
     try {
-      console.log(`[BotConfig] updateBotConfiguration called with colors:`, botColors);
-
       const gameRef = ref(db, `games/${gameId}`);
       const snapshot = await get(gameRef);
 
@@ -3235,12 +3348,6 @@ class RealtimeDatabaseService {
       const gameData = snapshot.val();
       const currentPlayers = gameData.players || {};
       const allColors = ["r", "b", "y", "g"];
-
-      console.log(`[BotConfig] Current players:`, Object.entries(currentPlayers).map(([id, p]: [string, any]) => ({
-        id: id.slice(0, 10),
-        color: p.color,
-        isBot: p.isBot,
-      })));
 
       // Separate human players from bots
       const humanPlayers: { [id: string]: any } = {};
@@ -3259,7 +3366,6 @@ class RealtimeDatabaseService {
 
       // Ensure we don't exceed 4 total players - silently return if would exceed
       if (humanCount + requestedBotCount > 4) {
-        console.log(`[BotConfig] Cannot add ${requestedBotCount} bots with ${humanCount} human players. Maximum is 4 total. Ignoring request.`);
         return;
       }
 
@@ -3272,8 +3378,6 @@ class RealtimeDatabaseService {
       const updates: any = {};
 
       if (conflictingColors.length > 0) {
-        console.log(`[BotConfig] Conflict detected: humans on colors ${conflictingColors.join(', ')}`);
-
         // Find available colors (not used by humans and not requested for bots)
         const availableColors = allColors.filter(
           color => !humanColors.includes(color) && !botColors.includes(color)
@@ -3294,8 +3398,6 @@ class RealtimeDatabaseService {
             const [humanId, humanPlayer] = humanEntry;
             const newColor = availableColors.shift()!;
 
-            console.log(`[BotConfig] Reassigning human ${humanId.slice(0, 10)} from ${conflictColor} to ${newColor}`);
-
             // Update human player's color
             updates[`players/${humanId}/color`] = newColor;
 
@@ -3308,14 +3410,12 @@ class RealtimeDatabaseService {
 
       // Remove existing bots
       Object.keys(existingBots).forEach(playerId => {
-        console.log(`[BotConfig] Removing bot: ${playerId} (color: ${existingBots[playerId].color})`);
         updates[`players/${playerId}`] = null;
       });
 
       // Add new bots for specified colors
       for (const botColor of botColors) {
         const botId = `bot_${botColor}_${Date.now()}`;
-        console.log(`[BotConfig] Adding bot: ${botId} for color: ${botColor}`);
         updates[`players/${botId}`] = {
           id: botId,
           name: `Bot ${botColor.toUpperCase()}`,
@@ -3327,11 +3427,9 @@ class RealtimeDatabaseService {
         };
       }
 
-      console.log(`[BotConfig] Updates to apply:`, Object.keys(updates));
       updates["gameState/version"] = increment(1);
       updates.lastActivity = Date.now();
       await update(gameRef, updates);
-      console.log(`[BotConfig] Update complete`);
     } catch (error) {
       console.error("Error updating bot configuration:", error);
       throw error;
@@ -3609,6 +3707,70 @@ class RealtimeDatabaseService {
         if (gameData.status === "waiting" && validPlayers.length === 1 && gameData.lastActivity) {
           const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000; // 30 minutes ago
           if (gameData.lastActivity < thirtyMinutesAgo) {
+            corruptedGames.push(gameId);
+            return;
+          }
+        }
+
+        // Clean up "playing" games where gameState already finished but top-level status wasn't updated
+        if (gameData.status === "playing") {
+          const gs = gameData.gameState;
+          const gsStatus = gs?.gameStatus;
+          if (gsStatus === "finished" || gsStatus === "checkmate" || gsStatus === "stalemate") {
+            corruptedGames.push(gameId);
+            return;
+          }
+
+          // Clean up "playing" games where all clocks have expired based on the game's time control
+          const tc = gs?.timeControl;
+          const baseMs = tc?.baseMs ?? DEFAULT_TIME_CONTROL.baseMs;
+          const incrementMs = tc?.incrementMs ?? 0;
+          const clocks = gs?.clocks;
+          const turnStartedAt = gs?.turnStartedAt;
+          const currentTurn = gs?.currentPlayerTurn;
+
+          if (clocks && typeof clocks === "object") {
+            const activePlayers = CLOCK_COLORS.filter(
+              (c) => !Array.isArray(gs.eliminatedPlayers) || !gs.eliminatedPlayers.includes(c)
+            );
+
+            // A game is stale if the current player's clock has fully elapsed.
+            // Max possible time remaining = clock value + increment (they'd get one more).
+            // Add a 60s grace buffer for network lag / reconnection.
+            const GRACE_MS = 60_000;
+            if (
+              currentTurn &&
+              CLOCK_COLORS.includes(currentTurn as ClockColor) &&
+              typeof turnStartedAt === "number" &&
+              turnStartedAt > 0
+            ) {
+              const clockMs = typeof clocks[currentTurn] === "number" ? clocks[currentTurn] : baseMs;
+              const maxRemainingMs = clockMs + incrementMs + GRACE_MS;
+              if (now - turnStartedAt > maxRemainingMs) {
+                corruptedGames.push(gameId);
+                return;
+              }
+            } else if (turnStartedAt === null || turnStartedAt === undefined) {
+              // No turn in progress -- if all active clocks are 0, game is dead
+              const allClocksZero = activePlayers.every(
+                (c) => typeof clocks[c] === "number" && clocks[c] <= 0
+              );
+              if (allClocksZero && activePlayers.length > 0) {
+                corruptedGames.push(gameId);
+                return;
+              }
+            }
+          }
+
+          // Fallback: if a "playing" game has existed for longer than
+          // 4x its base time (one full clock per player) plus a generous buffer,
+          // and has no valid turnStartedAt, it's abandoned.
+          const gameAge = now - (gameData.createdAt || 0);
+          const maxReasonableLifetimeMs = baseMs * 4 + 10 * 60_000;
+          if (
+            gameAge > maxReasonableLifetimeMs &&
+            (turnStartedAt === null || turnStartedAt === undefined)
+          ) {
             corruptedGames.push(gameId);
             return;
           }

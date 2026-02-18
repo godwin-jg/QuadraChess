@@ -117,6 +117,13 @@ export function useMoveExecution({
         return;
       }
 
+      // Read-only fallback: if we don't yet know the local player's color,
+      // never allow move execution from this client.
+      if ((effectiveMode === "online" || effectiveMode === "p2p") && !currentPlayerColor) {
+        abortPendingDrop();
+        return;
+      }
+
       // Online/P2P mode - handle premove when not your turn
       if ((effectiveMode === "online" || effectiveMode === "p2p") && currentPlayerColor) {
         // Only allow moves/premoves with your own pieces
@@ -127,7 +134,6 @@ export function useMoveExecution({
         
         // If it's not your turn, set as premove instead of executing (if enabled)
         if (currentPlayerColor !== currentPlayerTurn) {
-          console.log('[Premove] premoveEnabled:', premoveEnabled);
           if (premoveEnabled) {
             const premoveData = { from, to, pieceCode: pieceToMove };
             // Call optimistic callback first for instant UI update

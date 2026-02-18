@@ -9,11 +9,13 @@ import type { LastMove } from "../../../state/types";
 // This prevents duplicate animation logs when multiple Board components are mounted
 let globalActiveOrchestrationId: string | null = null;
 let globalOrchestrationCounter = 0;
+const MAX_FALLBACK_ANIM_CHANGES = 8;
 
-// Reset global orchestration state - call when switching game modes
+// Reset global orchestration state - call when switching game modes.
+// Only clears the active ID so the next Board can register itself;
+// the counter keeps incrementing to avoid ID collisions.
 export function resetOrchestrationState(): void {
   globalActiveOrchestrationId = null;
-  globalOrchestrationCounter = 0;
   if (__DEV__) console.log('[Anim] Global orchestration state reset');
 }
 
@@ -27,6 +29,7 @@ interface AnimationOrchestrationParams {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   gameFlowSend: (event: any) => void;
   visibilityMask: SharedValue<number[]>;
+  maskRevision: SharedValue<number>;
   animationRunning: SharedValue<number>;
   uiState?: SharedValue<number>;
 }
@@ -61,12 +64,14 @@ export function useBoardAnimationOrchestration({
   isFlowAnimating,
   gameFlowSend,
   visibilityMask,
+  maskRevision,
   animationRunning,
   uiState,
 }: AnimationOrchestrationParams): AnimationOrchestrationReturn {
   const buildPlanFromLastMove = (
     move: LastMove,
-    prevPieces: Map<number, string>
+    prevPieces: Map<number, string>,
+    currentPieces: Map<number, string>
   ): { plan: AnimPlan; movePieceOverrides: Map<number, string> } | null => {
     if (!move?.pieceCode) return null;
     const playerColor = move.playerColor ?? move.pieceCode[0];
@@ -74,6 +79,17 @@ export function useBoardAnimationOrchestration({
     const toKey = move.to.row * 14 + move.to.col;
     const pieceAtFrom = prevPieces.get(fromKey);
     if (!pieceAtFrom || pieceAtFrom !== move.pieceCode) return null;
+    const pieceAtToNow = currentPieces.get(toKey);
+    const destinationMatchesMove =
+      pieceAtToNow === move.pieceCode ||
+      (move.pieceCode[1] === "P" &&
+        !!pieceAtToNow &&
+        pieceAtToNow[0] === move.pieceCode[0] &&
+        pieceAtToNow[1] !== "P");
+    // Guard against stale/out-of-order snapshots (common in spectate mode).
+    // If current board destination does not reflect the move payload yet,
+    // skip deterministic animation to avoid "piece appears while moving, then vanishes".
+    if (!destinationMatchesMove) return null;
 
     const dx = move.from.col - move.to.col;
     const dy = move.from.row - move.to.row;
@@ -173,6 +189,14 @@ export function useBoardAnimationOrchestration({
     };
   }, [orchestrationId]);
 
+  // Self-healing: re-register if the global was cleared externally
+  // (e.g. resetOrchestrationState after spectating) while this component
+  // stayed mounted/frozen. Runs during render so it's fixed before
+  // the layout effect checks the guard.
+  if (globalActiveOrchestrationId === null) {
+    globalActiveOrchestrationId = orchestrationId;
+  }
+
   // Use ref to always have access to current animationsEnabled value
   const animationsEnabledRef = useRef(animationsEnabled);
   useLayoutEffect(() => {
@@ -199,6 +223,23 @@ export function useBoardAnimationOrchestration({
   // Build a stable move key that ignores timestamp churn
   const moveKey = buildMoveKey(lastMove);
 
+  // Game was reset (no last move) — sync prevPieces to current board state
+  // so the first move after reset animates from the correct baseline.
+  // Also clear any stale animation refs that may have leaked from a previous
+  // session (e.g. spectating) to prevent the "busy animating a different move"
+  // guard from blocking future animations.
+  if (!moveKey && prevPiecesRef.current !== currentPiecesMap) {
+    prevPiecesRef.current = currentPiecesMap;
+    lastMoveKeyRef.current = null;
+    if (activePlanRef.current || activeMoveKeyRef.current) {
+      activePlanRef.current = null;
+      activeMoveKeyRef.current = null;
+      planPiecesRef.current = null;
+      activeMoveOverridesRef.current = null;
+      animationSetupDoneRef.current = false;
+    }
+  }
+
   // Skip animation if:
   // - skipNextAnimationRef is true (set for user's own drag moves)
   // - isViewingHistory is true
@@ -221,13 +262,12 @@ export function useBoardAnimationOrchestration({
     }
 
     const deterministicPlan = lastMove
-      ? buildPlanFromLastMove(lastMove, prevPiecesRef.current)
+      ? buildPlanFromLastMove(
+          lastMove,
+          prevPiecesRef.current,
+          currentPiecesMapRef.current
+        )
       : null;
-    if (__DEV__ && lastMove && !deterministicPlan) {
-      const fromKey = lastMove.from.row * 14 + lastMove.from.col;
-      const pieceAtFrom = prevPiecesRef.current?.get(fromKey);
-      console.log('[Anim] buildPlanFromLastMove returned null. pieceAtFrom=', pieceAtFrom, 'expected=', lastMove.pieceCode, 'fromKey=', fromKey);
-    }
     if (deterministicPlan) {
       activePlanRef.current = deterministicPlan.plan;
       activeMoveKeyRef.current = moveKey;
@@ -236,14 +276,29 @@ export function useBoardAnimationOrchestration({
     }
 
     const plan = computeAnimPlan(prevPiecesRef.current, currentPiecesMapRef.current);
-    if (plan.anims.size === 0 && plan.fadings.size === 0) {
+    const totalFallbackChanges = plan.anims.size + plan.fadings.size;
+    if (totalFallbackChanges === 0) {
+      return null;
+    }
+    // Snapshot reconciliation can occasionally produce large diffs (e.g. online sync jumps).
+    // Animating those as one move hides too many squares and causes visual artifacts.
+    // Prefer an instant board sync in this case.
+    if (totalFallbackChanges > MAX_FALLBACK_ANIM_CHANGES) {
+      if (__DEV__) {
+        console.log(
+          "[Anim] Skip fallback plan: large diff",
+          totalFallbackChanges,
+          "moveKey:",
+          moveKey
+        );
+      }
       return null;
     }
     activePlanRef.current = plan;
     activeMoveKeyRef.current = moveKey;
     activeMoveOverridesRef.current = null;
     return plan;
-  }, [moveKey, skipAnimation, lastMove]);
+  }, [moveKey, skipAnimation, lastMove, currentPiecesMap]);
 
   // Guard against stale useMemo cache: only return plan if refs are still set
   // This prevents animation replay after cancelDrag clears the refs
@@ -251,28 +306,46 @@ export function useBoardAnimationOrchestration({
 
   const handleAnimationCompleteUI = React.useCallback(() => {
     "worklet";
-    const indices = activeMaskIndicesValue.value;
     animationRunning.value = 0;
-    if (!indices || indices.length === 0) {
-      const dragging = uiState ? uiState.value === 1 || uiState.value === 2 : false;
-      if (!dragging) {
-        visibilityMask.value = new Array(196).fill(0);
+    const dragging = uiState ? uiState.value === 1 || uiState.value === 2 : false;
+    let clearedCount = 0;
+    if (!dragging) {
+      // Full clear is more robust than targeted index clearing;
+      // avoids stale hidden pieces if indices get out of sync.
+      visibilityMask.value = new Array(196).fill(0);
+      clearedCount = 196;
+    } else {
+      // When dragging, only clear animation-related indices (preserve drag mask)
+      const indices = activeMaskIndicesValue.value;
+      clearedCount = indices ? indices.length : 0;
+      if (indices && indices.length > 0) {
+        const next = visibilityMask.value.slice();
+        for (let i = 0; i < indices.length; i++) {
+          const idx = indices[i];
+          if (idx >= 0 && idx < 196) {
+            next[idx] = 0;
+          }
+        }
+        visibilityMask.value = next;
       }
-      return;
     }
-    const next = visibilityMask.value.slice();
-    for (let i = 0; i < indices.length; i++) {
-      const idx = indices[i];
-      if (idx >= 0 && idx < 196) {
-        next[idx] = 0;
-      }
-    }
-    visibilityMask.value = next;
     activeMaskIndicesValue.value = [];
-  }, [visibilityMask, animationRunning, activeMaskIndicesValue, uiState]);
+    if (__DEV__) {
+      console.log("[VANISH][MaskClear]", {
+        dragging,
+        clearedCount,
+        animationRunning: animationRunning.value,
+        nextMaskRevision: maskRevision.value + 1,
+      });
+    }
+    maskRevision.value += 1;
+  }, [visibilityMask, maskRevision, animationRunning, activeMaskIndicesValue, uiState]);
 
   const handleAnimationComplete = React.useCallback(
     (options?: { baselinePieces?: Map<number, string>; moveKeyOverride?: string | null }) => {
+      // Defensive clear: ensure visibility mask is reset even if
+      // animator callback ordering/races skip onCompleteUI for a frame.
+      runOnUI(handleAnimationCompleteUI)();
       if (!activePlanRef.current && !options?.baselinePieces) {
         if (__DEV__) console.log('[Anim] handleAnimationComplete early return');
         return;
@@ -293,7 +366,7 @@ export function useBoardAnimationOrchestration({
       animationSetupDoneRef.current = false; // Reset for next animation
       gameFlowSend({ type: "ANIMATION_DONE" });
     },
-    [gameFlowSend]
+    [gameFlowSend, handleAnimationCompleteUI]
   );
 
   // Animation setup effect
@@ -351,7 +424,13 @@ export function useBoardAnimationOrchestration({
       lastMoveKeyRef.current = moveKey;
       animationSetupDoneRef.current = true;
       activeMaskIndicesValue.value = indices;
-      const next = visibilityMask.value.slice();
+      const draggingNow = uiState ? uiState.value === 1 || uiState.value === 2 : false;
+      // Build mask from a clean slate for each animation. This prevents stale
+      // hidden squares from a previous move leaking into the next move.
+      // Preserve current mask only while actively dragging.
+      const next = draggingNow
+        ? visibilityMask.value.slice()
+        : new Array(196).fill(0);
       for (let i = 0; i < indices.length; i++) {
         const idx = indices[i];
         if (idx >= 0 && idx < 196) {
@@ -359,6 +438,25 @@ export function useBoardAnimationOrchestration({
         }
       }
       visibilityMask.value = next;
+      if (__DEV__) {
+        const fromKey = lastMove
+          ? lastMove.from.row * 14 + lastMove.from.col
+          : null;
+        const toKey = lastMove
+          ? lastMove.to.row * 14 + lastMove.to.col
+          : null;
+        console.log("[VANISH][MaskSet]", {
+          moveKey,
+          indicesCount: indices.length,
+          indicesPreview: indices.slice(0, 8),
+          fromKey,
+          toKey,
+          maskFrom: fromKey !== null ? next[fromKey] : null,
+          maskTo: toKey !== null ? next[toKey] : null,
+          nextMaskRevision: maskRevision.value + 1,
+        });
+      }
+      maskRevision.value += 1;
       animationRunning.value = 1;
     }
   }, [
@@ -367,6 +465,7 @@ export function useBoardAnimationOrchestration({
     pendingPlan,
     currentPiecesMap,
     visibilityMask,
+    maskRevision,
     animationRunning,
     handleAnimationComplete,
     handleAnimationCompleteUI,

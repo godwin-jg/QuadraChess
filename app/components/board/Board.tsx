@@ -23,6 +23,7 @@ import { useChessEngine } from "../../../hooks/useChessEngine";
 import { getBoardSize } from "../../utils/responsive";
 import { useGameFlowMachine } from "../../../hooks/useGameFlowMachine";
 import {
+  buildMoveKey,
   consumeSkipNextMoveAnimation,
   markSkipNextMoveAnimation,
 } from "../../../services/gameFlowService";
@@ -32,6 +33,8 @@ import { getBoardPointFromLocal, getDragLiftOffset } from "./boardDragUtils";
 
 // Set to true to use GPU-accelerated Skia animations
 const USE_SKIA_ANIMATIONS = true;
+const DEBUG_VANISH_LOGS = __DEV__;
+const VANISH_LOG_DELAYS_MS = [0, 80, 180, 320] as const;
 import type { MoveInfo, Position } from "../../../types";
 
 // Extracted components and hooks
@@ -58,7 +61,7 @@ import {
 import { useBoardAnimationOrchestration } from "./useBoardAnimationOrchestration";
 import { useGameFlowReady } from "./useGameFlowReady";
 import { useBoardGestures } from "./useBoardGestures";
-import type { PremoveState } from "../../../state/types";
+import type { LastMove, PremoveState } from "../../../state/types";
 
 // 4-player chess piece codes:
 // y = yellow, r = red, b = blue, g = green
@@ -81,6 +84,7 @@ interface BoardProps {
   viewerColor?: string | null;
   displayTurn?: string;
   maxBoardSize?: number;
+  isSpectatorMode?: boolean;
 }
 
 
@@ -92,6 +96,7 @@ export default function Board({
   viewerColor = null,
   displayTurn,
   maxBoardSize,
+  isSpectatorMode = false,
 }: BoardProps) {
   const { width, height } = useWindowDimensions();
   // Board dimensions - use provided size to avoid extra gaps
@@ -146,6 +151,10 @@ export default function Board({
     }
     return boardState;
   }, [viewingHistoryIndex, history, boardState]);
+  const boardStateForVanishRef = useRef(displayBoardState);
+  React.useEffect(() => {
+    boardStateForVanishRef.current = displayBoardState;
+  }, [displayBoardState]);
   const displayEliminatedPlayers = useMemo(() => {
     if (viewingHistoryIndex !== null && history[viewingHistoryIndex]) {
       return history[viewingHistoryIndex].eliminatedPlayers ?? [];
@@ -189,7 +198,8 @@ export default function Board({
   } = dragSharedValues;
 
   // Visibility mask for zero-flicker piece hiding (extracted hook)
-  const { visibilityMask, animationRunning, setMaskIndices, clearMask } = useVisibilityMask();
+  const { visibilityMask, maskRevision, animationRunning, setMaskIndices, clearMask } = useVisibilityMask();
+  const pieceMaskEnabled = !isSpectatorMode;
 
   // Drag refs
   const dragHoverRef = useRef<DragTarget | null>(null);
@@ -220,14 +230,6 @@ export default function Board({
     tapToMoveEnabledRef.current = tapToMoveEnabled;
     dragToMoveEnabledRef.current = dragToMoveEnabled;
     animationsEnabledRef.current = animationsEnabled;
-    
-    // Log when settings actually change
-    if (prevTap !== tapToMoveEnabled || prevDrag !== dragToMoveEnabled || prevAnim !== animationsEnabled) {
-      console.log(`[Settings] Board settings refs updated:`);
-      console.log(`  - Tap to Move: ${prevTap} → ${tapToMoveEnabled}`);
-      console.log(`  - Drag to Move: ${prevDrag} → ${dragToMoveEnabled}`);
-      console.log(`  - Animations: ${prevAnim} → ${animationsEnabled}`);
-    }
   }, [tapToMoveEnabled, dragToMoveEnabled, animationsEnabled]);
 
   // Drag performance logging (dev mode only)
@@ -305,9 +307,207 @@ export default function Board({
     isFlowAnimating,
     gameFlowSend,
     visibilityMask,
+    maskRevision,
     animationRunning,
     uiState,
   });
+
+  // Reset piece visibility state when mask mode changes (e.g. spectate -> single).
+  // Without this, stale hidden indices from spectator snapshots can carry over
+  // into local play and make landed pieces appear to vanish.
+  React.useEffect(() => {
+    visibilityMask.value = new Array(196).fill(0);
+    maskRevision.value += 1;
+    animationRunning.value = 0;
+    activeMaskIndicesValue.value = [];
+    // Clear any stale drag session when board mode/context flips.
+    setDragState(null);
+    setDragHover(null);
+    setDragValidMoves([]);
+    dragValidMovesRef.current = [];
+    dragHoverRef.current = null;
+    pendingDropRef.current = null;
+    dragPreviouslySelectedRef.current = false;
+    dragKeyHasChangedRef.current = false;
+    dragEndedRef.current = false;
+    suppressTapRef.current = false;
+    if (suppressTapTimeoutRef.current) {
+      clearTimeout(suppressTapTimeoutRef.current);
+      suppressTapTimeoutRef.current = null;
+    }
+    runOnUI(() => {
+      "worklet";
+      uiState.value = 0;
+      dragSnapActive.value = 0;
+      dragSnapTargets.value = [];
+      validMoveMap.value = new Array(196).fill(0);
+      dragStartPos.value = null;
+      lastSnappedKey.value = -1;
+      lastCursorKey.value = -1;
+      ghostOpacity.value = 0;
+      dragScale.value = 1;
+      dragOffsetX.value = 0;
+      dragOffsetY.value = 0;
+    })();
+  }, [
+    pieceMaskEnabled,
+    visibilityMask,
+    maskRevision,
+    animationRunning,
+    activeMaskIndicesValue,
+    uiState,
+    dragSnapActive,
+    dragSnapTargets,
+    validMoveMap,
+    dragStartPos,
+    lastSnappedKey,
+    lastCursorKey,
+    ghostOpacity,
+    dragScale,
+    dragOffsetX,
+    dragOffsetY,
+  ]);
+
+  const logVanishSnapshot = React.useCallback(
+    (phase: string, move: NonNullable<LastMove>) => {
+      if (!DEBUG_VANISH_LOGS) return;
+      const moveKey = buildMoveKey(move);
+      if (!moveKey) return;
+    },
+    [
+      activeMaskIndicesValue,
+      animationRunning,
+      dragState,
+      effectivePlan,
+      maskRevision,
+      pieceMaskEnabled,
+      uiState,
+      visibilityMask,
+    ]
+  );
+
+  const lastVanishMoveKeyRef = useRef<string | null>(null);
+  React.useEffect(() => {
+    const move = lastMove;
+    if (!DEBUG_VANISH_LOGS || !move) return;
+    const moveKey = buildMoveKey(move);
+    if (!moveKey || moveKey === lastVanishMoveKeyRef.current) return;
+
+    lastVanishMoveKeyRef.current = moveKey;
+    logVanishSnapshot("move-detected", move);
+
+    const timers = VANISH_LOG_DELAYS_MS.map((delayMs) =>
+      setTimeout(() => logVanishSnapshot(`after-${delayMs}ms`, move), delayMs)
+    );
+    return () => {
+      timers.forEach((timerId) => clearTimeout(timerId));
+    };
+  }, [lastMove, logVanishSnapshot]);
+
+  const lastVanishAnomalyRef = useRef<string | null>(null);
+  React.useEffect(() => {
+    const move = lastMove;
+    if (!DEBUG_VANISH_LOGS || !pieceMaskEnabled || !move) return;
+
+    const moveKey = buildMoveKey(move);
+    if (!moveKey) return;
+    const toIdx = move.to.row * 14 + move.to.col;
+    const board = boardStateForVanishRef.current;
+    const pieceAtTo = board?.[move.to.row]?.[move.to.col] ?? null;
+    const maskedAtTo = visibilityMask.value[toIdx] === 1;
+    const animationActive = animationRunning.value === 1;
+    const dragActive = uiState.value !== 0 || !!dragState;
+    const anomalyKey = `${moveKey}:${maskRevision.value}`;
+
+    if (pieceAtTo && maskedAtTo && !animationActive && !dragActive && !effectivePlan) {
+      if (lastVanishAnomalyRef.current !== anomalyKey) {
+        lastVanishAnomalyRef.current = anomalyKey;
+      }
+    }
+  }, [
+    displayBoardState,
+    lastMove,
+    pieceMaskEnabled,
+    effectivePlan,
+    dragState,
+    visibilityMask,
+    animationRunning,
+    uiState,
+    maskRevision,
+  ]);
+
+  const previousMoveForVanishRef = useRef<NonNullable<LastMove> | null>(null);
+  React.useEffect(() => {
+    if (!DEBUG_VANISH_LOGS) return;
+    const move = lastMove as NonNullable<LastMove> | null;
+    if (!move) {
+      previousMoveForVanishRef.current = null;
+      return;
+    }
+
+    previousMoveForVanishRef.current = move;
+  }, [
+    lastMove,
+    pieceMaskEnabled,
+    effectivePlan,
+    visibilityMask,
+    animationRunning,
+    uiState,
+  ]);
+
+  const lastIdleMaskAnomalyRef = useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!DEBUG_VANISH_LOGS || !pieceMaskEnabled) return;
+
+    const board = boardStateForVanishRef.current;
+    const mask = visibilityMask.value;
+    const maskedWithPieces: Array<{
+      idx: number;
+      row: number;
+      col: number;
+      piece: string;
+    }> = [];
+
+    for (let idx = 0; idx < mask.length; idx += 1) {
+      if (mask[idx] !== 1) continue;
+      const row = Math.floor(idx / 14);
+      const col = idx % 14;
+      const piece = board?.[row]?.[col];
+      if (piece) {
+        maskedWithPieces.push({ idx, row, col, piece });
+      }
+    }
+
+    const idle =
+      animationRunning.value === 0 &&
+      uiState.value === 0 &&
+      !dragState &&
+      !effectivePlan;
+
+    if (!idle || maskedWithPieces.length === 0) return;
+
+    const signature = `${maskRevision.value}:${maskedWithPieces
+      .map((entry) => entry.idx)
+      .join(",")}`;
+    if (lastIdleMaskAnomalyRef.current === signature) return;
+    lastIdleMaskAnomalyRef.current = signature;
+
+    // Self-heal: if any pieces are masked while idle, force-clear mask state.
+    visibilityMask.value = new Array(196).fill(0);
+    activeMaskIndicesValue.value = [];
+    maskRevision.value += 1;
+  }, [
+    displayBoardState,
+    lastMove,
+    dragState,
+    effectivePlan,
+    pieceMaskEnabled,
+    visibilityMask,
+    animationRunning,
+    uiState,
+    maskRevision,
+    activeMaskIndicesValue,
+  ]);
 
   const dragValidMoveMap = useMemo(() => {
     const map = new Map<number, "move" | "capture">();
@@ -362,6 +562,11 @@ export default function Board({
       }
       const localPlayerColor = currentPlayerColorRef.current;
       const isOnlineMode = effectiveMode === "online" || effectiveMode === "p2p";
+      const isReadOnlyOnlineViewer = isOnlineMode && !localPlayerColor;
+      if (isSpectatorMode || isReadOnlyOnlineViewer) {
+        resetUiState();
+        return;
+      }
       const allowPremoveDuringAnimation =
         isOnlineMode &&
         localPlayerColor &&
@@ -489,6 +694,7 @@ export default function Board({
       isFlowAnimating,
       isFlowReady,
       isViewingHistory,
+      isSpectatorMode,
       resolveBoardPoint,
       selectedPiece,
       squareSize,
@@ -538,6 +744,7 @@ export default function Board({
     // This ensures the real piece is visible the same frame DraggedPiece disappears
     // (Using direct call instead of runOnUI for synchronous SharedValue update)
     visibilityMask.value = new Array(196).fill(0);
+    maskRevision.value += 1;
     // Now clear dragState - the piece at destination is already visible
     if (dragState) {
       setDragState(null);
@@ -585,6 +792,7 @@ export default function Board({
     lastCursorKey,
     uiState,
     visibilityMask,
+    maskRevision,
     clearActiveAnimationPlan,
   ]);
 
@@ -753,6 +961,10 @@ export default function Board({
   // Handle square press
   const handleSquarePress = async (row: number, col: number) => {
     const isOnlineMode = effectiveMode === "online" || effectiveMode === "p2p";
+    const isReadOnlyOnlineViewer = isOnlineMode && !currentPlayerColor;
+    if (isSpectatorMode || isReadOnlyOnlineViewer) {
+      return;
+    }
     const allowPremoveDuringAnimation =
       isOnlineMode &&
       currentPlayerColor &&
@@ -924,6 +1136,7 @@ export default function Board({
     onCursorChange,
     onSnapKeyChange,
     visibilityMask,
+    maskRevision,
     activeMaskIndicesValue,
     clearMask,
     setPanStart,
@@ -1053,10 +1266,16 @@ export default function Board({
                       isEliminated={isPieceEliminated(piece, displayEliminatedPlayers)}
                       isInteractable={true}
                       boardTheme={boardTheme}
+                      pieceStyleKey={settings.pieces.style}
                       playerData={isCornerCenter ? playerData : undefined}
                       boardRotation={boardRotation}
                       viewerColor={viewerColor}
-                      visibilityMask={visibilityMask}
+                      visibilityMask={pieceMaskEnabled ? visibilityMask : undefined}
+                      maskRevision={pieceMaskEnabled ? maskRevision : undefined}
+                      animationRunning={pieceMaskEnabled ? animationRunning : undefined}
+                      uiState={pieceMaskEnabled ? uiState : undefined}
+                      dragPieceActive={pieceMaskEnabled ? !!dragState : false}
+                      maskActive={pieceMaskEnabled ? (!!effectivePlan || !!dragState) : false}
                     />
                   );
                 })}

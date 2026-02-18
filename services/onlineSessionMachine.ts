@@ -73,6 +73,32 @@ class OnlineSessionMachine {
     );
   }
 
+  private isWithinBoard(row: number, col: number): boolean {
+    return row >= 0 && row < 14 && col >= 0 && col < 14;
+  }
+
+  private isSnapshotLastMoveConsistent(
+    boardState: GameState["boardState"],
+    move: GameState["lastMove"]
+  ): boolean {
+    if (!move) return true;
+    if (
+      !this.isWithinBoard(move.from.row, move.from.col) ||
+      !this.isWithinBoard(move.to.row, move.to.col)
+    ) {
+      return false;
+    }
+    const pieceAtTo = boardState?.[move.to.row]?.[move.to.col] ?? null;
+    if (!pieceAtTo) return false;
+
+    const moverColor = move.playerColor || move.pieceCode[0];
+    if (pieceAtTo[0] !== moverColor) return false;
+    if (pieceAtTo === move.pieceCode) return true;
+    // Promotion can legitimately change pawn type at destination.
+    if (move.pieceCode[1] === "P" && pieceAtTo[1] !== "P") return true;
+    return false;
+  }
+
   private getPlayersArray(players: { [playerId: string]: Player } | undefined): Player[] {
     if (!players) return [];
     return Object.entries(players).map(([playerId, player]) => ({
@@ -174,8 +200,6 @@ class OnlineSessionMachine {
       .filter((player) => player.isBot)
       .map((player) => player.color);
 
-    console.log(`[OnlineSession] Players from snapshot:`, playersArray.map(p => ({ color: p.color, isBot: p.isBot })));
-    console.log(`[OnlineSession] Extracted botPlayers:`, botPlayers);
     store.dispatch(setBotPlayers(botPlayers));
 
     const user = onlineDataClient.getCurrentUser();
@@ -221,16 +245,21 @@ class OnlineSessionMachine {
     const resolvedVersion =
       typeof version === "number" ? version : store.getState().game.version ?? 0;
 
-    const incomingMoveKey = buildMoveKey(game.lastMove || null);
+    const rawLastMove = game.lastMove || null;
+    const sanitizedLastMove = this.isSnapshotLastMoveConsistent(
+      snapshotState.boardState,
+      rawLastMove
+    )
+      ? rawLastMove
+      : null;
+
+    const incomingMoveKey = buildMoveKey(sanitizedLastMove);
     const isNewMoveForMachine = incomingMoveKey && incomingMoveKey !== this.lastMoveKey;
-    if (__DEV__ && isNewMoveForMachine) {
-      console.log('[OnlineSession] New move:', incomingMoveKey);
-    }
 
     store.dispatch(
       applyOnlineSnapshot({
         gameState: snapshotState,
-        lastMove: game.lastMove || null,
+        lastMove: sanitizedLastMove,
         version: resolvedVersion,
       })
     );
@@ -244,7 +273,7 @@ class OnlineSessionMachine {
         moveKey: incomingMoveKey,
         shouldAnimate,
       });
-      this.moveUpdateCallbacks.forEach((cb) => cb(game.lastMove));
+      this.moveUpdateCallbacks.forEach((cb) => cb(sanitizedLastMove));
     }
     // Update lastMoveKey to track what we've seen
     if (incomingMoveKey) {

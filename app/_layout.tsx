@@ -142,8 +142,6 @@ export default function RootLayout() {
             {updateInfo && (
               <UpdatePromptModal
                 visible={showUpdateModal}
-                currentVersion={updateInfo.currentVersion}
-                latestVersion={updateInfo.latestVersion}
                 updateMessage={updateInfo.updateMessage}
                 forceUpdate={updateInfo.forceUpdate}
                 onUpdate={handleUpdate}

@@ -1,7 +1,7 @@
 {
   "name": "quadrachess",
   "main": "expo-router/entry",
-  "version": "1.0.9",
+  "version": "2.1.0",
   "scripts": {
     "start": "expo start --port 8082",
     "start-clear": "expo start --clear --port 8082",

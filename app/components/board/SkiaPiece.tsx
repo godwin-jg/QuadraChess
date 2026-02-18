@@ -17,6 +17,7 @@ interface SkiaPieceProps {
   isEliminated?: boolean;
   isSelected?: boolean;
   previewStyle?: string;
+  styleKey?: string;
 }
 
 // Cache for parsed Skia paths - avoids re-parsing on every render
@@ -50,6 +51,7 @@ const SkiaPiece = React.memo(function SkiaPiece({
   isEliminated = false,
   isSelected = false,
   previewStyle,
+  styleKey: _styleKey,
 }: SkiaPieceProps) {
   const { settings } = useSettings();
   
